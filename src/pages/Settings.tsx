@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Save, RefreshCw } from 'lucide-react'
+import { Save, RefreshCw, Download } from 'lucide-react'
 import { useProfile, useUpdateProfile } from '../hooks/useProfile'
 import { useSyncCalendar } from '../hooks/useMeetings'
+import { supabase } from '../lib/supabase'
 
 export default function Settings() {
   const { data: profile, isLoading } = useProfile()
@@ -95,6 +96,46 @@ export default function Settings() {
               Sync failed. Make sure the ics-sync edge function is deployed.
             </p>
           )}
+        </section>
+
+        {/* Data Export */}
+        <section className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+          <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-400">
+            Data Export
+          </h2>
+          <p className="mb-3 text-sm text-gray-400">
+            Download all your data as a JSON file.
+          </p>
+          <button
+            onClick={async () => {
+              const [items, streams, meetings, activities, chatMsgs] = await Promise.all([
+                supabase.from('items').select('*'),
+                supabase.from('streams').select('*'),
+                supabase.from('meetings').select('*'),
+                supabase.from('activity_log').select('*'),
+                supabase.from('chat_messages').select('*'),
+              ])
+              const exportData = {
+                exported_at: new Date().toISOString(),
+                items: items.data,
+                streams: streams.data,
+                meetings: meetings.data,
+                activity_log: activities.data,
+                chat_messages: chatMsgs.data,
+              }
+              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `resurface-export-${new Date().toISOString().split('T')[0]}.json`
+              a.click()
+              URL.revokeObjectURL(url)
+            }}
+            className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800"
+          >
+            <Download size={14} />
+            Export All Data
+          </button>
         </section>
 
         {/* Save */}

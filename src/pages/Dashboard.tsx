@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useItems } from '../hooks/useItems'
+import { useStreams } from '../hooks/useStreams'
 import ItemCard from '../components/ItemCard'
 import QuickAddBar from '../components/QuickAddBar'
+import OnboardingWizard from '../components/OnboardingWizard'
 import { computePriority, priorityReason } from '../lib/priorityScore'
 import type { Item } from '../lib/types'
 
@@ -21,6 +23,8 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
 
 export default function Dashboard() {
   const [now] = useState(() => Date.now())
+  const { data: streams, isLoading: streamsLoading } = useStreams()
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
 
   const { data: activeItems, isLoading } = useItems({
     status: ['open', 'in_progress', 'waiting'],
@@ -50,6 +54,11 @@ export default function Dashboard() {
       .filter((item) => item.due_date && new Date(item.due_date) <= weekFromNow)
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
   }, [activeItems, now])
+
+  // Show onboarding if no streams exist
+  if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
+    return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
+  }
 
   return (
     <div className="mx-auto max-w-3xl">
