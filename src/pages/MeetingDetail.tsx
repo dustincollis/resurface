@@ -60,7 +60,7 @@ export default function MeetingDetail() {
 
   const handleCreateItemFromAction = (
     index: number,
-    action: { title: string; description?: string; suggested_due_date?: string | null }
+    action: { title: string; description?: string; company?: string | null; suggested_due_date?: string | null }
   ) => {
     const desc = action.description
       ? `${action.description}\n\nFrom discussion: ${meeting.title}`
@@ -71,6 +71,7 @@ export default function MeetingDetail() {
         description: desc,
         source_meeting_id: meeting.id,
         due_date: action.suggested_due_date ?? null,
+        custom_fields: action.company ? { company: action.company } : undefined,
       },
       {
         onSuccess: (item) => {

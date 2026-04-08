@@ -37,6 +37,11 @@ export default function ItemCard({ item }: { item: Item }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
+          {(item.custom_fields?.company as string | undefined) && (
+            <span className="flex-shrink-0 rounded bg-blue-900/40 px-1.5 py-0.5 text-xs font-semibold text-blue-300">
+              {item.custom_fields.company as string}
+            </span>
+          )}
           <span className="truncate text-sm font-semibold text-white">{item.title}</span>
           {item.streams ? (
             <span

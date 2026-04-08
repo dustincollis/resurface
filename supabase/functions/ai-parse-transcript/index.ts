@@ -103,12 +103,15 @@ Extract these elements:
    - Detect the assignee ("user" for the person uploading, name for others)
    - Assign urgency (high/medium/low)
    - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. Use today's date as the reference. If no due date is implied, use null.
+   - **Identify the company / account / client** this task is about, if applicable. Look at the discussion title (e.g. "S&P pricing call", "Adobe HCLS - Follow up", "Acme Corp standup") and the content for an org name. Use the cleanest short form (e.g. "Adobe", "S&P", "Acme Corp"). If the task is internal-only or no company is mentioned, use null. Do NOT invent company names. **If the discussion is clearly about a single company, set the company field on EVERY action item to that company name** — don't leave action items blank just because the company isn't repeated in that specific bullet.
 
 3. **Decisions**: Things that were decided/agreed upon
 
 4. **Open Questions**: Unresolved items that need follow-up
 
 5. **References**: Match against existing work items where applicable
+
+6. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
 Current open items for cross-reference:
 ${itemsSummary}
@@ -121,10 +124,12 @@ ${transcript.substring(0, 15000)}
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
   "summary": "<the markdown synopsis as a single string>",
+  "company": "string or null",
   "action_items": [
     {
       "title": "string",
       "description": "string",
+      "company": "string or null",
       "assignee": "user|name",
       "urgency": "high|medium|low",
       "suggested_due_date": "YYYY-MM-DD or null",

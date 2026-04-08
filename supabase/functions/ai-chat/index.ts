@@ -15,7 +15,7 @@ const TOOLS = [
   {
     name: "list_tasks",
     description:
-      "List the user's tasks with optional filters. Returns up to the limit. Use this when the user asks about their tasks, what's due, what's stale, what's in a stream, etc. Defaults to active tasks (open, in_progress, waiting) sorted by staleness.",
+      "List the user's tasks with optional filters. Returns up to the limit. Use this when the user asks about their tasks, what's due, what's stale, what's in a stream, what's open for a specific company, etc. Defaults to active tasks (open, in_progress, waiting) sorted by staleness.",
     input_schema: {
       type: "object",
       properties: {
@@ -27,6 +27,10 @@ const TOOLS = [
         stream_name: {
           type: "string",
           description: "Filter by stream name (case-insensitive). Omit for all streams.",
+        },
+        company: {
+          type: "string",
+          description: "Filter by the company / account / client name on the task (custom_fields.company). Case-insensitive substring match.",
         },
         only_overdue: {
           type: "boolean",
@@ -99,6 +103,15 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "list_companies",
+    description:
+      "List all the unique companies / accounts referenced across the user's active tasks, with task counts. Use this for questions like 'what companies am I tracking?' or 'show me all my Acme work'.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // ============================================================
@@ -118,6 +131,7 @@ async function execListTasks(
 ): Promise<unknown> {
   const status = args.status as string | undefined;
   const streamName = args.stream_name as string | undefined;
+  const company = args.company as string | undefined;
   const onlyOverdue = args.only_overdue as boolean | undefined;
   const onlyDueWithinDays = args.only_due_within_days as number | undefined;
   const sortBy = (args.sort_by as string | undefined) ?? "staleness_score";
@@ -126,7 +140,7 @@ async function execListTasks(
   let query = ctx.adminClient
     .from("items")
     .select(
-      "id, title, description, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, last_touched_at, created_at, streams(name)"
+      "id, title, description, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, last_touched_at, created_at, custom_fields, streams(name)"
     )
     .eq("user_id", ctx.userId);
 
@@ -160,18 +174,32 @@ async function execListTasks(
     query = query.lte("due_date", future).not("due_date", "is", null);
   }
 
-  query = query.order(sortBy, { ascending: false }).limit(limit);
+  // Fetch a wider page if filtering by company so we don't miss matches
+  const fetchLimit = company ? Math.min(limit * 4, 500) : limit;
+  query = query.order(sortBy, { ascending: false }).limit(fetchLimit);
 
   const { data, error } = await query;
   if (error) return { error: error.message };
 
+  // Client-side company filter (substring, case-insensitive)
+  let filtered = data ?? [];
+  if (company) {
+    const target = company.toLowerCase();
+    filtered = filtered.filter((t) => {
+      const c = (t.custom_fields as Record<string, unknown> | null)?.company;
+      return typeof c === "string" && c.toLowerCase().includes(target);
+    });
+    filtered = filtered.slice(0, limit);
+  }
+
   return {
-    count: data?.length ?? 0,
-    tasks: data?.map((t) => ({
+    count: filtered.length,
+    tasks: filtered.map((t) => ({
       id: t.id,
       title: t.title,
       status: t.status,
       stream: (t.streams as { name: string } | null)?.name ?? null,
+      company: ((t.custom_fields as Record<string, unknown> | null)?.company as string | undefined) ?? null,
       next_action: t.next_action,
       due_date: t.due_date,
       stakes: t.stakes,
@@ -280,6 +308,31 @@ async function execGetTaskCounts(ctx: ToolContext): Promise<unknown> {
   };
 }
 
+async function execListCompanies(ctx: ToolContext): Promise<unknown> {
+  const { data: items } = await ctx.adminClient
+    .from("items")
+    .select("custom_fields, status")
+    .eq("user_id", ctx.userId)
+    .not("status", "in", '("done","dropped")');
+
+  if (!items) return { error: "Failed to fetch tasks" };
+
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const company = (item.custom_fields as Record<string, unknown> | null)?.company;
+    if (typeof company === "string" && company.trim()) {
+      const key = company.trim();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+
+  const companies = Array.from(counts.entries())
+    .map(([name, count]) => ({ name, active_task_count: count }))
+    .sort((a, b) => b.active_task_count - a.active_task_count);
+
+  return { count: companies.length, companies };
+}
+
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -297,6 +350,8 @@ async function executeTool(
         return await execListStreams(ctx);
       case "get_task_counts":
         return await execGetTaskCounts(ctx);
+      case "list_companies":
+        return await execListCompanies(ctx);
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -463,11 +518,14 @@ TOOLS
 =====
 You have access to live database tools. ALWAYS use them when the user asks about their tasks, streams, or specific items. Do not guess from the conversation history — fetch fresh data via tools.
 
-- list_tasks(status?, stream_name?, only_overdue?, only_due_within_days?, sort_by?, limit?) — list tasks with filters
+- list_tasks(status?, stream_name?, company?, only_overdue?, only_due_within_days?, sort_by?, limit?) — list tasks with filters. The "company" filter searches the custom_fields.company on each task.
 - get_task(task_id) — full detail for one task
 - search_tasks(query) — full-text + fuzzy search across tasks and discussions
 - list_streams() — list all active streams
+- list_companies() — list all unique companies/accounts referenced in active tasks, with counts
 - get_task_counts() — aggregate counts (total, by status, by stream, overdue, stale)
+
+Tasks store their company / account / client name in custom_fields.company. The user organizes a lot of work around which company a task is for. Use list_companies() and the company filter on list_tasks() liberally when the user mentions an org name.
 
 Use multiple tool calls if needed. For example: get_task_counts() first to understand scope, then list_tasks(stream_name: "X") to drill in.
 ${fileContext}

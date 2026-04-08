@@ -104,10 +104,13 @@ ${streamsDescription}
 Task title: "${item.title}"
 Task description: "${item.description || ""}"
 
+Identify if this task is about a specific company / account / client. Look for an org name in the title or description (e.g. "Adobe", "S&P", "Acme Corp"). If the task is internal-only or no company is mentioned, use null. Do NOT invent company names.
+
 Respond with ONLY valid JSON (no markdown, no code fences):
 {
   "stream_id": "the-matching-stream-id-or-null",
   "confidence": 0.0-1.0,
+  "company": "string or null",
   "custom_fields": {},
   "suggested_next_action": "a concrete next step"
 }
@@ -163,15 +166,20 @@ For custom_fields, generate key-value pairs that match the stream's field_templa
       updates.stream_id = classification.stream_id;
     }
 
-    // Merge custom fields
+    // Merge custom fields, including company extraction
+    const mergedCustomFields: Record<string, unknown> = {
+      ...(item.custom_fields ?? {}),
+      ...(classification.custom_fields ?? {}),
+    };
     if (
-      classification.custom_fields &&
-      Object.keys(classification.custom_fields).length > 0
+      typeof classification.company === "string" &&
+      classification.company.trim().length > 0 &&
+      !mergedCustomFields.company
     ) {
-      updates.custom_fields = {
-        ...item.custom_fields,
-        ...classification.custom_fields,
-      };
+      mergedCustomFields.company = classification.company.trim();
+    }
+    if (Object.keys(mergedCustomFields).length > 0) {
+      updates.custom_fields = mergedCustomFields;
     }
 
     // Set next_action if not already set

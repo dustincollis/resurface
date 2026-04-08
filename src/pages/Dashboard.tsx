@@ -111,7 +111,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
           </span>
 
           <div className="min-w-0 flex-1">
-            {/* Stream + due tag */}
+            {/* Stream + company + due tag */}
             <div className="flex items-center gap-2 text-[11px]">
               {item.streams ? (
                 <span
@@ -126,6 +126,11 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               ) : (
                 <span className="rounded bg-gray-800 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-gray-500">
                   No stream
+                </span>
+              )}
+              {(item.custom_fields?.company as string | undefined) && (
+                <span className="rounded bg-blue-900/40 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-blue-300">
+                  {item.custom_fields.company as string}
                 </span>
               )}
               {dueLabel && (

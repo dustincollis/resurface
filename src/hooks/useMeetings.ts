@@ -19,6 +19,7 @@ export interface Meeting {
   extracted_action_items: {
     title: string
     description?: string
+    company?: string | null
     assignee?: string
     urgency?: string
     suggested_due_date?: string | null
