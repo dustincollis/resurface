@@ -47,7 +47,24 @@ export default function ItemCard({ item }: { item: Item }) {
       />
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-white">{item.title}</div>
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-white">{item.title}</span>
+          {item.streams ? (
+            <span
+              className="flex-shrink-0 rounded px-1.5 py-0.5 text-xs"
+              style={{
+                backgroundColor: `${streamColor}20`,
+                color: streamColor,
+              }}
+            >
+              {item.streams.name}
+            </span>
+          ) : (
+            <span className="flex-shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500">
+              no stream
+            </span>
+          )}
+        </div>
         {item.next_action && (
           <div className="mt-0.5 truncate text-xs text-gray-500">
             Next: {item.next_action}
