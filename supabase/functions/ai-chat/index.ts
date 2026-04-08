@@ -202,38 +202,70 @@ Deno.serve(async (req) => {
         ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze the attached files as part of your response.`
         : "";
 
-    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system. You help the user manage their work items, understand priorities, and stay on top of everything.
+    const availableStreams = items
+      ? [...new Set(items.map((i) => (i.streams as { name: string } | null)?.name).filter(Boolean))]
+      : [];
 
-Current context:
+    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system.
+
+CONTEXT
+=======
 Open items (${items?.length ?? 0} total):
 ${itemsSummary}
+
+Available streams: ${availableStreams.length > 0 ? availableStreams.join(", ") : "(none yet)"}
 
 Today's meetings:
 ${meetingsSummary}
 ${searchContext}
 ${fileContext}
 
-Behavior:
-- Be conversational, natural, and concise. Write plain prose responses.
-- DO NOT use markdown formatting like **bold** or *italic* — just write naturally.
-- When the user shares files, analyze their content and provide useful insights.
-- When asked "what should I do next?", recommend 3-5 items based on staleness, stakes, and due dates.
-- When asked to break down an item, suggest 3-5 sub-tasks.
-- When the user dumps unstructured text about a meeting or task, proactively suggest extracting items.
+YOUR CAPABILITIES
+=================
+You can directly create and update work items by including them in the "actions" array of your response. The user does NOT need to confirm — actions you include WILL be executed automatically. Use this capability proactively when the user asks you to create tasks, add items, or organize work.
 
-CRITICAL OUTPUT FORMAT:
-You MUST respond with ONLY a valid JSON object, no markdown wrapping, no code fences, no text before or after. The JSON has this exact shape:
+OUTPUT FORMAT
+=============
+Your ENTIRE response MUST be a single valid JSON object — nothing else. No prose before, no prose after, no code fences, no markdown.
+
+Response shape:
 {
-  "message": "your conversational response as a plain string",
-  "actions": []
+  "message": "your conversational reply to the user as plain text",
+  "actions": [...]
 }
 
-The "actions" array contains items to create or update. Only include actions when you actually need to modify data:
-- {"action": "create_item", "title": "...", "description": "...", "stream_name": "...", "next_action": "..."}
-- {"action": "update_item", "item_id": "...", "updates": {"status": "...", "next_action": "...", ...}}
+The "message" field is what the user reads. Write it naturally, conversationally, as if texting a colleague. Plain text only — no markdown asterisks, no JSON, no code blocks. Mention what you did (e.g. "Created 5 items based on your spreadsheet").
 
-If you don't need to take any actions, use an empty array: "actions": []
-The user only sees the "message" field — your conversational response. They never see the JSON wrapper.`;
+The "actions" array contains operations to execute. Each action is an object:
+
+Create an item:
+{"action": "create_item", "title": "string", "description": "string", "stream_name": "string", "next_action": "string"}
+
+Update an item (use the 8-character ID prefix from the items list):
+{"action": "update_item", "item_id": "string", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string"}}
+
+EXAMPLES
+========
+
+User: "What should I work on?"
+Response:
+{"message": "Based on your open items, I'd focus on these three first: the Q2 pipeline review (due today), the Datadog vendor follow-up (getting stale), and the team 1:1 prep (high stakes). The pipeline review is the most urgent.", "actions": []}
+
+User: "Create a task to call John about the contract"
+Response:
+{"message": "Done — created that task in Business Development.", "actions": [{"action": "create_item", "title": "Call John about the contract", "description": "", "stream_name": "Business Development", "next_action": "Schedule call with John this week"}]}
+
+User: "Here's my to-do list, please add these as items"
+Response:
+{"message": "I added 5 items across your streams: 3 in Business Development, 1 in Internal Operations, and 1 in Technical Development.", "actions": [{"action": "create_item", "title": "...", "stream_name": "...", "next_action": "..."}, {"action": "create_item", ...}]}
+
+RULES
+=====
+- ALWAYS be conversational in the message field. Never put JSON, code, or structured data in the message text.
+- When the user gives you content to organize (spreadsheets, notes, lists), CREATE items via the actions array. Don't just describe what you would create.
+- Match stream_name to existing streams when possible. If no good match exists, omit stream_name.
+- Be concise. The message should be 1-3 sentences unless the user asks for more detail.
+- Begin your response with { and end with }. Nothing else.`;
 
     // Build messages array with history
     const messages: { role: string; content: unknown }[] = [];
@@ -256,6 +288,12 @@ The user only sees the "message" field — your conversational response. They ne
       ),
     });
 
+    // Prefill assistant response with "{" to force JSON output
+    messages.push({
+      role: "assistant",
+      content: "{",
+    });
+
     // Call Claude
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -267,7 +305,7 @@ The user only sees the "message" field — your conversational response. They ne
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
-        temperature: 0.7,
+        temperature: 0.3,
         system: systemPrompt,
         messages,
       }),
@@ -283,7 +321,12 @@ The user only sees the "message" field — your conversational response. They ne
     }
 
     const aiResponse = await response.json();
-    const rawContent = aiResponse.content?.[0]?.text ?? "";
+    let rawContent = aiResponse.content?.[0]?.text ?? "";
+
+    // Prepend the "{" we prefilled (the model continues from after it)
+    if (!rawContent.trim().startsWith("{")) {
+      rawContent = "{" + rawContent;
+    }
 
     // Strip any code fence wrapping the model might have added
     let cleanContent = rawContent.trim();
