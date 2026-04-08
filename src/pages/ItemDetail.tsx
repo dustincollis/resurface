@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
@@ -21,6 +22,15 @@ const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   const date = new Date(dateStr)
+  const diffMs = Date.now() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
@@ -105,6 +115,17 @@ export default function ItemDetail() {
   const touchItem = useTouchItem()
   const deleteItem = useDeleteItem()
   const { data: activities } = useActivityLog(id!)
+  const [touchedFlash, setTouchedFlash] = useState(false)
+
+  const handleTouch = () => {
+    if (!item) return
+    touchItem.mutate(item.id, {
+      onSuccess: () => {
+        setTouchedFlash(true)
+        setTimeout(() => setTouchedFlash(false), 1500)
+      },
+    })
+  }
 
   if (isLoading || !item) {
     return <div className="text-gray-400">Loading...</div>
@@ -352,11 +373,24 @@ export default function ItemDetail() {
 
           <div className="mt-2 flex items-center gap-2">
             <button
-              onClick={() => touchItem.mutate(item.id)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-700 py-2 text-xs text-gray-300 hover:bg-gray-800"
+              onClick={handleTouch}
+              disabled={touchItem.isPending}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border py-2 text-xs transition-colors disabled:opacity-50 ${
+                touchedFlash
+                  ? 'border-green-700 bg-green-900/30 text-green-300'
+                  : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+              }`}
               title="Bump 'last touched' to now so it stops getting stale"
             >
-              <Clock size={12} /> Touch +1d
+              {touchedFlash ? (
+                <>
+                  <Check size={12} /> Touched!
+                </>
+              ) : (
+                <>
+                  <Clock size={12} /> Touch +1d
+                </>
+              )}
             </button>
             <button
               onClick={() => handleStatusChange('dropped', true)}
