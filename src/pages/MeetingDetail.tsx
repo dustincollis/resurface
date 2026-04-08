@@ -28,7 +28,10 @@ export default function MeetingDetail() {
     )
   }
 
-  const handleCreateItemFromAction = (index: number, action: { title: string; description?: string }) => {
+  const handleCreateItemFromAction = (
+    index: number,
+    action: { title: string; description?: string; suggested_due_date?: string | null }
+  ) => {
     const desc = action.description
       ? `${action.description}\n\nFrom discussion: ${meeting.title}`
       : `From discussion: ${meeting.title}`
@@ -37,6 +40,7 @@ export default function MeetingDetail() {
         title: action.title,
         description: desc,
         source_meeting_id: meeting.id,
+        due_date: action.suggested_due_date ?? null,
       },
       {
         onSuccess: (item) => {
@@ -155,6 +159,11 @@ export default function MeetingDetail() {
                       </span>
                       {action.assignee && (
                         <span className="ml-2 text-xs text-gray-500">({action.assignee})</span>
+                      )}
+                      {action.suggested_due_date && !created && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded bg-blue-900/40 px-1.5 py-0.5 text-xs text-blue-300">
+                          due {new Date(action.suggested_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
                       )}
                       {action.description && (
                         <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>

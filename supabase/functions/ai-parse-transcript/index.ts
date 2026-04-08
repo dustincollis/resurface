@@ -89,33 +89,55 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: "user",
-            content: `You are analyzing a meeting transcript. The transcript may be in any format: raw text, timestamped notes, VTT/SRT subtitles, or structured meeting notes. Handle all formats gracefully.
+            content: `You are analyzing a discussion transcript or notes. The content may be in any format: raw text, timestamped notes, VTT/SRT subtitles, or structured meeting notes. Handle all formats gracefully.
 
-Extract:
-1. Action items: tasks that need to be done, with assignee if detectable ("user" for the person uploading, name for others)
-2. Decisions: things that were decided/agreed upon
-3. Open questions: unresolved items that need follow-up
-4. References to existing work items (match against provided list)
+Today's date: ${new Date().toISOString().split('T')[0]}
+
+Extract these elements:
+
+1. **Synopsis**: A structured markdown summary with these exact sections:
+   - "## Overview" — one paragraph: who participated, what was discussed, primary outcome
+   - "## Key Topics Discussed" — bulleted list of main topics with 1-2 sentences of context for each
+   - "## Participants & Perspectives" — who said what, key positions and concerns
+   - "## Outcomes & Next Steps" — what was resolved, what remains open, what happens next
+
+2. **Action Items**: Tasks that need to be done. For each:
+   - Detect the assignee ("user" for the person uploading, name for others)
+   - Assign urgency (high/medium/low)
+   - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. Use today's date as the reference. If no due date is implied, use null.
+
+3. **Decisions**: Things that were decided/agreed upon
+
+4. **Open Questions**: Unresolved items that need follow-up
+
+5. **References**: Match against existing work items where applicable
 
 Current open items for cross-reference:
 ${itemsSummary}
 
-Meeting title: "${meeting.title}"
+Discussion title: "${meeting.title}"
 
-Transcript:
+Content:
 ${transcript.substring(0, 15000)}
 
-Respond with ONLY valid JSON (no markdown, no code fences):
+Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
-  "summary": "A structured discussion synopsis using markdown formatting. Include these sections:\n\n## Overview\nOne paragraph: who participated, what the discussion was about, and the primary outcome.\n\n## Key Topics Discussed\nBulleted list of the main topics covered, with 1-2 sentences of context for each.\n\n## Participants & Perspectives\nWho said what — capture each participant's key positions, proposals, or concerns.\n\n## Outcomes & Next Steps\nWhat was resolved, what remains open, and what happens next.\n\nThis should serve as a complete record so someone who missed the discussion can fully understand what happened.",
+  "summary": "<the markdown synopsis as a single string>",
   "action_items": [
-    {"title": "...", "description": "...", "assignee": "user|name", "urgency": "high|medium|low", "related_item_ids": ["..."]}
+    {
+      "title": "string",
+      "description": "string",
+      "assignee": "user|name",
+      "urgency": "high|medium|low",
+      "suggested_due_date": "YYYY-MM-DD or null",
+      "related_item_ids": ["string"]
+    }
   ],
   "decisions": [
-    {"decision": "...", "context": "..."}
+    {"decision": "string", "context": "string"}
   ],
   "open_questions": [
-    {"question": "...", "owner": "user|name|unknown"}
+    {"question": "string", "owner": "user|name|unknown"}
   ]
 }`,
           },
@@ -138,13 +160,19 @@ Respond with ONLY valid JSON (no markdown, no code fences):
     const aiResponse = await response.json();
     const rawContent = aiResponse.content?.[0]?.text ?? "";
 
+    // Strip any code fence wrapping the model might have added
+    let cleanContent = rawContent.trim();
+    if (cleanContent.startsWith("```")) {
+      cleanContent = cleanContent.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+    }
+
     let parsed;
     try {
-      parsed = JSON.parse(rawContent);
-    } catch {
-      console.error("Failed to parse AI response:", rawContent);
+      parsed = JSON.parse(cleanContent);
+    } catch (parseErr) {
+      console.error("Failed to parse AI response:", parseErr, "Raw:", rawContent);
       return new Response(
-        JSON.stringify({ error: "Failed to parse AI response" }),
+        JSON.stringify({ error: "Failed to parse AI response", raw: rawContent.substring(0, 500) }),
         {
           status: 502,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

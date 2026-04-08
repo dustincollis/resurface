@@ -15,7 +15,14 @@ export interface Meeting {
   attendees: string[]
   transcript: string | null
   transcript_summary: string | null
-  extracted_action_items: { title: string; description?: string; assignee?: string; urgency?: string; related_item_ids?: string[] }[]
+  extracted_action_items: {
+    title: string
+    description?: string
+    assignee?: string
+    urgency?: string
+    suggested_due_date?: string | null
+    related_item_ids?: string[]
+  }[]
   extracted_decisions: { decision: string; context?: string }[]
   extracted_open_questions: { question: string; owner?: string }[]
   source: string | null
