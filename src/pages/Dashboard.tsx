@@ -141,17 +141,14 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="mb-6 text-2xl font-semibold text-white">Dashboard</h1>
-
-      <div className="max-w-3xl">
-        <QuickAddBar />
-      </div>
-
       {/* Today's Focus */}
-      <section className="mt-8 max-w-md">
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-          Today&apos;s Focus
-        </h2>
+      <section className="max-w-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium uppercase tracking-wider text-gray-500">
+            Today&apos;s Focus
+          </h2>
+          <QuickAddBar compact />
+        </div>
         {isLoading ? (
           <div className="text-sm text-gray-500">Loading...</div>
         ) : focusItems.length > 0 ? (
