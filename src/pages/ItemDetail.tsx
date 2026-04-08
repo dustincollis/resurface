@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
+import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
@@ -102,6 +103,7 @@ export default function ItemDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: item, isLoading } = useItem(id!)
+  const { data: streams } = useStreams()
   const updateItem = useUpdateItem()
   const touchItem = useTouchItem()
   const deleteItem = useDeleteItem()
@@ -145,9 +147,18 @@ export default function ItemDetail() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="h-3 w-3 rounded-full" style={{ backgroundColor: streamColor }} />
-              <span className="text-sm text-gray-400">
-                {item.streams?.name ?? 'No stream'}
-              </span>
+              <select
+                value={item.stream_id ?? ''}
+                onChange={(e) => updateItem.mutate({ id: item.id, stream_id: e.target.value || null })}
+                className="rounded bg-transparent text-sm text-gray-300 outline-none hover:bg-gray-800"
+              >
+                <option value="" className="bg-gray-900">No stream</option>
+                {streams?.map((s) => (
+                  <option key={s.id} value={s.id} className="bg-gray-900">
+                    {s.name}
+                  </option>
+                ))}
+              </select>
               <span className="text-gray-600">/</span>
               <select
                 value={item.status}
