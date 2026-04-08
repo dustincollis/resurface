@@ -96,6 +96,22 @@ export function useChildItems(parentId: string) {
   })
 }
 
+export function useItemsByDiscussion(meetingId: string) {
+  return useQuery({
+    queryKey: ['items', 'discussion', meetingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('items')
+        .select('*, streams(*)')
+        .eq('source_meeting_id', meetingId)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return data as Item[]
+    },
+    enabled: !!meetingId,
+  })
+}
+
 export interface ProposedSubTask {
   title: string
   description: string

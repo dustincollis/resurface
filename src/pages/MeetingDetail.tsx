@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2, Check } from 'lucide-react'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2, Check, ChevronRight } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
-import { useCreateItem } from '../hooks/useItems'
+import { useCreateItem, useItemsByDiscussion } from '../hooks/useItems'
+import StatusBadge from '../components/StatusBadge'
 import type { Item } from '../lib/types'
 
 // Render inline markdown: **bold**, *italic*, `code`
@@ -37,6 +38,7 @@ export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: meeting, isLoading } = useMeeting(id!)
+  const { data: linkedTasks } = useItemsByDiscussion(id!)
   const uploadTranscript = useUploadTranscript()
   const deleteMeeting = useDeleteMeeting()
   const createItem = useCreateItem()
@@ -170,6 +172,48 @@ export default function MeetingDetail() {
                   )
                 }
                 return <p key={i}>{renderInline(trimmed)}</p>
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Linked Tasks (created from this discussion) */}
+        {linkedTasks && linkedTasks.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 text-sm font-medium text-gray-300">
+              Tasks from this discussion ({linkedTasks.length})
+            </h3>
+            <div className="space-y-1.5">
+              {linkedTasks.map((task) => {
+                const streamColor = task.streams?.color ?? '#6B7280'
+                return (
+                  <button
+                    key={task.id}
+                    onClick={() => navigate(`/items/${task.id}`)}
+                    className="flex w-full items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-900"
+                  >
+                    <ChevronRight size={14} className="flex-shrink-0 text-gray-600" />
+                    <div
+                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: streamColor }}
+                    />
+                    <span className="flex-1 truncate text-sm text-gray-200">
+                      {task.title}
+                    </span>
+                    {task.streams && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                        style={{
+                          backgroundColor: `${streamColor}20`,
+                          color: streamColor,
+                        }}
+                      >
+                        {task.streams.name}
+                      </span>
+                    )}
+                    <StatusBadge status={task.status} />
+                  </button>
+                )
               })}
             </div>
           </div>
