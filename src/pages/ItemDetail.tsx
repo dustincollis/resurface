@@ -242,16 +242,29 @@ export default function ItemDetail() {
           </div>
 
           <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 text-xs">
-            {(item.custom_fields?.company as string | undefined) && (
-              <div>
-                <span className="text-gray-400">Company</span>
-                <div className="mt-0.5">
-                  <span className="rounded bg-blue-900/40 px-1.5 py-0.5 font-semibold text-blue-300">
-                    {item.custom_fields.company as string}
-                  </span>
-                </div>
+            <div>
+              <span className="text-gray-400">Company</span>
+              <div className="mt-0.5">
+                <InlineEditable
+                  value={(item.custom_fields?.company as string | undefined) ?? ''}
+                  onSave={(company) => {
+                    const newCustomFields = { ...(item.custom_fields ?? {}) }
+                    if (company.trim()) {
+                      newCustomFields.company = company.trim()
+                    } else {
+                      delete newCustomFields.company
+                    }
+                    updateItem.mutate({ id: item.id, custom_fields: newCustomFields })
+                  }}
+                  placeholder="add company..."
+                  className={
+                    item.custom_fields?.company
+                      ? 'rounded bg-blue-900/40 px-1.5 py-0.5 font-semibold text-blue-300'
+                      : 'text-gray-500 italic'
+                  }
+                />
               </div>
-            )}
+            </div>
             <div>
               <span className="text-gray-400">Created</span>
               <div className="mt-0.5 text-gray-200">{formatDate(item.created_at)}</div>

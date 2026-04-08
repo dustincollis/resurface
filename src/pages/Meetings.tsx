@@ -25,6 +25,14 @@ function groupByDate(meetings: Meeting[]): Map<string, Meeting[]> {
   return groups
 }
 
+function todayString(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export default function Meetings() {
   const { data: meetings, isLoading } = useMeetings()
   const createMeeting = useCreateMeeting()
@@ -32,21 +40,25 @@ export default function Meetings() {
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [newDate, setNewDate] = useState('')
+  const [newDate, setNewDate] = useState(todayString())
 
   const handleCreate = () => {
     if (!newTitle.trim()) return
+    // newDate is YYYY-MM-DD; convert to ISO at noon local to avoid TZ off-by-one
+    const startTime = newDate
+      ? new Date(`${newDate}T12:00:00`).toISOString()
+      : undefined
     createMeeting.mutate(
       {
         title: newTitle.trim(),
-        start_time: newDate ? new Date(newDate).toISOString() : undefined,
+        start_time: startTime,
       },
       {
         onSuccess: (meeting) => {
           navigate(`/meetings/${meeting.id}`)
           setShowForm(false)
           setNewTitle('')
-          setNewDate('')
+          setNewDate(todayString())
         },
       }
     )
@@ -88,7 +100,7 @@ export default function Meetings() {
           />
           <div className="flex items-center gap-2">
             <input
-              type="datetime-local"
+              type="date"
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
               className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
@@ -101,7 +113,7 @@ export default function Meetings() {
               Create
             </button>
             <button
-              onClick={() => { setShowForm(false); setNewTitle(''); setNewDate('') }}
+              onClick={() => { setShowForm(false); setNewTitle(''); setNewDate(todayString()) }}
               className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-gray-200"
             >
               Cancel
