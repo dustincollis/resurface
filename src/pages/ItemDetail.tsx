@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
@@ -117,11 +117,24 @@ export default function ItemDetail() {
   const sourceMeeting = (item as { source_meeting?: { id: string; title: string } | null }).source_meeting
   const parent = (item as { parent?: { id: string; title: string } | null }).parent
 
-  const handleStatusChange = (status: ItemStatus) => {
+  const handleStatusChange = (status: ItemStatus, navigateAway = false) => {
     const completed_at = (status === 'done' || status === 'dropped')
       ? new Date().toISOString()
       : null
-    updateItem.mutate({ id: item.id, status, completed_at })
+    updateItem.mutate(
+      { id: item.id, status, completed_at },
+      {
+        onSuccess: () => {
+          if (navigateAway) {
+            navigate(-1)
+          }
+        },
+        onError: (err) => {
+          console.error('Failed to update status:', err)
+          alert('Failed to update item. Check console for details.')
+        },
+      }
+    )
   }
 
   const handleDelete = () => {
@@ -329,11 +342,12 @@ export default function ItemDetail() {
         {/* Action bar — Complete is the dominant action */}
         <div className="px-6 py-4">
           <button
-            onClick={() => handleStatusChange('done')}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-purple-500"
-            title="Mark this item as done"
+            onClick={() => handleStatusChange('done', true)}
+            disabled={updateItem.isPending}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-purple-500 disabled:opacity-50"
+            title="Mark this item as done and return"
           >
-            <Clock size={14} /> Mark Complete
+            <Check size={14} /> {updateItem.isPending ? 'Saving...' : 'Mark Complete'}
           </button>
 
           <div className="mt-2 flex items-center gap-2">
@@ -345,8 +359,9 @@ export default function ItemDetail() {
               <Clock size={12} /> Touch +1d
             </button>
             <button
-              onClick={() => handleStatusChange('dropped')}
-              className="flex flex-1 items-center justify-center rounded-lg border border-gray-700 py-2 text-xs text-gray-400 hover:bg-gray-800"
+              onClick={() => handleStatusChange('dropped', true)}
+              disabled={updateItem.isPending}
+              className="flex flex-1 items-center justify-center rounded-lg border border-gray-700 py-2 text-xs text-gray-400 hover:bg-gray-800 disabled:opacity-50"
               title="Mark as not pursuing — won't appear in active lists"
             >
               Drop
