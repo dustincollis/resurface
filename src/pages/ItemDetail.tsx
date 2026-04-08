@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
+import DecomposeSection from '../components/DecomposeSection'
 import type { ItemStatus } from '../lib/types'
 
 const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
@@ -117,6 +118,7 @@ export default function ItemDetail() {
   const due = formatDueDate(item.due_date)
   const streamColor = item.streams?.color ?? '#6B7280'
   const sourceMeeting = (item as { source_meeting?: { id: string; title: string } | null }).source_meeting
+  const parent = (item as { parent?: { id: string; title: string } | null }).parent
 
   const handleStatusChange = (status: ItemStatus) => {
     const completed_at = (status === 'done' || status === 'dropped')
@@ -224,6 +226,18 @@ export default function ItemDetail() {
                 </button>
               </div>
             )}
+            {parent && (
+              <div>
+                <span className="text-gray-500">Parent</span>
+                <button
+                  onClick={() => navigate(`/items/${parent.id}`)}
+                  className="mt-0.5 flex items-center gap-1 text-purple-400 hover:text-purple-300"
+                >
+                  <GitBranch size={11} />
+                  {parent.title}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -266,6 +280,9 @@ export default function ItemDetail() {
             </div>
           </div>
         )}
+
+        {/* Sub-items / decompose */}
+        <DecomposeSection item={item} />
 
         {/* Linked items */}
         <ItemLinkSection itemId={item.id} />

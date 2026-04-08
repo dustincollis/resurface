@@ -66,13 +66,51 @@ export function useItem(id: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('items')
-        .select('*, streams(*), source_meeting:meetings!source_meeting_id(id, title)')
+        .select('*, streams(*), source_meeting:meetings!source_meeting_id(id, title), parent:items!parent_id(id, title)')
         .eq('id', id)
         .single()
       if (error) throw error
-      return data as Item & { source_meeting?: { id: string; title: string } | null }
+      return data as Item & {
+        source_meeting?: { id: string; title: string } | null
+        parent?: { id: string; title: string } | null
+      }
     },
     enabled: !!id,
+  })
+}
+
+export function useChildItems(parentId: string) {
+  return useQuery({
+    queryKey: ['items', 'children', parentId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('items')
+        .select('*, streams(*)')
+        .eq('parent_id', parentId)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return data as Item[]
+    },
+    enabled: !!parentId,
+  })
+}
+
+export interface ProposedSubTask {
+  title: string
+  description: string
+  next_action: string
+  suggested_due_date: string | null
+}
+
+export function useDecomposeItem() {
+  return useMutation({
+    mutationFn: async (itemId: string) => {
+      const { data, error } = await supabase.functions.invoke('ai-decompose', {
+        body: { item_id: itemId },
+      })
+      if (error) throw error
+      return data as { sub_tasks: ProposedSubTask[]; parent_stream_id: string | null }
+    },
   })
 }
 
