@@ -20,9 +20,20 @@ export function useChatMessages() {
         .from('chat_messages')
         .select('*')
         .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
         .limit(100)
       if (error) throw error
-      return data as ChatMessage[]
+
+      // Final safety net: if any pair has identical timestamps, sort user before assistant
+      const sorted = [...(data ?? [])].sort((a, b) => {
+        const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        if (timeDiff !== 0) return timeDiff
+        if (a.role === 'user' && b.role === 'assistant') return -1
+        if (a.role === 'assistant' && b.role === 'user') return 1
+        return 0
+      })
+
+      return sorted as ChatMessage[]
     },
     enabled: !!user,
   })

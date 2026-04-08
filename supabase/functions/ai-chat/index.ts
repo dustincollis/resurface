@@ -131,7 +131,14 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Gather context: open items summary
+    // Gather context: all user's streams + open items
+    const { data: allStreams } = await adminClient
+      .from("streams")
+      .select("id, name, color")
+      .eq("user_id", user.id)
+      .eq("is_archived", false)
+      .order("sort_order");
+
     const { data: items } = await adminClient
       .from("items")
       .select(
@@ -174,14 +181,19 @@ Deno.serve(async (req) => {
       searchResults = results;
     }
 
-    // Build items summary
+    // Build items summary — include full UUID so AI can use it in update_item
     const itemsSummary =
       items
         ?.map(
           (i) =>
-            `- [${i.id.substring(0, 8)}] "${i.title}" (${i.status}, stream: ${(i.streams as { name: string } | null)?.name ?? "none"}, staleness: ${i.staleness_score?.toFixed(0) ?? 0}, stakes: ${i.stakes ?? "?"}, next: ${i.next_action ?? "none"}${i.due_date ? `, due: ${i.due_date}` : ""})`
+            `- id=${i.id} | "${i.title}" | status=${i.status} | stream=${(i.streams as { name: string } | null)?.name ?? "NONE"} | staleness=${i.staleness_score?.toFixed(0) ?? 0} | stakes=${i.stakes ?? "?"} | next=${i.next_action ?? "none"}${i.due_date ? ` | due=${i.due_date}` : ""}`
         )
         .join("\n") ?? "No open items.";
+
+    const streamsSummary =
+      allStreams && allStreams.length > 0
+        ? allStreams.map((s) => `- "${s.name}"`).join("\n")
+        : "(none yet)";
 
     const meetingsSummary = meetings?.length
       ? meetings
@@ -202,18 +214,15 @@ Deno.serve(async (req) => {
         ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze the attached files as part of your response.`
         : "";
 
-    const availableStreams = items
-      ? [...new Set(items.map((i) => (i.streams as { name: string } | null)?.name).filter(Boolean))]
-      : [];
-
     const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system.
 
 CONTEXT
 =======
-Open items (${items?.length ?? 0} total):
-${itemsSummary}
+Available streams (these already exist — DO NOT propose creating duplicates):
+${streamsSummary}
 
-Available streams: ${availableStreams.length > 0 ? availableStreams.join(", ") : "(none yet)"}
+Open items (${items?.length ?? 0} total) — note the id values, you'll need them for update_item actions:
+${itemsSummary}
 
 Today's meetings:
 ${meetingsSummary}
@@ -250,8 +259,15 @@ Propose a new stream (user will confirm):
 {"action": "create_stream", "name": "string", "color": "#RRGGBB"}
 Suggested colors: #3B82F6 (blue), #22C55E (green), #8B5CF6 (purple), #EF4444 (red), #EAB308 (yellow), #06B6D4 (cyan), #F97316 (orange), #EC4899 (pink)
 
-Update an existing item (executes immediately, use the 8-character ID prefix):
-{"action": "update_item", "item_id": "string", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string"}}
+Update an existing item (executes immediately — use the FULL id from the items list above):
+{"action": "update_item", "item_id": "<full uuid from items list>", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string", "stream_name": "string"}}
+
+Updatable fields in "updates":
+- status
+- next_action
+- stream_name (use the exact stream name from the streams list — server resolves to id)
+- due_date (YYYY-MM-DD or null)
+- description
 
 EXAMPLES
 ========
@@ -271,6 +287,17 @@ Response:
 User: "Create streams for my main work areas based on what I'm working on"
 Response:
 {"message": "I see you're working across a few areas. Here are streams I'd suggest creating — click Create on the ones you want.", "actions": [{"action": "create_stream", "name": "Adobe Partnerships", "color": "#3B82F6"}, {"action": "create_stream", "name": "Internal Operations", "color": "#22C55E"}, {"action": "create_stream", "name": "Business Development", "color": "#8B5CF6"}]}
+
+User: "Categorize my unassigned tasks into the right streams"
+Response:
+{"message": "I assigned 4 unassigned items to streams that fit. The Adobe items went to Adobe Partnerships, the proposal work to Business Development, and the team management items to Internal Operations.", "actions": [{"action": "update_item", "item_id": "<full uuid from items list>", "updates": {"stream_name": "Adobe Partnerships"}}, {"action": "update_item", "item_id": "<full uuid>", "updates": {"stream_name": "Business Development"}}]}
+
+CRITICAL RULES FOR STREAM ASSIGNMENT
+====================================
+- When the user asks to "categorize", "assign streams to", "organize", or similar — use update_item with stream_name in the updates object. DO NOT create new streams unless none of the existing streams fit.
+- Only propose create_stream when the user explicitly asks to create new streams, OR when the existing streams clearly don't cover an item's category.
+- Use the FULL uuid from the items list for item_id, not the prefix.
+- update_item executes immediately (no user confirmation needed) since it's modifying existing data, so be confident in your assignments.
 
 RULES
 =====
@@ -392,19 +419,48 @@ RULES
               icon: (a.icon as string) ?? null,
             });
           } else if (a.action === "update_item" && a.item_id) {
-            const updates = a.updates as Record<string, unknown>;
+            const updates = { ...(a.updates as Record<string, unknown>) };
             if (updates) {
-              const { error } = await adminClient
-                .from("items")
-                .update(updates)
-                .eq("id", a.item_id)
-                .eq("user_id", user.id);
+              // Resolve stream_name → stream_id
+              if (typeof updates.stream_name === "string") {
+                const targetName = (updates.stream_name as string).toLowerCase();
+                const matchedStream = allStreams?.find(
+                  (s) => s.name.toLowerCase() === targetName
+                );
+                if (matchedStream) {
+                  updates.stream_id = matchedStream.id;
+                }
+                delete updates.stream_name;
+              }
 
-              if (!error) {
-                actionsTaken.push({
-                  type: "updated",
-                  item_id: a.item_id as string,
-                });
+              // Strip any unknown/unsupported fields for safety
+              const allowedFields = new Set([
+                "status",
+                "next_action",
+                "stream_id",
+                "due_date",
+                "description",
+                "title",
+                "resistance",
+                "stakes",
+              ]);
+              for (const key of Object.keys(updates)) {
+                if (!allowedFields.has(key)) delete updates[key];
+              }
+
+              if (Object.keys(updates).length > 0) {
+                const { error } = await adminClient
+                  .from("items")
+                  .update(updates)
+                  .eq("id", a.item_id)
+                  .eq("user_id", user.id);
+
+                if (!error) {
+                  actionsTaken.push({
+                    type: "updated",
+                    item_id: a.item_id as string,
+                  });
+                }
               }
             }
           }
@@ -420,19 +476,23 @@ RULES
         ? `${message ?? ""}\n\n[Attached: ${(attachments as FileAttachment[]).map((f) => f.name).join(", ")}]`
         : message;
 
-    await adminClient.from("chat_messages").insert([
-      {
-        user_id: user.id,
-        role: "user",
-        content: userMsgContent,
-      },
-      {
-        user_id: user.id,
-        role: "assistant",
-        content: parsedResponse.message,
-        actions_taken: actionsTaken,
-      },
-    ]);
+    // Insert sequentially to guarantee user message has earlier created_at
+    // (single INSERT gives both rows identical timestamps; ordering then becomes arbitrary)
+    await adminClient.from("chat_messages").insert({
+      user_id: user.id,
+      role: "user",
+      content: userMsgContent,
+    });
+
+    // Tiny delay to guarantee distinct timestamps
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await adminClient.from("chat_messages").insert({
+      user_id: user.id,
+      role: "assistant",
+      content: parsedResponse.message,
+      actions_taken: actionsTaken,
+    });
 
     return new Response(
       JSON.stringify({
