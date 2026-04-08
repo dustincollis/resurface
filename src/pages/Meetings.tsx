@@ -1,133 +1,164 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Calendar, FileText } from 'lucide-react'
-import { useMeetings, useCreateMeeting } from '../hooks/useMeetings'
+import { Plus, Calendar, FileText, Trash2 } from 'lucide-react'
+import { useMeetings, useCreateMeeting, useDeleteMeeting } from '../hooks/useMeetings'
+import type { Meeting } from '../hooks/useMeetings'
+
+function groupByDate(meetings: Meeting[]): Map<string, Meeting[]> {
+  const groups = new Map<string, Meeting[]>()
+
+  for (const meeting of meetings) {
+    const dateKey = meeting.start_time
+      ? new Date(meeting.start_time).toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : 'No date'
+
+    const existing = groups.get(dateKey) ?? []
+    existing.push(meeting)
+    groups.set(dateKey, existing)
+  }
+
+  return groups
+}
 
 export default function Meetings() {
   const { data: meetings, isLoading } = useMeetings()
   const createMeeting = useCreateMeeting()
+  const deleteMeeting = useDeleteMeeting()
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [newDate, setNewDate] = useState('')
 
   const handleCreate = () => {
     if (!newTitle.trim()) return
     createMeeting.mutate(
-      { title: newTitle.trim() },
+      {
+        title: newTitle.trim(),
+        start_time: newDate ? new Date(newDate).toISOString() : undefined,
+      },
       {
         onSuccess: (meeting) => {
           navigate(`/meetings/${meeting.id}`)
           setShowForm(false)
           setNewTitle('')
+          setNewDate('')
         },
       }
     )
   }
 
-  const upcoming = meetings?.filter(
-    (m) => m.start_time && new Date(m.start_time) >= new Date()
-  ) ?? []
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    deleteMeeting.mutate(id)
+  }
 
-  const past = meetings?.filter(
-    (m) => !m.start_time || new Date(m.start_time) < new Date()
-  ) ?? []
+  const grouped = useMemo(() => {
+    if (!meetings) return new Map<string, Meeting[]>()
+    return groupByDate(meetings)
+  }, [meetings])
 
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">Meetings</h1>
+        <h1 className="text-2xl font-semibold text-white">Discussions</h1>
         <button
           onClick={() => setShowForm(!showForm)}
           className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
         >
           <Plus size={16} />
-          Add Meeting
+          Add Discussion
         </button>
       </div>
 
       {showForm && (
-        <div className="mb-6 flex gap-2">
+        <div className="mb-6 space-y-2 rounded-lg border border-gray-700 bg-gray-900 p-4">
           <input
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            placeholder="Meeting title..."
-            className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+            placeholder="Discussion title..."
+            className="block w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
             autoFocus
           />
-          <button
-            onClick={handleCreate}
-            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
-          >
-            Create
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              type="datetime-local"
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+            />
+            <button
+              onClick={handleCreate}
+              disabled={!newTitle.trim()}
+              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+            >
+              Create
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setNewTitle(''); setNewDate('') }}
+              className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-gray-200"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
       {isLoading ? (
-        <div className="text-gray-400">Loading meetings...</div>
-      ) : (
-        <>
-          {upcoming.length > 0 && (
-            <section className="mb-8">
-              <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-                Upcoming
+        <div className="text-gray-400">Loading discussions...</div>
+      ) : meetings && meetings.length > 0 ? (
+        <div className="space-y-6">
+          {[...grouped.entries()].map(([dateLabel, items]) => (
+            <section key={dateLabel}>
+              <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-gray-500">
+                {dateLabel}
               </h2>
               <div className="space-y-2">
-                {upcoming.map((meeting) => (
-                  <MeetingRow key={meeting.id} meeting={meeting} onClick={() => navigate(`/meetings/${meeting.id}`)} />
+                {items.map((meeting) => (
+                  <div
+                    key={meeting.id}
+                    onClick={() => navigate(`/meetings/${meeting.id}`)}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
+                  >
+                    <Calendar size={16} className="flex-shrink-0 text-gray-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-white">{meeting.title}</div>
+                      {meeting.start_time && (
+                        <div className="text-xs text-gray-500">
+                          {new Date(meeting.start_time).toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {meeting.transcript_summary && (
+                      <FileText size={14} className="flex-shrink-0 text-purple-400" />
+                    )}
+                    <button
+                      onClick={(e) => handleDelete(e, meeting.id)}
+                      className="flex-shrink-0 rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-red-400"
+                      title="Delete discussion"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 ))}
               </div>
             </section>
-          )}
-
-          <section>
-            <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-              {upcoming.length > 0 ? 'Past' : 'All Meetings'}
-            </h2>
-            {past.length > 0 ? (
-              <div className="space-y-2">
-                {past.map((meeting) => (
-                  <MeetingRow key={meeting.id} meeting={meeting} onClick={() => navigate(`/meetings/${meeting.id}`)} />
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-gray-700 py-8 text-center">
-                <p className="text-gray-400">No meetings yet. Add one or connect your calendar in Settings.</p>
-              </div>
-            )}
-          </section>
-        </>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-gray-700 py-8 text-center">
+          <p className="text-gray-400">No discussions yet. Add one or connect your calendar in Settings.</p>
+        </div>
       )}
     </div>
-  )
-}
-
-function MeetingRow({ meeting, onClick }: { meeting: { id: string; title: string; start_time: string | null; transcript: string | null; transcript_summary: string | null }; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
-    >
-      <Calendar size={16} className="flex-shrink-0 text-gray-500" />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-white">{meeting.title}</div>
-        {meeting.start_time && (
-          <div className="text-xs text-gray-500">
-            {new Date(meeting.start_time).toLocaleDateString('en-US', {
-              weekday: 'short',
-              month: 'short',
-              day: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
-          </div>
-        )}
-      </div>
-      {meeting.transcript_summary && (
-        <FileText size={14} className="flex-shrink-0 text-purple-400" />
-      )}
-    </button>
   )
 }

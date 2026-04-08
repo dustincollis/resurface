@@ -9,7 +9,7 @@ import ChatPanel from './ChatPanel'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/streams', icon: Layers, label: 'Streams' },
-  { to: '/meetings', icon: Calendar, label: 'Meetings' },
+  { to: '/meetings', icon: Calendar, label: 'Discussions' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

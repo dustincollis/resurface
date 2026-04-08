@@ -81,6 +81,18 @@ export function useCreateMeeting() {
   })
 }
 
+export function useDeleteMeeting() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('meetings').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['meetings'] })
+    },
+  })
+}
+
 export function useUploadTranscript() {
   return useMutation({
     mutationFn: async ({ meetingId, transcript }: { meetingId: string; transcript: string }) => {

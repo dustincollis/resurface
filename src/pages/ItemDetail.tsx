@@ -203,7 +203,7 @@ export default function ItemDetail() {
             </div>
             {sourceMeeting && (
               <div>
-                <span className="text-gray-500">From meeting</span>
+                <span className="text-gray-500">From discussion</span>
                 <button
                   onClick={() => navigate(`/meetings/${sourceMeeting.id}`)}
                   className="mt-0.5 flex items-center gap-1 text-purple-400 hover:text-purple-300"

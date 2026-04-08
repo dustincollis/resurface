@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle } from 'lucide-react'
-import { useMeeting, useUploadTranscript } from '../hooks/useMeetings'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2 } from 'lucide-react'
+import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
 import { useCreateItem } from '../hooks/useItems'
 
 export default function MeetingDetail() {
@@ -9,6 +9,7 @@ export default function MeetingDetail() {
   const navigate = useNavigate()
   const { data: meeting, isLoading } = useMeeting(id!)
   const uploadTranscript = useUploadTranscript()
+  const deleteMeeting = useDeleteMeeting()
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
   const [showTranscriptInput, setShowTranscriptInput] = useState(false)
@@ -28,8 +29,8 @@ export default function MeetingDetail() {
 
   const handleCreateItemFromAction = (action: { title: string; description?: string }) => {
     const desc = action.description
-      ? `${action.description}\n\nFrom meeting: ${meeting.title}`
-      : `From meeting: ${meeting.title}`
+      ? `${action.description}\n\nFrom discussion: ${meeting.title}`
+      : `From discussion: ${meeting.title}`
     createItem.mutate({
       title: action.title,
       description: desc,
@@ -39,12 +40,21 @@ export default function MeetingDetail() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <button
-        onClick={() => navigate('/meetings')}
-        className="mb-4 flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200"
-      >
-        <ArrowLeft size={16} /> Back to Meetings
-      </button>
+      <div className="mb-4 flex items-center justify-between">
+        <button
+          onClick={() => navigate('/meetings')}
+          className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200"
+        >
+          <ArrowLeft size={16} /> Back to Discussions
+        </button>
+        <button
+          onClick={() => { deleteMeeting.mutate(meeting.id); navigate('/meetings') }}
+          className="flex items-center gap-1 rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-red-400"
+          title="Delete discussion"
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
 
       {/* Meeting info */}
       <div className="rounded-xl border border-gray-800 bg-gray-900">
