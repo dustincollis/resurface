@@ -1,6 +1,112 @@
-import { useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Pencil, Archive } from 'lucide-react'
+import { useStream, useUpdateStream, useArchiveStream } from '../hooks/useStreams'
+import { useItemsByStream } from '../hooks/useItems'
+import ItemCard from '../components/ItemCard'
+import QuickAddBar from '../components/QuickAddBar'
+import StreamFormModal from '../components/StreamFormModal'
+import type { CreateStreamPayload } from '../lib/types'
 
 export default function StreamDetail() {
-  const { id } = useParams()
-  return <h1 className="text-2xl font-semibold text-white">Stream: {id}</h1>
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { data: stream, isLoading: streamLoading } = useStream(id!)
+  const { data: items, isLoading: itemsLoading } = useItemsByStream(id!)
+  const updateStream = useUpdateStream()
+  const archiveStream = useArchiveStream()
+  const [showEditModal, setShowEditModal] = useState(false)
+
+  if (streamLoading || !stream) {
+    return <div className="text-gray-400">Loading...</div>
+  }
+
+  const handleEdit = (payload: CreateStreamPayload) => {
+    updateStream.mutate({ id: stream.id, ...payload })
+    setShowEditModal(false)
+  }
+
+  const handleArchive = () => {
+    archiveStream.mutate(stream.id)
+    navigate('/streams')
+  }
+
+  const activeItems = items?.filter(i => !['done', 'dropped'].includes(i.status)) ?? []
+  const completedItems = items?.filter(i => ['done', 'dropped'].includes(i.status)) ?? []
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <button
+        onClick={() => navigate('/streams')}
+        className="mb-4 flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200"
+      >
+        <ArrowLeft size={16} /> Back to Streams
+      </button>
+
+      <div className="mb-6 flex items-center gap-3">
+        <div
+          className="h-4 w-4 rounded-full"
+          style={{ backgroundColor: stream.color }}
+        />
+        <h1 className="flex-1 text-2xl font-semibold text-white">{stream.name}</h1>
+        <button
+          onClick={() => setShowEditModal(true)}
+          className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+          title="Edit stream"
+        >
+          <Pencil size={16} />
+        </button>
+        <button
+          onClick={handleArchive}
+          className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-red-400"
+          title="Archive stream"
+        >
+          <Archive size={16} />
+        </button>
+      </div>
+
+      <QuickAddBar defaultStreamId={id} />
+
+      {itemsLoading ? (
+        <div className="mt-4 text-gray-400">Loading items...</div>
+      ) : (
+        <>
+          {activeItems.length > 0 && (
+            <div className="mt-6 space-y-2">
+              {activeItems.map((item) => (
+                <ItemCard key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+
+          {activeItems.length === 0 && (
+            <div className="mt-6 rounded-lg border border-dashed border-gray-700 py-8 text-center">
+              <p className="text-gray-400">No active items in this stream.</p>
+            </div>
+          )}
+
+          {completedItems.length > 0 && (
+            <div className="mt-8">
+              <h3 className="mb-3 text-sm font-medium text-gray-500">
+                Completed ({completedItems.length})
+              </h3>
+              <div className="space-y-2 opacity-60">
+                {completedItems.map((item) => (
+                  <ItemCard key={item.id} item={item} />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {showEditModal && (
+        <StreamFormModal
+          stream={stream}
+          onSave={handleEdit}
+          onClose={() => setShowEditModal(false)}
+        />
+      )}
+    </div>
+  )
 }

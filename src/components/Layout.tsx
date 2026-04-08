@@ -1,6 +1,9 @@
+import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
 import { LayoutDashboard, Layers, Calendar, Settings, Search, LogOut } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import { useStreams } from '../hooks/useStreams'
+import SearchModal from './SearchModal'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,6 +14,20 @@ const navItems = [
 
 export default function Layout() {
   const { session, user, loading, signOut } = useAuth()
+  const { data: streams } = useStreams()
+  const [searchOpen, setSearchOpen] = useState(false)
+
+  // Cmd+K / Ctrl+K to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   if (loading) {
     return (
@@ -32,7 +49,7 @@ export default function Layout() {
           Resurface
         </div>
 
-        <nav className="flex-1 space-y-1 px-2 py-2">
+        <nav className="space-y-1 px-2 py-2">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -51,6 +68,34 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Stream list */}
+        {streams && streams.length > 0 && (
+          <div className="flex-1 overflow-y-auto border-t border-gray-800 px-2 py-2">
+            <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600">
+              Streams
+            </div>
+            {streams.map((stream) => (
+              <NavLink
+                key={stream.id}
+                to={`/stream/${stream.id}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                    isActive
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                  }`
+                }
+              >
+                <div
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: stream.color }}
+                />
+                <span className="truncate">{stream.name}</span>
+              </NavLink>
+            ))}
+          </div>
+        )}
 
         <div className="border-t border-gray-800 p-3">
           <div className="flex items-center justify-between">
@@ -72,15 +117,13 @@ export default function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
         <header className="flex h-14 items-center gap-4 border-b border-gray-800 px-6">
-          <div className="flex flex-1 items-center gap-2 rounded-lg bg-gray-800/50 px-3 py-1.5">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="flex flex-1 items-center gap-2 rounded-lg bg-gray-800/50 px-3 py-1.5"
+          >
             <Search size={16} className="text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search... (Cmd+K)"
-              className="flex-1 bg-transparent text-sm text-gray-300 placeholder-gray-500 outline-none"
-              readOnly
-            />
-          </div>
+            <span className="text-sm text-gray-500">Search... (Cmd+K)</span>
+          </button>
         </header>
 
         {/* Page content */}
@@ -88,6 +131,8 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
 }
