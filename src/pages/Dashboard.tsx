@@ -119,13 +119,16 @@ export default function Dashboard() {
     limit: 5,
   })
 
-  const focusItems = useMemo(() => {
+  const FOCUS_LIMIT = 10
+  const sortedActiveItems = useMemo(() => {
     if (!activeItems) return []
     return [...activeItems]
       .map((item) => ({ item, score: computePriority(item) }))
       .sort((a, b) => b.score - a.score)
       .map((x) => x.item)
   }, [activeItems])
+  const focusItems = useMemo(() => sortedActiveItems.slice(0, FOCUS_LIMIT), [sortedActiveItems])
+  const hiddenCount = sortedActiveItems.length - focusItems.length
 
   const dueSoonItems = useMemo(() => {
     if (!activeItems) return []
@@ -152,11 +155,18 @@ export default function Dashboard() {
         {isLoading ? (
           <div className="text-sm text-gray-500">Loading...</div>
         ) : focusItems.length > 0 ? (
-          <div className="space-y-3 overflow-y-auto">
-            {focusItems.map((item, i) => (
-              <FocusCard key={item.id} item={item} rank={i + 1} />
-            ))}
-          </div>
+          <>
+            <div className="space-y-3">
+              {focusItems.map((item, i) => (
+                <FocusCard key={item.id} item={item} rank={i + 1} />
+              ))}
+            </div>
+            {hiddenCount > 0 && (
+              <p className="mt-3 text-center text-xs text-gray-600">
+                + {hiddenCount} more active item{hiddenCount !== 1 ? 's' : ''} not shown. Open a stream to see all.
+              </p>
+            )}
+          </>
         ) : (
           <div className="rounded-lg border border-dashed border-gray-800 py-6 text-center text-sm text-gray-500">
             No items to focus on. Add some tasks to get started.
