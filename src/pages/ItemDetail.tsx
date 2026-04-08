@@ -56,13 +56,14 @@ function DotRating({
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-gray-500">{label}</span>
-      <div className="flex gap-1">
+      <div className="flex gap-1.5">
         {Array.from({ length: max }, (_, i) => (
           <button
             key={i}
             onClick={() => onChange(i + 1)}
-            className={`h-2.5 w-2.5 rounded-full transition-colors ${
-              value && i < value ? 'bg-purple-400' : 'bg-gray-700 hover:bg-gray-600'
+            title={`${label}: ${i + 1} of ${max}`}
+            className={`h-4 w-4 rounded-full ring-1 ring-gray-700 transition-all hover:scale-110 hover:ring-purple-400 ${
+              value && i < value ? 'bg-purple-500' : 'bg-gray-800 hover:bg-gray-700'
             }`}
           />
         ))}

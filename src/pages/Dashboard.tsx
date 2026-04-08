@@ -166,7 +166,7 @@ export default function Dashboard() {
 
       {/* Due Soon */}
       {dueSoonItems.length > 0 && (
-        <section className="mt-8 max-w-3xl">
+        <section className="mt-8 max-w-2xl">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Due Soon
           </h2>
@@ -180,7 +180,7 @@ export default function Dashboard() {
 
       {/* Recently Touched */}
       {recentItems && recentItems.length > 0 && (
-        <section className="mt-8 max-w-3xl">
+        <section className="mt-8 max-w-2xl">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Recently Touched
           </h2>
