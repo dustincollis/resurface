@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import type { Stream, CreateStreamPayload, FieldTemplate } from '../lib/types'
 
 const COLOR_PALETTE = [
-  '#6B7280', '#EF4444', '#F97316', '#EAB308',
+  '#EF4444', '#F97316', '#EAB308', '#84CC16',
   '#22C55E', '#06B6D4', '#3B82F6', '#8B5CF6',
   '#EC4899', '#F43F5E',
 ]

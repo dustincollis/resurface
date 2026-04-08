@@ -74,50 +74,48 @@ export default function Layout() {
         </nav>
 
         {/* Stream list */}
-        {((streams && streams.length > 0) || (uncategorized && uncategorized.length > 0)) && (
-          <div className="flex-1 overflow-y-auto border-t border-gray-800 px-2 py-2">
-            <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600">
-              Streams
-            </div>
-            {streams?.map((stream) => (
-              <NavLink
-                key={stream.id}
-                to={`/stream/${stream.id}`}
-                className={({ isActive }) =>
-                  `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                    isActive
-                      ? 'bg-gray-800 text-white'
-                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
-                  }`
-                }
-              >
-                <div
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: stream.color }}
-                />
-                <span className="truncate">{stream.name}</span>
-              </NavLink>
-            ))}
-            {uncategorized && uncategorized.length > 0 && (
-              <NavLink
-                to="/stream/uncategorized"
-                className={({ isActive }) =>
-                  `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                    isActive
-                      ? 'bg-gray-800 text-white'
-                      : 'text-gray-500 hover:bg-gray-800/50 hover:text-gray-300'
-                  }`
-                }
-              >
-                <div className="h-2 w-2 rounded-full border border-dashed border-gray-600" />
-                <span className="flex-1 truncate italic">Uncategorized</span>
-                <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
-                  {uncategorized.length}
-                </span>
-              </NavLink>
-            )}
+        <div className="flex-1 overflow-y-auto border-t border-gray-800 px-2 py-2">
+          <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600">
+            Streams
           </div>
-        )}
+          {streams?.map((stream) => (
+            <NavLink
+              key={stream.id}
+              to={`/stream/${stream.id}`}
+              className={({ isActive }) =>
+                `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-gray-800 text-white'
+                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                }`
+              }
+            >
+              <div
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: stream.color }}
+              />
+              <span className="truncate">{stream.name}</span>
+            </NavLink>
+          ))}
+          <NavLink
+            to="/stream/uncategorized"
+            className={({ isActive }) =>
+              `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                isActive
+                  ? 'bg-gray-800 text-white'
+                  : 'text-gray-500 hover:bg-gray-800/50 hover:text-gray-300'
+              }`
+            }
+          >
+            <div className="h-2 w-2 rounded-full border border-dashed border-gray-600" />
+            <span className="flex-1 truncate italic">Uncategorized</span>
+            {uncategorized && uncategorized.length > 0 && (
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
+                {uncategorized.length}
+              </span>
+            )}
+          </NavLink>
+        </div>
 
         <div className="border-t border-gray-800 p-3">
           <div className="flex items-center justify-between">
