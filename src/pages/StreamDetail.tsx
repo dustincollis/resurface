@@ -7,6 +7,7 @@ import ItemCard from '../components/ItemCard'
 import KanbanBoard from '../components/KanbanBoard'
 import QuickAddBar from '../components/QuickAddBar'
 import StreamFormModal from '../components/StreamFormModal'
+import { sortByPriority } from '../lib/priorityScore'
 import type { CreateStreamPayload, ItemStatus } from '../lib/types'
 
 export default function StreamDetail() {
@@ -41,7 +42,7 @@ export default function StreamDetail() {
     updateItem.mutate({ id: itemId, status: newStatus, completed_at })
   }
 
-  const activeItems = items?.filter(i => !['done', 'dropped'].includes(i.status)) ?? []
+  const activeItems = sortByPriority(items?.filter(i => !['done', 'dropped'].includes(i.status)) ?? [])
   const completedItems = items?.filter(i => ['done', 'dropped'].includes(i.status)) ?? []
 
   return (

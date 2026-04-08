@@ -1,104 +1,293 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar } from 'lucide-react'
-import { useItems } from '../hooks/useItems'
+import { Clock, Check, ChevronDown, Sparkles, Play } from 'lucide-react'
+import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import ItemCard from '../components/ItemCard'
-import StatusBadge from '../components/StatusBadge'
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
-import { computePriority, priorityReason, effectiveStalenessLevel, stalenessFillClass } from '../lib/priorityScore'
+import {
+  computePriority,
+  getSurfaceReasons,
+  getSuggestedMove,
+  getScoreBreakdown,
+  getClusterFactors,
+  sortByPriority,
+  effectiveStalenessLevel,
+  type SurfaceReason,
+  type SuggestedMove,
+} from '../lib/priorityScore'
 import type { Item } from '../lib/types'
 
-function formatDueDate(dateStr: string): string {
+const TONE_CLASSES: Record<SurfaceReason['tone'], string> = {
+  red: 'bg-red-900/40 text-red-300 border-red-900/60',
+  orange: 'bg-orange-900/40 text-orange-300 border-orange-900/60',
+  yellow: 'bg-yellow-900/40 text-yellow-300 border-yellow-900/60',
+  blue: 'bg-blue-900/40 text-blue-300 border-blue-900/60',
+  gray: 'bg-gray-800 text-gray-400 border-gray-700',
+}
+
+function ReasonChip({ reason }: { reason: SurfaceReason }) {
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${TONE_CLASSES[reason.tone]}`}>
+      {reason.label}
+    </span>
+  )
+}
+
+function formatDueLabel(dateStr: string): { text: string; tone: 'red' | 'orange' | 'gray' } {
   const date = new Date(dateStr)
   const now = new Date()
   const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Tomorrow'
-  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`
-  if (diffDays <= 7) return `${diffDays}d`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  if (diffDays < 0) return { text: `${Math.abs(diffDays)}d overdue`, tone: 'red' }
+  if (diffDays === 0) return { text: 'Due today', tone: 'orange' }
+  if (diffDays === 1) return { text: 'Due tomorrow', tone: 'orange' }
+  if (diffDays <= 7) return { text: `Due in ${diffDays}d`, tone: 'gray' }
+  return { text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), tone: 'gray' }
+}
+
+const SUGGESTED_MOVE_STYLES: Record<SuggestedMove, { className: string; icon: typeof Play }> = {
+  'Do Now': { className: 'bg-purple-600 text-white hover:bg-purple-500', icon: Play },
+  'Break Down': { className: 'bg-purple-900/40 text-purple-200 border border-purple-800/50 hover:bg-purple-900/60', icon: Sparkles },
+  'Open': { className: 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700', icon: ChevronDown },
 }
 
 function FocusCard({ item, rank }: { item: Item; rank: number }) {
   const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
+  const [touchedFlash, setTouchedFlash] = useState(false)
+  const touchItem = useTouchItem()
+  const updateItem = useUpdateItem()
+
+  const score = Math.round(computePriority(item))
+  const reasons = getSurfaceReasons(item)
+  const suggestedMove = getSuggestedMove(item)
+  const breakdown = getScoreBreakdown(item)
+  const dueLabel = item.due_date ? formatDueLabel(item.due_date) : null
   const streamColor = item.streams?.color ?? '#6B7280'
-  const isDue = item.due_date && new Date(item.due_date) <= new Date()
   const level = effectiveStalenessLevel(item)
-  const fillWidth = Math.min(
-    Math.max(item.staleness_score ?? 0, level === 'critical' ? 90 : level === 'stale' ? 60 : 0),
-    100
-  )
+  const SuggestedIcon = SUGGESTED_MOVE_STYLES[suggestedMove].icon
+
+  const handleSuggestedAction = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (suggestedMove === 'Do Now' || suggestedMove === 'Open') {
+      navigate(`/items/${item.id}`)
+    } else if (suggestedMove === 'Break Down') {
+      navigate(`/items/${item.id}`)
+    }
+  }
+
+  const handleTouch = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    touchItem.mutate(item.id, {
+      onSuccess: () => {
+        setTouchedFlash(true)
+        setTimeout(() => setTouchedFlash(false), 1500)
+      },
+    })
+  }
+
+  const handleComplete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    updateItem.mutate({
+      id: item.id,
+      status: 'done',
+      completed_at: new Date().toISOString(),
+    })
+  }
+
+  const breakdownColor = (value: number) => {
+    if (value >= 80) return 'text-red-400'
+    if (value >= 60) return 'text-orange-400'
+    if (value >= 40) return 'text-yellow-400'
+    return 'text-gray-400'
+  }
 
   return (
-    <button
-      onClick={() => navigate(`/items/${item.id}`)}
-      className="flex w-full flex-col rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
+    <div
+      className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${
+        expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-700'
+      } ${level === 'critical' ? 'ring-1 ring-red-900/30' : ''}`}
     >
-      {/* Header: rank + stream */}
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-900/50 text-[11px] font-medium text-purple-300">
+      {/* Always-visible row */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-4 py-3 text-left"
+      >
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex-shrink-0 text-sm font-medium text-gray-600">
             {rank}
           </span>
-          {item.streams ? (
-            <span
-              className="rounded px-1.5 py-0.5 text-[11px]"
-              style={{
-                backgroundColor: `${streamColor}20`,
-                color: streamColor,
-              }}
+
+          <div className="min-w-0 flex-1">
+            {/* Stream + due tag */}
+            <div className="flex items-center gap-2 text-[11px]">
+              {item.streams ? (
+                <span
+                  className="rounded px-1.5 py-0.5 font-semibold uppercase tracking-wide"
+                  style={{
+                    backgroundColor: `${streamColor}20`,
+                    color: streamColor,
+                  }}
+                >
+                  {item.streams.name}
+                </span>
+              ) : (
+                <span className="rounded bg-gray-800 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-gray-500">
+                  No stream
+                </span>
+              )}
+              {dueLabel && (
+                <span
+                  className={`font-medium ${
+                    dueLabel.tone === 'red'
+                      ? 'text-red-400'
+                      : dueLabel.tone === 'orange'
+                      ? 'text-orange-400'
+                      : 'text-gray-500'
+                  }`}
+                >
+                  {dueLabel.text}
+                </span>
+              )}
+            </div>
+
+            {/* Title */}
+            <h3 className="mt-1 text-base font-semibold leading-snug text-white">
+              {item.title}
+            </h3>
+
+            {/* Next action */}
+            {item.next_action && (
+              <p className="mt-1 line-clamp-1 text-xs text-gray-400">
+                <span className="text-gray-500">Next:</span> {item.next_action}
+              </p>
+            )}
+
+            {/* Reason chips */}
+            {reasons.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {reasons.map((reason, i) => (
+                  <ReasonChip key={i} reason={reason} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right rail: suggested action + score */}
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={handleSuggestedAction}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
+              title={
+                suggestedMove === 'Do Now'
+                  ? 'Open this item and act on it'
+                  : suggestedMove === 'Break Down'
+                  ? 'Open this item to break it into sub-tasks'
+                  : 'Open item details'
+              }
             >
-              {item.streams.name}
+              <SuggestedIcon size={12} />
+              {suggestedMove}
+            </button>
+            <span className="text-[10px] uppercase tracking-wider text-gray-600">
+              score <span className="text-gray-500">{score}</span>
             </span>
-          ) : (
-            <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[11px] text-gray-400">
-              no stream
-            </span>
-          )}
+          </div>
         </div>
-        <StatusBadge status={item.status} />
-      </div>
+      </button>
 
-      {/* Title (wraps, dominant) */}
-      <h3 className="text-base font-semibold leading-snug text-white">
-        {item.title}
-      </h3>
+      {/* Expanded section */}
+      {expanded && (
+        <div className="border-t border-gray-800/60 bg-gray-950/40 px-4 py-4">
+          {/* Action row */}
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500"
+              title="Open item details and act on it"
+            >
+              <Play size={12} /> Do Now
+            </button>
+            <button
+              onClick={handleTouch}
+              disabled={touchItem.isPending}
+              className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                touchedFlash
+                  ? 'border-green-700 bg-green-900/30 text-green-300'
+                  : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+              }`}
+              title="Bump 'last touched' to now"
+            >
+              {touchedFlash ? (
+                <>
+                  <Check size={12} /> Touched!
+                </>
+              ) : (
+                <>
+                  <Clock size={12} /> Touch +1d
+                </>
+              )}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800"
+              title="Open item details to break it down"
+            >
+              <Sparkles size={12} /> Break Down
+            </button>
+          </div>
 
-      {/* Next action (wraps, up to 2 lines) */}
-      {item.next_action && (
-        <p className="mt-1.5 line-clamp-2 text-xs text-gray-400">
-          Next: {item.next_action}
-        </p>
+          {/* Score breakdown */}
+          <div className="mb-4 grid grid-cols-4 gap-2 rounded-lg border border-gray-800 bg-gray-900 p-3">
+            <div className="text-center">
+              <div className={`text-lg font-bold ${breakdownColor(breakdown.staleness)}`}>{breakdown.staleness}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Staleness</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-lg font-bold ${breakdownColor(breakdown.stakes)}`}>{breakdown.stakes}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Stakes</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-lg font-bold ${breakdownColor(breakdown.resistance)}`}>{breakdown.resistance}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Resistance</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-lg font-bold ${breakdownColor(breakdown.due_risk)}`}>{breakdown.due_risk}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Due Risk</div>
+            </div>
+          </div>
+
+          {/* Description */}
+          {item.description && (
+            <div className="mb-3">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Notes
+              </div>
+              <p className="line-clamp-3 text-xs text-gray-400">{item.description}</p>
+            </div>
+          )}
+
+          {/* Bottom row: complete + open detail */}
+          <div className="flex items-center justify-between gap-2 border-t border-gray-800/60 pt-3">
+            <button
+              onClick={handleComplete}
+              disabled={updateItem.isPending}
+              className="flex items-center gap-1.5 rounded-lg border border-green-800/60 bg-green-900/20 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-900/40 disabled:opacity-50"
+              title="Mark this item as done"
+            >
+              <Check size={12} /> Mark Complete
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
+              className="text-xs text-purple-400 hover:text-purple-300"
+            >
+              Open full detail →
+            </button>
+          </div>
+        </div>
       )}
-
-      {/* Footer: due date + staleness + reason */}
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-800/60 pt-2">
-        <div className="flex items-center gap-3">
-          {item.due_date && (
-            <span className={`flex items-center gap-1 text-xs ${isDue ? 'font-medium text-red-400' : 'text-gray-400'}`}>
-              <Calendar size={11} />
-              {formatDueDate(item.due_date)}
-            </span>
-          )}
-          <span className="text-[11px] italic text-gray-500" title={`Priority reason: ${priorityReason(item)}`}>
-            {priorityReason(item)}
-          </span>
-        </div>
-        <div
-          className="h-1 w-12 flex-shrink-0 overflow-hidden rounded-full bg-gray-800"
-          title={`Attention level: ${level}`}
-        >
-          <div
-            className={`h-full rounded-full ${stalenessFillClass(item)} ${
-              level === 'critical' ? 'animate-pulse' : ''
-            }`}
-            style={{ width: `${fillWidth}%` }}
-          />
-        </div>
-      </div>
-    </button>
+    </div>
   )
 }
 
@@ -118,15 +307,16 @@ export default function Dashboard() {
   })
 
   const FOCUS_LIMIT = 10
-  const sortedActiveItems = useMemo(() => {
-    if (!activeItems) return []
-    return [...activeItems]
-      .map((item) => ({ item, score: computePriority(item) }))
-      .sort((a, b) => b.score - a.score)
-      .map((x) => x.item)
-  }, [activeItems])
-  const focusItems = useMemo(() => sortedActiveItems.slice(0, FOCUS_LIMIT), [sortedActiveItems])
+  const sortedActiveItems = useMemo(
+    () => (activeItems ? sortByPriority(activeItems) : []),
+    [activeItems]
+  )
+  const focusItems = useMemo(
+    () => sortedActiveItems.slice(0, FOCUS_LIMIT),
+    [sortedActiveItems]
+  )
   const hiddenCount = sortedActiveItems.length - focusItems.length
+  const clusterFactors = useMemo(() => getClusterFactors(focusItems), [focusItems])
 
   const dueSoonItems = useMemo(() => {
     if (!activeItems) return []
@@ -144,10 +334,29 @@ export default function Dashboard() {
     <div className="mx-auto max-w-5xl">
       {/* Today's Focus */}
       <section className="max-w-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium uppercase tracking-wider text-gray-500">
-            Today&apos;s Focus
-          </h2>
+        <div className="mb-3 flex items-end justify-between">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-xl font-bold text-white">Today&apos;s Focus</h2>
+              {focusItems.length > 0 && (
+                <span className="text-xs text-gray-500">
+                  {focusItems.length} of {sortedActiveItems.length} active
+                </span>
+              )}
+            </div>
+            {clusterFactors.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {clusterFactors.map((factor, i) => (
+                  <span
+                    key={i}
+                    className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-400"
+                  >
+                    {factor.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <QuickAddBar compact />
         </div>
         {isLoading ? (
