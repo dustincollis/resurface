@@ -41,7 +41,7 @@ export default function MeetingDetail() {
   const deleteMeeting = useDeleteMeeting()
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
-  const [showTranscriptInput, setShowTranscriptInput] = useState(false)
+  const [showTranscriptInput, setShowTranscriptInput] = useState(true)
   const [createdItems, setCreatedItems] = useState<Map<number, Item>>(new Map())
 
   if (isLoading || !meeting) {

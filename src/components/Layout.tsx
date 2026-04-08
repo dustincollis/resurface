@@ -17,7 +17,7 @@ export default function Layout() {
   const { session, user, loading, signOut } = useAuth()
   const { data: streams } = useStreams()
   const [searchOpen, setSearchOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(true)
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
