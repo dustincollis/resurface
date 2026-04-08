@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2 } from 'lucide-react'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2, Check } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
 import { useCreateItem } from '../hooks/useItems'
+import type { Item } from '../lib/types'
 
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
@@ -13,6 +14,7 @@ export default function MeetingDetail() {
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
   const [showTranscriptInput, setShowTranscriptInput] = useState(false)
+  const [createdItems, setCreatedItems] = useState<Map<number, Item>>(new Map())
 
   if (isLoading || !meeting) {
     return <div className="text-gray-400">Loading...</div>
@@ -27,15 +29,22 @@ export default function MeetingDetail() {
     setShowTranscriptInput(false)
   }
 
-  const handleCreateItemFromAction = (action: { title: string; description?: string }) => {
+  const handleCreateItemFromAction = (index: number, action: { title: string; description?: string }) => {
     const desc = action.description
       ? `${action.description}\n\nFrom discussion: ${meeting.title}`
       : `From discussion: ${meeting.title}`
-    createItem.mutate({
-      title: action.title,
-      description: desc,
-      source_meeting_id: meeting.id,
-    })
+    createItem.mutate(
+      {
+        title: action.title,
+        description: desc,
+        source_meeting_id: meeting.id,
+      },
+      {
+        onSuccess: (item) => {
+          setCreatedItems((prev) => new Map(prev).set(index, item))
+        },
+      }
+    )
   }
 
   return (
@@ -99,26 +108,49 @@ export default function MeetingDetail() {
           <div className="border-b border-gray-800 px-6 py-4">
             <h3 className="mb-3 text-sm font-medium text-gray-300">Action Items</h3>
             <div className="space-y-2">
-              {meeting.extracted_action_items.map((action, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-orange-400" />
-                  <div className="flex-1">
-                    <span className="text-sm text-gray-200">{action.title}</span>
-                    {action.assignee && (
-                      <span className="ml-2 text-xs text-gray-500">({action.assignee})</span>
+              {meeting.extracted_action_items.map((action, i) => {
+                const created = createdItems.get(i)
+                return (
+                  <div key={i} className="flex items-start gap-2">
+                    {created ? (
+                      <Check size={14} className="mt-0.5 flex-shrink-0 text-green-400" />
+                    ) : (
+                      <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-orange-400" />
                     )}
-                    {action.description && (
-                      <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>
+                    <div className="flex-1">
+                      <span className={`text-sm ${created ? 'text-gray-500' : 'text-gray-200'}`}>
+                        {action.title}
+                      </span>
+                      {action.assignee && (
+                        <span className="ml-2 text-xs text-gray-500">({action.assignee})</span>
+                      )}
+                      {action.description && (
+                        <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>
+                      )}
+                      {created && (
+                        <p className="mt-1 text-xs text-green-400">
+                          Created — {created.streams?.name ? `added to ${created.streams.name}` : 'no stream yet (AI classifying...)'}
+                          {' · '}
+                          <button
+                            onClick={() => navigate(`/items/${created.id}`)}
+                            className="text-purple-400 hover:text-purple-300"
+                          >
+                            View item
+                          </button>
+                        </p>
+                      )}
+                    </div>
+                    {!created && (
+                      <button
+                        onClick={() => handleCreateItemFromAction(i, action)}
+                        className="flex-shrink-0 rounded bg-purple-600/20 px-2 py-1 text-xs text-purple-300 hover:bg-purple-600/30"
+                      >
+                        Create Item
+                      </button>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleCreateItemFromAction(action)}
-                    className="flex-shrink-0 rounded bg-purple-600/20 px-2 py-1 text-xs text-purple-300 hover:bg-purple-600/30"
-                  >
-                    Create Item
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
