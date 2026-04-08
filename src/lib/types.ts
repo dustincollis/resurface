@@ -40,6 +40,7 @@ export interface Item {
   ai_confidence: number | null
   parent_id: string | null
   source_meeting_id: string | null
+  snoozed_until: string | null
   // Joined fields
   streams?: Stream | null
 }

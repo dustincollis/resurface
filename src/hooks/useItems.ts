@@ -196,9 +196,14 @@ export function useTouchItem() {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      const now = new Date()
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
       const { data, error } = await supabase
         .from('items')
-        .update({ last_touched_at: new Date().toISOString() })
+        .update({
+          last_touched_at: now.toISOString(),
+          snoozed_until: tomorrow.toISOString(),
+        })
         .eq('id', id)
         .select()
         .single()
@@ -213,7 +218,24 @@ export function useTouchItem() {
         user_id: user!.id,
         item_id: itemId,
         action: 'touched',
+        details: { snoozed_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
       })
+    },
+  })
+}
+
+// Manual unsnooze (e.g. if user wants the item back today)
+export function useUnsnoozeItem() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('items')
+        .update({ snoozed_until: null })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items'] })
     },
   })
 }

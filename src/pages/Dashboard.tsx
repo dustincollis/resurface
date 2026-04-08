@@ -267,24 +267,32 @@ export default function Dashboard() {
   })
 
   const FOCUS_LIMIT = 10
+  // Filter out snoozed items (Touch +1d snoozes for 24h)
+  const unsnoozedActiveItems = useMemo(() => {
+    if (!activeItems) return []
+    return activeItems.filter(
+      (item) => !item.snoozed_until || new Date(item.snoozed_until) <= new Date(now)
+    )
+  }, [activeItems, now])
   const sortedActiveItems = useMemo(
-    () => (activeItems ? sortByPriority(activeItems) : []),
-    [activeItems]
+    () => sortByPriority(unsnoozedActiveItems),
+    [unsnoozedActiveItems]
   )
   const focusItems = useMemo(
     () => sortedActiveItems.slice(0, FOCUS_LIMIT),
     [sortedActiveItems]
   )
   const hiddenCount = sortedActiveItems.length - focusItems.length
+  const snoozedCount = (activeItems?.length ?? 0) - unsnoozedActiveItems.length
   const clusterFactors = useMemo(() => getClusterFactors(focusItems), [focusItems])
 
   const dueSoonItems = useMemo(() => {
-    if (!activeItems) return []
+    if (!unsnoozedActiveItems) return []
     const weekFromNow = new Date(now + 7 * 24 * 60 * 60 * 1000)
-    return activeItems
+    return unsnoozedActiveItems
       .filter((item) => item.due_date && new Date(item.due_date) <= weekFromNow)
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
-  }, [activeItems, now])
+  }, [unsnoozedActiveItems, now])
 
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
@@ -328,9 +336,15 @@ export default function Dashboard() {
                 <FocusCard key={item.id} item={item} rank={i + 1} />
               ))}
             </div>
-            {hiddenCount > 0 && (
+            {(hiddenCount > 0 || snoozedCount > 0) && (
               <p className="mt-3 text-center text-xs text-gray-600">
-                + {hiddenCount} more active item{hiddenCount !== 1 ? 's' : ''} not shown. Open a stream to see all.
+                {hiddenCount > 0 && (
+                  <>+ {hiddenCount} more active item{hiddenCount !== 1 ? 's' : ''} not shown</>
+                )}
+                {hiddenCount > 0 && snoozedCount > 0 && <> · </>}
+                {snoozedCount > 0 && (
+                  <>{snoozedCount} snoozed for later</>
+                )}
               </p>
             )}
           </>
