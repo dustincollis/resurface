@@ -50,7 +50,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-medium text-gray-300 hover:border-gray-600 hover:bg-gray-800"
+        className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
       >
         <Plus size={14} />
         Add Item
