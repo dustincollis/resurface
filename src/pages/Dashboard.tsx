@@ -157,7 +157,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             {item.next_action && (
               <p
                 className="mt-1.5 line-clamp-1 text-xs text-gray-300"
-                title="The very next physical step to make progress on this item. Editable on the item detail page."
+                title="The very next physical step to make progress on this task. Editable on the task detail page."
               >
                 <span className="text-gray-500">Next step:</span> {item.next_action}
               </p>
@@ -180,10 +180,10 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
               title={
                 suggestedMove === 'Do Now'
-                  ? 'Open this item and act on it'
+                  ? 'Open this task and act on it'
                   : suggestedMove === 'Break Down'
-                  ? 'Open this item to break it into sub-tasks'
-                  : 'Open item details'
+                  ? 'Open this task to break it into sub-tasks'
+                  : 'Open task details'
               }
             >
               <SuggestedIcon size={12} />
@@ -201,7 +201,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             <button
               onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500"
-              title="Open item details and act on it"
+              title="Open task details and act on it"
             >
               <Play size={12} /> Do Now
             </button>
@@ -228,7 +228,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             <button
               onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
               className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800"
-              title="Open item details to break it down"
+              title="Open task details to break it down"
             >
               <Sparkles size={12} /> Break Down
             </button>
@@ -240,7 +240,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               onClick={handleComplete}
               disabled={updateItem.isPending}
               className="flex items-center gap-1.5 rounded-lg border border-green-800/60 bg-green-900/20 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-900/40 disabled:opacity-50"
-              title="Mark this item as done"
+              title="Mark this task as done"
             >
               <Check size={12} /> Mark Complete
             </button>
@@ -339,7 +339,7 @@ export default function Dashboard() {
             {(hiddenCount > 0 || snoozedCount > 0) && (
               <p className="mt-3 text-center text-xs text-gray-600">
                 {hiddenCount > 0 && (
-                  <>+ {hiddenCount} more active item{hiddenCount !== 1 ? 's' : ''} not shown</>
+                  <>+ {hiddenCount} more active task{hiddenCount !== 1 ? 's' : ''} not shown</>
                 )}
                 {hiddenCount > 0 && snoozedCount > 0 && <> · </>}
                 {snoozedCount > 0 && (
@@ -350,7 +350,7 @@ export default function Dashboard() {
           </>
         ) : (
           <div className="rounded-lg border border-dashed border-gray-800 py-6 text-center text-sm text-gray-500">
-            No items to focus on. Add some tasks to get started.
+            No tasks to focus on. Add one to get started.
           </div>
         )}
       </section>

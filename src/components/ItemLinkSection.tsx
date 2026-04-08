@@ -83,7 +83,7 @@ export default function ItemLinkSection({ itemId }: { itemId: string }) {
       return (
         <div className="border-b border-gray-800 px-6 py-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-gray-300">Linked Items</h3>
+            <h3 className="text-sm font-medium text-gray-300">Linked Tasks</h3>
             <button
               onClick={() => {
                 setShowForm(true)
@@ -94,7 +94,7 @@ export default function ItemLinkSection({ itemId }: { itemId: string }) {
               <Plus size={16} />
             </button>
           </div>
-          <p className="mt-1 text-xs text-gray-600">No linked items</p>
+          <p className="mt-1 text-xs text-gray-600">No linked tasks</p>
         </div>
       )
     }
@@ -103,7 +103,7 @@ export default function ItemLinkSection({ itemId }: { itemId: string }) {
   return (
     <div className="border-b border-gray-800 px-6 py-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-300">Linked Items</h3>
+        <h3 className="text-sm font-medium text-gray-300">Linked Tasks</h3>
         <button
           onClick={() => {
             setShowForm(!showForm)
@@ -163,7 +163,7 @@ export default function ItemLinkSection({ itemId }: { itemId: string }) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search for an item..."
+              placeholder="Search for a task..."
               className="flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
             />
           </div>

@@ -107,12 +107,12 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
     <div className="border-b border-gray-800 px-6 py-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-300">
-          Sub-items{hasChildren ? ` (${children.length})` : ''}
+          Sub-tasks{hasChildren ? ` (${children.length})` : ''}
         </h3>
         <button
           onClick={handleDecompose}
           disabled={decompose.isPending}
-          title="Ask AI to break this item into 3-7 actionable sub-tasks"
+          title="Ask AI to break this task into 3-7 actionable sub-tasks"
           className="flex items-center gap-1.5 rounded-lg border border-purple-700 bg-purple-900/30 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-900/50 disabled:opacity-50"
         >
           {decompose.isPending ? (
@@ -182,7 +182,7 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
 
       {!hasChildren && !proposals && !decompose.isPending && (
         <p className="text-xs text-gray-600">
-          Click &ldquo;Break down&rdquo; to get AI-suggested sub-tasks for this item.
+          Click &ldquo;Break down&rdquo; to get AI-suggested sub-tasks for this task.
         </p>
       )}
     </div>

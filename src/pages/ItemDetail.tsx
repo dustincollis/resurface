@@ -152,7 +152,7 @@ export default function ItemDetail() {
         },
         onError: (err) => {
           console.error('Failed to update status:', err)
-          alert('Failed to update item. Check console for details.')
+          alert('Failed to update task. Check console for details.')
         },
       }
     )
@@ -366,7 +366,7 @@ export default function ItemDetail() {
             onClick={() => handleStatusChange('done', true)}
             disabled={updateItem.isPending}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-purple-500 disabled:opacity-50"
-            title="Mark this item as done and return"
+            title="Mark this task as done and return"
           >
             <Check size={14} /> {updateItem.isPending ? 'Saving...' : 'Mark Complete'}
           </button>
@@ -403,7 +403,7 @@ export default function ItemDetail() {
             <button
               onClick={handleDelete}
               className="rounded-lg border border-gray-700 p-2 text-gray-500 hover:bg-gray-800 hover:text-red-400"
-              title="Delete item permanently"
+              title="Delete task permanently"
             >
               <Trash2 size={14} />
             </button>

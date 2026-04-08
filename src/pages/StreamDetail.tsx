@@ -102,7 +102,7 @@ export default function StreamDetail() {
       <QuickAddBar defaultStreamId={id} />
 
       {itemsLoading ? (
-        <div className="mt-4 text-gray-400">Loading items...</div>
+        <div className="mt-4 text-gray-400">Loading tasks...</div>
       ) : viewMode === 'kanban' ? (
         <div className="mt-6">
           <KanbanBoard
@@ -120,7 +120,7 @@ export default function StreamDetail() {
             </div>
           ) : (
             <div className="mt-6 rounded-lg border border-dashed border-gray-700 py-8 text-center">
-              <p className="text-gray-400">No active items in this stream.</p>
+              <p className="text-gray-400">No active tasks in this stream.</p>
             </div>
           )}
 

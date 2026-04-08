@@ -62,7 +62,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
         className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
       >
         <Plus size={14} />
-        Add Item
+        Add Task
       </button>
     )
   }
@@ -78,7 +78,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           onBlur={() => { if (!text.trim()) setExpanded(false) }}
-          placeholder="Add an item... (#stream, due:date)"
+          placeholder="Add a task... (#stream, due:date)"
           className="w-64 bg-transparent text-xs text-white placeholder-gray-500 outline-none"
         />
         {text.trim() && (
@@ -108,7 +108,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Add an item... (#stream, due:date)"
+        placeholder="Add a task... (#stream, due:date)"
         className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
       />
       {text.trim() && (
