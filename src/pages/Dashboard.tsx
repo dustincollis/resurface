@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, Sparkles, Play } from 'lucide-react'
+import { Clock, Check, ChevronDown, Sparkles, Play, Zap } from 'lucide-react'
 import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
+import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
 import ItemCard from '../components/ItemCard'
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
+import EasyButtonModal from '../components/EasyButtonModal'
 import {
   getSurfaceReasons,
   getSuggestedMove,
@@ -255,6 +257,22 @@ export default function Dashboard() {
   const [now] = useState(() => Date.now())
   const { data: streams, isLoading: streamsLoading } = useStreams()
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
+  const easyButton = useEasyButton()
+  const [easyResult, setEasyResult] = useState<EasyButtonResult | null>(null)
+  const [easyOpen, setEasyOpen] = useState(false)
+
+  const handleEasyButton = () => {
+    setEasyResult(null)
+    setEasyOpen(true)
+    easyButton.mutate(undefined, {
+      onSuccess: (data) => {
+        setEasyResult(data)
+      },
+      onError: () => {
+        setEasyResult(null)
+      },
+    })
+  }
 
   const { data: activeItems, isLoading } = useItems({
     status: ['open', 'in_progress', 'waiting'],
@@ -325,7 +343,17 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          <QuickAddBar compact />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleEasyButton}
+              className="flex items-center gap-1.5 rounded-lg border border-yellow-700/50 bg-yellow-900/20 px-3 py-1.5 text-xs font-medium text-yellow-300 hover:bg-yellow-900/40"
+              title="Pick a low-effort task to knock out quickly"
+            >
+              <Zap size={14} />
+              Easy Win
+            </button>
+            <QuickAddBar compact />
+          </div>
         </div>
         {isLoading ? (
           <div className="text-sm text-gray-500">Loading...</div>
@@ -382,6 +410,14 @@ export default function Dashboard() {
           </div>
         </section>
       )}
+
+      <EasyButtonModal
+        isOpen={easyOpen}
+        onClose={() => setEasyOpen(false)}
+        result={easyResult}
+        isLoading={easyButton.isPending}
+        onRetry={handleEasyButton}
+      />
     </div>
   )
 }

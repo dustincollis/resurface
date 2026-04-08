@@ -3,66 +3,330 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 interface FileAttachment {
   name: string;
-  type: string; // mime type
-  data: string; // base64 encoded
+  type: string;
+  data: string;
 }
 
-// Build Claude content blocks from message text + file attachments
-function buildUserContent(
-  message: string,
-  attachments?: FileAttachment[]
-): unknown {
-  if (!attachments || attachments.length === 0) {
-    return message;
+// ============================================================
+// Tool definitions exposed to Claude
+// ============================================================
+
+const TOOLS = [
+  {
+    name: "list_tasks",
+    description:
+      "List the user's tasks with optional filters. Returns up to the limit. Use this when the user asks about their tasks, what's due, what's stale, what's in a stream, etc. Defaults to active tasks (open, in_progress, waiting) sorted by staleness.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["open", "in_progress", "waiting", "done", "dropped", "any"],
+          description: "Filter by status. Use 'any' to include all statuses.",
+        },
+        stream_name: {
+          type: "string",
+          description: "Filter by stream name (case-insensitive). Omit for all streams.",
+        },
+        only_overdue: {
+          type: "boolean",
+          description: "Only items past their due_date",
+        },
+        only_due_within_days: {
+          type: "integer",
+          description: "Only items due within N days from today",
+        },
+        sort_by: {
+          type: "string",
+          enum: ["staleness_score", "last_touched_at", "due_date", "created_at", "stakes"],
+          description: "Sort field",
+        },
+        limit: {
+          type: "integer",
+          description: "Max number of tasks to return (default 50, max 200)",
+        },
+      },
+    },
+  },
+  {
+    name: "get_task",
+    description:
+      "Fetch the full detail of a single task by ID, including stream, parent, source meeting, and custom fields.",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_id: {
+          type: "string",
+          description: "The task UUID",
+        },
+      },
+      required: ["task_id"],
+    },
+  },
+  {
+    name: "search_tasks",
+    description:
+      "Full-text + fuzzy search across the user's tasks and discussions. Use this when the user mentions a specific topic, person, or company.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query (2+ characters)",
+        },
+        limit: {
+          type: "integer",
+          description: "Max results (default 10)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_streams",
+    description: "List all the user's active (non-archived) streams.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "get_task_counts",
+    description:
+      "Get aggregate counts: total tasks by status, by stream, overdue, stale, etc. Use for high-level questions like 'how many tasks do I have?' or 'how am I doing?'",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
+];
+
+// ============================================================
+// Tool implementations
+// ============================================================
+
+type SupabaseAdmin = ReturnType<typeof createClient>;
+
+interface ToolContext {
+  adminClient: SupabaseAdmin;
+  userId: string;
+}
+
+async function execListTasks(
+  ctx: ToolContext,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const status = args.status as string | undefined;
+  const streamName = args.stream_name as string | undefined;
+  const onlyOverdue = args.only_overdue as boolean | undefined;
+  const onlyDueWithinDays = args.only_due_within_days as number | undefined;
+  const sortBy = (args.sort_by as string | undefined) ?? "staleness_score";
+  const limit = Math.min((args.limit as number | undefined) ?? 50, 200);
+
+  let query = ctx.adminClient
+    .from("items")
+    .select(
+      "id, title, description, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, last_touched_at, created_at, streams(name)"
+    )
+    .eq("user_id", ctx.userId);
+
+  if (status && status !== "any") {
+    query = query.eq("status", status);
+  } else if (!status) {
+    query = query.not("status", "in", '("done","dropped")');
   }
+
+  if (streamName) {
+    const { data: stream } = await ctx.adminClient
+      .from("streams")
+      .select("id")
+      .eq("user_id", ctx.userId)
+      .ilike("name", streamName)
+      .maybeSingle();
+    if (stream) {
+      query = query.eq("stream_id", stream.id);
+    } else {
+      return { tasks: [], note: `No stream named "${streamName}" found` };
+    }
+  }
+
+  if (onlyOverdue) {
+    query = query.lt("due_date", new Date().toISOString().split("T")[0]);
+  }
+  if (onlyDueWithinDays && onlyDueWithinDays > 0) {
+    const future = new Date(Date.now() + onlyDueWithinDays * 86400000)
+      .toISOString()
+      .split("T")[0];
+    query = query.lte("due_date", future).not("due_date", "is", null);
+  }
+
+  query = query.order(sortBy, { ascending: false }).limit(limit);
+
+  const { data, error } = await query;
+  if (error) return { error: error.message };
+
+  return {
+    count: data?.length ?? 0,
+    tasks: data?.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      stream: (t.streams as { name: string } | null)?.name ?? null,
+      next_action: t.next_action,
+      due_date: t.due_date,
+      stakes: t.stakes,
+      resistance: t.resistance,
+      staleness: Math.round(t.staleness_score ?? 0),
+      last_touched_at: t.last_touched_at,
+      created_at: t.created_at,
+      description: t.description ? t.description.substring(0, 200) : null,
+    })),
+  };
+}
+
+async function execGetTask(
+  ctx: ToolContext,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const taskId = args.task_id as string;
+  if (!taskId) return { error: "task_id required" };
+
+  const { data, error } = await ctx.adminClient
+    .from("items")
+    .select(
+      "*, streams(name, color, field_templates), parent:items!parent_id(id, title), source_meeting:meetings!source_meeting_id(id, title)"
+    )
+    .eq("id", taskId)
+    .eq("user_id", ctx.userId)
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!data) return { error: "Task not found" };
+
+  return data;
+}
+
+async function execSearchTasks(
+  ctx: ToolContext,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const query = args.query as string;
+  const limit = (args.limit as number | undefined) ?? 10;
+  if (!query || query.length < 2) return { error: "query must be 2+ characters" };
+
+  const { data, error } = await ctx.adminClient.rpc("search_everything", {
+    search_query: query,
+    searching_user_id: ctx.userId,
+    max_results: limit,
+  });
+
+  if (error) return { error: error.message };
+  return { count: data?.length ?? 0, results: data };
+}
+
+async function execListStreams(ctx: ToolContext): Promise<unknown> {
+  const { data, error } = await ctx.adminClient
+    .from("streams")
+    .select("id, name, color, sort_order")
+    .eq("user_id", ctx.userId)
+    .eq("is_archived", false)
+    .order("sort_order");
+
+  if (error) return { error: error.message };
+  return { count: data?.length ?? 0, streams: data };
+}
+
+async function execGetTaskCounts(ctx: ToolContext): Promise<unknown> {
+  const { data: items } = await ctx.adminClient
+    .from("items")
+    .select("status, stream_id, due_date, staleness_score, streams(name)")
+    .eq("user_id", ctx.userId);
+
+  if (!items) return { error: "Failed to fetch counts" };
+
+  const byStatus: Record<string, number> = {};
+  const byStream: Record<string, number> = {};
+  let overdueCount = 0;
+  let staleCount = 0;
+  let dueThisWeek = 0;
+
+  const now = Date.now();
+  const weekFromNow = now + 7 * 86400000;
+
+  for (const item of items) {
+    byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+    const streamName =
+      (item.streams as { name: string } | null)?.name ?? "(no stream)";
+    byStream[streamName] = (byStream[streamName] ?? 0) + 1;
+
+    if (item.due_date) {
+      const dueMs = new Date(item.due_date).getTime();
+      if (dueMs < now && !["done", "dropped"].includes(item.status)) overdueCount++;
+      if (dueMs >= now && dueMs <= weekFromNow) dueThisWeek++;
+    }
+
+    if ((item.staleness_score ?? 0) >= 60 && !["done", "dropped"].includes(item.status)) {
+      staleCount++;
+    }
+  }
+
+  return {
+    total: items.length,
+    by_status: byStatus,
+    by_stream: byStream,
+    overdue: overdueCount,
+    stale: staleCount,
+    due_this_week: dueThisWeek,
+  };
+}
+
+async function executeTool(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<unknown> {
+  try {
+    switch (name) {
+      case "list_tasks":
+        return await execListTasks(ctx, input);
+      case "get_task":
+        return await execGetTask(ctx, input);
+      case "search_tasks":
+        return await execSearchTasks(ctx, input);
+      case "list_streams":
+        return await execListStreams(ctx);
+      case "get_task_counts":
+        return await execGetTaskCounts(ctx);
+      default:
+        return { error: `Unknown tool: ${name}` };
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function buildUserContent(message: string, attachments?: FileAttachment[]): unknown {
+  if (!attachments || attachments.length === 0) return message;
 
   const content: unknown[] = [];
 
   for (const file of attachments) {
     const mimeType = file.type;
-
     if (mimeType.startsWith("image/")) {
-      // Images: send as base64 image content block
       content.push({
         type: "image",
-        source: {
-          type: "base64",
-          media_type: mimeType,
-          data: file.data,
-        },
+        source: { type: "base64", media_type: mimeType, data: file.data },
       });
     } else if (mimeType === "application/pdf") {
-      // PDFs: send as document content block
       content.push({
         type: "document",
-        source: {
-          type: "base64",
-          media_type: "application/pdf",
-          data: file.data,
-        },
+        source: { type: "base64", media_type: "application/pdf", data: file.data },
       });
-    } else if (
-      mimeType === "text/csv" ||
-      mimeType === "text/plain" ||
-      mimeType === "text/markdown" ||
-      mimeType.includes("spreadsheetml") ||
-      mimeType.includes("presentationml")
-    ) {
-      // Text-based files: decode and include as text
-      try {
-        const decoded = atob(file.data);
-        content.push({
-          type: "text",
-          text: `[File: ${file.name}]\n${decoded}`,
-        });
-      } catch {
-        content.push({
-          type: "text",
-          text: `[File: ${file.name} - could not decode content]`,
-        });
-      }
     } else {
-      // Unknown type: try to decode as text
       try {
         const decoded = atob(file.data);
         content.push({
@@ -72,19 +336,62 @@ function buildUserContent(
       } catch {
         content.push({
           type: "text",
-          text: `[File: ${file.name} - unsupported file type: ${mimeType}]`,
+          text: `[File: ${file.name} - could not decode]`,
         });
       }
     }
   }
 
-  // Add the user's text message
-  if (message) {
-    content.push({ type: "text", text: message });
-  }
-
+  if (message) content.push({ type: "text", text: message });
   return content;
 }
+
+interface ContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+interface ClaudeResponse {
+  content: ContentBlock[];
+  stop_reason: string;
+}
+
+async function callClaude(
+  messages: { role: string; content: unknown }[],
+  systemPrompt: string,
+  anthropicKey: string
+): Promise<ClaudeResponse> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      temperature: 0.4,
+      system: systemPrompt,
+      tools: TOOLS,
+      messages,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Claude API error: ${response.status} ${errText}`);
+  }
+
+  return await response.json();
+}
+
+// ============================================================
+// Main handler
+// ============================================================
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -119,7 +426,6 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Verify user from JWT
     const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
@@ -131,7 +437,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Gather context: all user's streams + open items
+    const ctx: ToolContext = { adminClient, userId: user.id };
+
+    // Pre-fetch streams (for stream_name resolution in actions)
     const { data: allStreams } = await adminClient
       .from("streams")
       .select("id, name, color")
@@ -139,178 +447,59 @@ Deno.serve(async (req) => {
       .eq("is_archived", false)
       .order("sort_order");
 
-    const { data: items } = await adminClient
-      .from("items")
-      .select(
-        "id, title, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, streams(name)"
-      )
-      .eq("user_id", user.id)
-      .not("status", "in", '("done","dropped")')
-      .order("staleness_score", { ascending: false })
-      .limit(30);
-
-    // Today's meetings
-    const today = new Date();
-    const startOfDay = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate()
-    ).toISOString();
-    const endOfDay = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate() + 1
-    ).toISOString();
-
-    const { data: meetings } = await adminClient
-      .from("meetings")
-      .select("id, title, start_time, end_time")
-      .eq("user_id", user.id)
-      .gte("start_time", startOfDay)
-      .lt("start_time", endOfDay)
-      .order("start_time");
-
-    // Search for referenced entities
-    let searchResults = null;
-    if (message && message.length > 10) {
-      const { data: results } = await adminClient.rpc("search_everything", {
-        search_query: message.substring(0, 100),
-        searching_user_id: user.id,
-        max_results: 5,
-      });
-      searchResults = results;
-    }
-
-    // Build items summary — include full UUID so AI can use it in update_item
-    const itemsSummary =
-      items
-        ?.map(
-          (i) =>
-            `- id=${i.id} | "${i.title}" | status=${i.status} | stream=${(i.streams as { name: string } | null)?.name ?? "NONE"} | staleness=${i.staleness_score?.toFixed(0) ?? 0} | stakes=${i.stakes ?? "?"} | next=${i.next_action ?? "none"}${i.due_date ? ` | due=${i.due_date}` : ""}`
-        )
-        .join("\n") ?? "No open items.";
-
-    const streamsSummary =
-      allStreams && allStreams.length > 0
-        ? allStreams.map((s) => `- "${s.name}"`).join("\n")
-        : "(none yet)";
-
-    const meetingsSummary = meetings?.length
-      ? meetings
-          .map(
-            (m) =>
-              `- "${m.title}" at ${new Date(m.start_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-          )
-          .join("\n")
-      : "No meetings today.";
-
-    const searchContext = searchResults?.length
-      ? `\nSearch results for references in the message:\n${searchResults.map((r: { title: string; result_type: string; snippet: string }) => `- [${r.result_type}] "${r.title}": ${r.snippet}`).join("\n")}`
-      : "";
-
-    // File context description
-    const fileContext =
-      attachments && attachments.length > 0
-        ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze the attached files as part of your response.`
-        : "";
-
     const userContextBlock =
       typeof user_context === "string" && user_context.length > 0
         ? `\n${user_context}\n`
         : "";
 
-    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system.
+    const fileContext =
+      attachments && attachments.length > 0
+        ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze them.`
+        : "";
+
+    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system. The user calls their work items "tasks".
 ${userContextBlock}
-CONTEXT
-=======
-Available streams (these already exist — DO NOT propose creating duplicates):
-${streamsSummary}
+TOOLS
+=====
+You have access to live database tools. ALWAYS use them when the user asks about their tasks, streams, or specific items. Do not guess from the conversation history — fetch fresh data via tools.
 
-Open items (${items?.length ?? 0} total) — note the id values, you'll need them for update_item actions:
-${itemsSummary}
+- list_tasks(status?, stream_name?, only_overdue?, only_due_within_days?, sort_by?, limit?) — list tasks with filters
+- get_task(task_id) — full detail for one task
+- search_tasks(query) — full-text + fuzzy search across tasks and discussions
+- list_streams() — list all active streams
+- get_task_counts() — aggregate counts (total, by status, by stream, overdue, stale)
 
-Today's meetings:
-${meetingsSummary}
-${searchContext}
+Use multiple tool calls if needed. For example: get_task_counts() first to understand scope, then list_tasks(stream_name: "X") to drill in.
 ${fileContext}
+ACTIONS
+=======
+After gathering data via tools, you can propose write actions in your final JSON response. Read tools execute live; write actions return as proposals (user clicks Create) or execute immediately (updates).
 
-YOUR CAPABILITIES
-=================
-When the user asks you to create items or streams, or you identify ones worth creating, propose them in the "actions" array. The user sees each proposal as a card with a "Create" button — they confirm each one. Be proactive about proposing, but the user has the final say. Update actions for existing items execute immediately since they're less risky.
+Proposals (user confirms via Create button):
+- {"action": "create_item", "title": "...", "description": "...", "stream_name": "...", "next_action": "...", "due_date": "YYYY-MM-DD or null"}
+- {"action": "create_stream", "name": "...", "color": "#RRGGBB"}
 
-You can propose:
-- New work items (tasks)
-- New streams (categories) — only when none of the existing streams fit
-- Updates to existing items (these execute immediately)
+Immediate execution:
+- {"action": "update_item", "item_id": "<full uuid>", "updates": {"status": "...", "next_action": "...", "stream_name": "...", "due_date": "...", "description": "..."}}
 
 OUTPUT FORMAT
 =============
-Your ENTIRE response MUST be a single valid JSON object — nothing else. No prose before, no prose after, no code fences, no markdown.
-
-Response shape:
+Your FINAL response (after all tool calls are done) MUST be a single valid JSON object:
 {
-  "message": "your conversational reply to the user as plain text",
-  "actions": [...]
+  "message": "your conversational reply to the user, plain text, no markdown asterisks",
+  "actions": []
 }
 
-The "message" field is what the user reads. Write it naturally, conversationally, as if texting a colleague. Plain text only — no markdown asterisks, no JSON, no code blocks. Mention what you did (e.g. "Created 5 items based on your spreadsheet").
-
-The "actions" array contains operations. Each action is an object:
-
-Propose a new item (user will confirm):
-{"action": "create_item", "title": "string", "description": "string", "stream_name": "string", "next_action": "string", "due_date": "YYYY-MM-DD or null"}
-
-Propose a new stream (user will confirm):
-{"action": "create_stream", "name": "string", "color": "#RRGGBB"}
-Suggested colors: #3B82F6 (blue), #22C55E (green), #8B5CF6 (purple), #EF4444 (red), #EAB308 (yellow), #06B6D4 (cyan), #F97316 (orange), #EC4899 (pink)
-
-Update an existing item (executes immediately — use the FULL id from the items list above):
-{"action": "update_item", "item_id": "<full uuid from items list>", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string", "stream_name": "string"}}
-
-Updatable fields in "updates":
-- status
-- next_action
-- stream_name (use the exact stream name from the streams list — server resolves to id)
-- due_date (YYYY-MM-DD or null)
-- description
-
-EXAMPLES
-========
-
-User: "What should I work on?"
-Response:
-{"message": "Based on your open items, I'd focus on these three first: the Q2 pipeline review (due today), the Datadog vendor follow-up (getting stale), and the team 1:1 prep (high stakes). The pipeline review is the most urgent.", "actions": []}
-
-User: "Create a task to call John about the contract"
-Response:
-{"message": "Here's a proposed task for you to review.", "actions": [{"action": "create_item", "title": "Call John about the contract", "description": "", "stream_name": "Business Development", "next_action": "Schedule call with John this week"}]}
-
-User: "Here's my to-do list, please add these as items"
-Response:
-{"message": "I found 5 tasks worth tracking. Each is shown below — click Create to add the ones you want.", "actions": [{"action": "create_item", "title": "...", "stream_name": "...", "next_action": "..."}, {"action": "create_item", ...}]}
-
-User: "Create streams for my main work areas based on what I'm working on"
-Response:
-{"message": "I see you're working across a few areas. Here are streams I'd suggest creating — click Create on the ones you want.", "actions": [{"action": "create_stream", "name": "Adobe Partnerships", "color": "#3B82F6"}, {"action": "create_stream", "name": "Internal Operations", "color": "#22C55E"}, {"action": "create_stream", "name": "Business Development", "color": "#8B5CF6"}]}
-
-User: "Categorize my unassigned tasks into the right streams"
-Response:
-{"message": "I assigned 4 unassigned items to streams that fit. The Adobe items went to Adobe Partnerships, the proposal work to Business Development, and the team management items to Internal Operations.", "actions": [{"action": "update_item", "item_id": "<full uuid from items list>", "updates": {"stream_name": "Adobe Partnerships"}}, {"action": "update_item", "item_id": "<full uuid>", "updates": {"stream_name": "Business Development"}}]}
-
-CRITICAL RULES FOR STREAM ASSIGNMENT
-====================================
-- When the user asks to "categorize", "assign streams to", "organize", or similar — use update_item with stream_name in the updates object. DO NOT create new streams unless none of the existing streams fit.
-- Only propose create_stream when the user explicitly asks to create new streams, OR when the existing streams clearly don't cover an item's category.
-- Use the FULL uuid from the items list for item_id, not the prefix.
-- update_item executes immediately (no user confirmation needed) since it's modifying existing data, so be confident in your assignments.
+The "message" field is what the user reads. Conversational, concise (1-3 sentences unless they ask for detail). No markdown formatting. No JSON or code in the message.
+The "actions" array is optional — only include when proposing or updating items.
 
 RULES
 =====
-- ALWAYS be conversational in the message field. Never put JSON, code, or structured data in the message text.
-- When the user gives you content to organize (spreadsheets, notes, lists), CREATE items via the actions array. Don't just describe what you would create.
-- Match stream_name to existing streams when possible. If no good match exists, omit stream_name.
-- Be concise. The message should be 1-3 sentences unless the user asks for more detail.
-- Begin your response with { and end with }. Nothing else.`;
+- ALWAYS use tools when answering questions about tasks. Don't make up data or rely on memory.
+- When categorizing tasks, use update_item with stream_name (don't create new streams unless none fit).
+- Match stream_name to existing streams when proposing items.
+- Be conversational. Never put JSON in the message text.
+- Begin your final text response with { and end with }.`;
 
     // Build messages array with history
     const messages: { role: string; content: unknown }[] = [];
@@ -324,69 +513,65 @@ RULES
       }
     }
 
-    // Build the current user message with attachments
     messages.push({
       role: "user",
-      content: buildUserContent(
-        message ?? "",
-        attachments as FileAttachment[] | undefined
-      ),
+      content: buildUserContent(message ?? "", attachments as FileAttachment[] | undefined),
     });
 
-    // Prefill assistant response with "{" to force JSON output
-    messages.push({
-      role: "assistant",
-      content: "{",
-    });
+    // Tool-use loop
+    const MAX_LOOPS = 10;
+    let loopCount = 0;
+    let finalText = "";
 
-    // Call Claude
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        temperature: 0.3,
-        system: systemPrompt,
-        messages,
-      }),
-    });
+    while (loopCount < MAX_LOOPS) {
+      loopCount++;
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("Claude API error:", errText);
-      return new Response(JSON.stringify({ error: "AI chat failed" }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      const response = await callClaude(messages, systemPrompt, anthropicKey);
+
+      // If Claude is done (or stopped for any non-tool reason), grab the text
+      if (response.stop_reason !== "tool_use") {
+        for (const block of response.content) {
+          if (block.type === "text" && block.text) {
+            finalText += block.text;
+          }
+        }
+        break;
+      }
+
+      // Append the assistant turn (with tool_use blocks)
+      messages.push({ role: "assistant", content: response.content });
+
+      // Execute each tool call and append results in a single user turn
+      const toolResults: unknown[] = [];
+      for (const block of response.content) {
+        if (block.type === "tool_use" && block.name && block.id) {
+          const result = await executeTool(block.name, block.input ?? {}, ctx);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: JSON.stringify(result),
+          });
+        }
+      }
+
+      messages.push({ role: "user", content: toolResults });
     }
 
-    const aiResponse = await response.json();
-    let rawContent = aiResponse.content?.[0]?.text ?? "";
-
-    // Prepend the "{" we prefilled (the model continues from after it)
-    if (!rawContent.trim().startsWith("{")) {
-      rawContent = "{" + rawContent;
+    if (!finalText) {
+      finalText = '{"message": "I had trouble generating a response. Try rephrasing?", "actions": []}';
     }
 
-    // Strip any code fence wrapping the model might have added
-    let cleanContent = rawContent.trim();
+    // Parse the final response as JSON
+    let cleanContent = finalText.trim();
     if (cleanContent.startsWith("```")) {
-      cleanContent = cleanContent
-        .replace(/^```(?:json)?\s*\n?/, "")
-        .replace(/\n?```\s*$/, "");
+      cleanContent = cleanContent.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
     }
 
-    // Try to extract JSON object even if there's text around it
     let parsedResponse: { message: string; actions?: unknown[] };
     try {
       parsedResponse = JSON.parse(cleanContent);
     } catch {
-      // Try to find JSON object in the text
+      // Fall back: extract JSON object from text
       const jsonMatch = cleanContent.match(/\{[\s\S]*"message"[\s\S]*\}/);
       if (jsonMatch) {
         try {
@@ -395,12 +580,13 @@ RULES
           parsedResponse = { message: cleanContent, actions: [] };
         }
       } else {
+        // No JSON at all — treat the whole text as the message
         parsedResponse = { message: cleanContent, actions: [] };
       }
     }
 
-    // Process actions: create_item and create_stream become proposals
-    // (user must confirm), update_item executes immediately
+    // Process actions: create_item and create_stream become proposals,
+    // update_item executes immediately
     const actionsTaken: Record<string, unknown>[] = [];
 
     if (parsedResponse.actions && Array.isArray(parsedResponse.actions)) {
@@ -425,47 +611,38 @@ RULES
             });
           } else if (a.action === "update_item" && a.item_id) {
             const updates = { ...(a.updates as Record<string, unknown>) };
-            if (updates) {
-              // Resolve stream_name → stream_id
-              if (typeof updates.stream_name === "string") {
-                const targetName = (updates.stream_name as string).toLowerCase();
-                const matchedStream = allStreams?.find(
-                  (s) => s.name.toLowerCase() === targetName
-                );
-                if (matchedStream) {
-                  updates.stream_id = matchedStream.id;
-                }
-                delete updates.stream_name;
-              }
-
-              // Strip any unknown/unsupported fields for safety
-              const allowedFields = new Set([
-                "status",
-                "next_action",
-                "stream_id",
-                "due_date",
-                "description",
-                "title",
-                "resistance",
-                "stakes",
-              ]);
-              for (const key of Object.keys(updates)) {
-                if (!allowedFields.has(key)) delete updates[key];
-              }
-
-              if (Object.keys(updates).length > 0) {
-                const { error } = await adminClient
-                  .from("items")
-                  .update(updates)
-                  .eq("id", a.item_id)
-                  .eq("user_id", user.id);
-
-                if (!error) {
-                  actionsTaken.push({
-                    type: "updated",
-                    item_id: a.item_id as string,
-                  });
-                }
+            if (typeof updates.stream_name === "string") {
+              const targetName = (updates.stream_name as string).toLowerCase();
+              const matchedStream = allStreams?.find(
+                (s) => s.name.toLowerCase() === targetName
+              );
+              if (matchedStream) updates.stream_id = matchedStream.id;
+              delete updates.stream_name;
+            }
+            const allowedFields = new Set([
+              "status",
+              "next_action",
+              "stream_id",
+              "due_date",
+              "description",
+              "title",
+              "resistance",
+              "stakes",
+            ]);
+            for (const key of Object.keys(updates)) {
+              if (!allowedFields.has(key)) delete updates[key];
+            }
+            if (Object.keys(updates).length > 0) {
+              const { error } = await adminClient
+                .from("items")
+                .update(updates)
+                .eq("id", a.item_id)
+                .eq("user_id", user.id);
+              if (!error) {
+                actionsTaken.push({
+                  type: "updated",
+                  item_id: a.item_id as string,
+                });
               }
             }
           }
@@ -475,21 +652,18 @@ RULES
       }
     }
 
-    // Save messages to chat_messages table
+    // Save messages to chat_messages table (sequential for distinct timestamps)
     const userMsgContent =
       attachments && attachments.length > 0
         ? `${message ?? ""}\n\n[Attached: ${(attachments as FileAttachment[]).map((f) => f.name).join(", ")}]`
         : message;
 
-    // Insert sequentially to guarantee user message has earlier created_at
-    // (single INSERT gives both rows identical timestamps; ordering then becomes arbitrary)
     await adminClient.from("chat_messages").insert({
       user_id: user.id,
       role: "user",
       content: userMsgContent,
     });
 
-    // Tiny delay to guarantee distinct timestamps
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     await adminClient.from("chat_messages").insert({
@@ -503,6 +677,7 @@ RULES
       JSON.stringify({
         message: parsedResponse.message,
         actions_taken: actionsTaken,
+        tool_calls: loopCount - 1, // for debugging — how many tool-use rounds
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -510,9 +685,14 @@ RULES
     );
   } catch (err) {
     console.error("Error:", err);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "Internal server error",
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });
