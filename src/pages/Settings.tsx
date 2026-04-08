@@ -1,21 +1,29 @@
 import { useState } from 'react'
-import { Save, RefreshCw, Download } from 'lucide-react'
+import { Save, RefreshCw, Download, CheckCircle, LogOut } from 'lucide-react'
 import { useProfile, useUpdateProfile } from '../hooks/useProfile'
 import { useSyncCalendar } from '../hooks/useMeetings'
+import {
+  getMicrosoftAuthorizeUrl,
+  useSyncMicrosoft,
+  useDisconnectMicrosoft,
+  type MicrosoftConnection,
+} from '../hooks/useMicrosoft'
 import { supabase } from '../lib/supabase'
 
 export default function Settings() {
   const { data: profile, isLoading } = useProfile()
   const updateProfile = useUpdateProfile()
   const syncCalendar = useSyncCalendar()
+  const syncMicrosoft = useSyncMicrosoft()
+  const disconnectMicrosoft = useDisconnectMicrosoft()
 
   const [displayName, setDisplayName] = useState<string | undefined>(undefined)
   const [icsUrl, setIcsUrl] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
 
-  // Derive values: use local state if user has edited, otherwise use profile data
   const displayNameValue = displayName ?? profile?.display_name ?? ''
   const icsUrlValue = icsUrl ?? (profile?.settings?.ics_feed_url as string | undefined) ?? ''
+  const microsoft = profile?.settings?.microsoft as MicrosoftConnection | undefined
 
   const handleSave = () => {
     updateProfile.mutate({
@@ -29,8 +37,13 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const handleSync = () => {
-    syncCalendar.mutate()
+  const handleConnectMicrosoft = () => {
+    const url = getMicrosoftAuthorizeUrl()
+    if (!url) {
+      alert('Microsoft client ID not configured. Add VITE_MICROSOFT_CLIENT_ID and VITE_MICROSOFT_REDIRECT_URI to your environment.')
+      return
+    }
+    window.location.href = url
   }
 
   if (isLoading) {
@@ -59,28 +72,94 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* Calendar */}
+        {/* Microsoft Outlook */}
         <section className="rounded-xl border border-gray-800 bg-gray-900 p-6">
           <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-400">
-            Calendar Integration
+            Microsoft Outlook
+          </h2>
+
+          {microsoft?.refresh_token ? (
+            <>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={16} className="text-green-400" />
+                <span className="text-sm text-white">
+                  Connected{microsoft.account_email ? ` as ${microsoft.account_email}` : ''}
+                </span>
+              </div>
+              {microsoft.last_synced_at && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Last synced: {new Date(microsoft.last_synced_at).toLocaleString()}
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => syncMicrosoft.mutate()}
+                  disabled={syncMicrosoft.isPending}
+                  className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={syncMicrosoft.isPending ? 'animate-spin' : ''} />
+                  {syncMicrosoft.isPending ? 'Syncing...' : 'Sync Now'}
+                </button>
+                <button
+                  onClick={() => disconnectMicrosoft.mutate()}
+                  disabled={disconnectMicrosoft.isPending}
+                  className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-red-400 disabled:opacity-50"
+                >
+                  <LogOut size={14} />
+                  Disconnect
+                </button>
+              </div>
+              {syncMicrosoft.isSuccess && syncMicrosoft.data && (
+                <p className="mt-2 text-xs text-green-400">
+                  Synced {syncMicrosoft.data.synced} event{syncMicrosoft.data.synced !== 1 ? 's' : ''}.
+                </p>
+              )}
+              {syncMicrosoft.isError && (
+                <p className="mt-2 text-xs text-red-400">
+                  Sync failed. You may need to reconnect.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-gray-400">
+                Connect your Microsoft account to automatically sync Outlook calendar events as discussions.
+              </p>
+              <button
+                onClick={handleConnectMicrosoft}
+                className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
+              >
+                Connect Microsoft Account
+              </button>
+              <p className="mt-2 text-xs text-gray-500">
+                If you see a permissions error, your IT admin may need to approve the Resurface app for your organization.
+              </p>
+            </>
+          )}
+        </section>
+
+        {/* ICS Calendar (fallback) */}
+        <section className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+          <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-400">
+            Other Calendar (ICS Feed)
           </h2>
           <div>
             <label className="block text-sm font-medium text-gray-300">ICS Feed URL</label>
             <p className="mt-0.5 text-xs text-gray-500">
-              Publish your calendar as an ICS feed from Outlook or Google Calendar, then paste the URL here.
+              Fallback for non-Microsoft calendars (Google Calendar, etc.). Paste a published ICS URL here.
             </p>
             <input
               type="url"
               value={icsUrlValue}
               onChange={(e) => setIcsUrl(e.target.value)}
               className="mt-2 block w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-              placeholder="https://outlook.office365.com/owa/calendar/..."
+              placeholder="https://calendar.google.com/calendar/ical/..."
             />
           </div>
 
           {icsUrlValue && (
             <button
-              onClick={handleSync}
+              onClick={() => syncCalendar.mutate()}
               disabled={syncCalendar.isPending}
               className="mt-3 flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 disabled:opacity-50"
             >

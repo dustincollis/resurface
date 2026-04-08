@@ -12,6 +12,7 @@ import ItemDetail from './pages/ItemDetail'
 import Meetings from './pages/Meetings'
 import MeetingDetail from './pages/MeetingDetail'
 import Settings from './pages/Settings'
+import MicrosoftCallback from './pages/MicrosoftCallback'
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
               <Route path="meetings" element={<Meetings />} />
               <Route path="meetings/:id" element={<MeetingDetail />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
             </Route>
           </Routes>
         </AuthProvider>
