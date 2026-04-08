@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from './useAuth'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
+import { buildUserContext, formatUserContextBlock } from '../lib/userContext'
 import type { Item, ItemStatus, CreateItemPayload, UpdateItemPayload } from '../lib/types'
 
 interface ItemFilters {
@@ -105,8 +106,9 @@ export interface ProposedSubTask {
 export function useDecomposeItem() {
   return useMutation({
     mutationFn: async (itemId: string) => {
+      const userContext = formatUserContextBlock(buildUserContext())
       const { data, error } = await supabase.functions.invoke('ai-decompose', {
-        body: { item_id: itemId },
+        body: { item_id: itemId, user_context: userContext },
       })
       if (error) throw error
       return data as { sub_tasks: ProposedSubTask[]; parent_stream_id: string | null }
@@ -139,8 +141,9 @@ export function useCreateItem() {
       })
 
       // Fire-and-forget AI classification
+      const userContext = formatUserContextBlock(buildUserContext())
       supabase.functions.invoke('ai-classify', {
-        body: { item_id: item.id },
+        body: { item_id: item.id, user_context: userContext },
       })
     },
   })

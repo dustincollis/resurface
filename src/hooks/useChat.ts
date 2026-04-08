@@ -2,6 +2,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from './useAuth'
+import { buildUserContext, formatUserContextBlock } from '../lib/userContext'
 import type { ChatMessage } from '../lib/types'
 
 export interface FileAttachment {
@@ -46,6 +47,7 @@ export function useSendMessage() {
       chatHistory: ChatMessage[]
       attachments?: FileAttachment[]
     }) => {
+      const userContext = formatUserContextBlock(buildUserContext())
       const { data, error } = await supabase.functions.invoke('ai-chat', {
         body: {
           message,
@@ -54,6 +56,7 @@ export function useSendMessage() {
             content: m.content,
           })),
           attachments,
+          user_context: userContext,
         },
       })
 

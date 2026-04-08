@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { meeting_id, transcript } = await req.json();
+    const { meeting_id, transcript, user_context } = await req.json();
     if (!meeting_id || !transcript) {
       return new Response(
         JSON.stringify({ error: "meeting_id and transcript required" }),
@@ -90,9 +90,7 @@ Deno.serve(async (req) => {
           {
             role: "user",
             content: `You are analyzing a discussion transcript or notes. The content may be in any format: raw text, timestamped notes, VTT/SRT subtitles, or structured meeting notes. Handle all formats gracefully.
-
-Today's date: ${new Date().toISOString().split('T')[0]}
-
+${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : `\nToday's date: ${new Date().toISOString().split('T')[0]}\n`}
 Extract these elements:
 
 1. Synopsis: A structured summary with these exact section headers (use "## " prefix for headers, plain prose otherwise — do NOT use **bold** or *italic* markers in the body text):

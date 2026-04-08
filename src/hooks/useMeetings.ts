@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from './useAuth'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
+import { buildUserContext, formatUserContextBlock } from '../lib/userContext'
 
 export interface Meeting {
   id: string
@@ -112,8 +113,9 @@ export function useUploadTranscript() {
       if (updateError) throw updateError
 
       // Trigger AI parsing
+      const userContext = formatUserContextBlock(buildUserContext())
       const { data, error } = await supabase.functions.invoke('ai-parse-transcript', {
-        body: { meeting_id: meetingId, transcript },
+        body: { meeting_id: meetingId, transcript, user_context: userContext },
       })
 
       if (error) {

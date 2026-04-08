@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { item_id } = await req.json();
+    const { item_id, user_context } = await req.json();
     if (!item_id) {
       return new Response(JSON.stringify({ error: "item_id required" }), {
         status: 400,
@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
           {
             role: "user",
             content: `You are classifying a task into one of the user's work streams.
-
+${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : ""}
 Available streams:
 ${streamsDescription}
 

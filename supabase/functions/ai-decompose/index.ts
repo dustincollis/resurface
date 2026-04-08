@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { item_id } = await req.json();
+    const { item_id, user_context } = await req.json();
     if (!item_id) {
       return new Response(JSON.stringify({ error: "item_id required" }), {
         status: 400,
@@ -84,8 +84,7 @@ Deno.serve(async (req) => {
           {
             role: "user",
             content: `You are breaking down a work item into concrete sub-tasks. The user wants 3-7 actionable steps that, when completed in sequence, will accomplish the parent item.
-
-Today's date: ${today}
+${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : `\nToday's date: ${today}\n`}
 
 Parent item:
 - Title: "${item.title}"

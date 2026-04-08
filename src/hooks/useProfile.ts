@@ -49,3 +49,16 @@ export function useUpdateProfile() {
     },
   })
 }
+
+export function useDistillProfile() {
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('ai-distill-profile')
+      if (error) throw error
+      return data as { distilled: string | null; fallback?: boolean }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile'] })
+    },
+  })
+}

@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { message, chat_history, attachments } = await req.json();
+    const { message, chat_history, attachments, user_context } = await req.json();
     if (!message && (!attachments || attachments.length === 0)) {
       return new Response(
         JSON.stringify({ error: "message or attachments required" }),
@@ -214,8 +214,13 @@ Deno.serve(async (req) => {
         ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze the attached files as part of your response.`
         : "";
 
-    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system.
+    const userContextBlock =
+      typeof user_context === "string" && user_context.length > 0
+        ? `\n${user_context}\n`
+        : "";
 
+    const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system.
+${userContextBlock}
 CONTEXT
 =======
 Available streams (these already exist — DO NOT propose creating duplicates):
