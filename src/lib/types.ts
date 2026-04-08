@@ -97,6 +97,7 @@ export interface ItemLink {
 export type ChatActionEntry =
   | string // legacy: plain text confirmation
   | { type: 'proposed_item'; title: string; description?: string; stream_name?: string | null; next_action?: string | null; due_date?: string | null }
+  | { type: 'proposed_stream'; name: string; color?: string | null; icon?: string | null }
   | { type: 'updated'; item_id: string }
 
 export interface ChatMessage {

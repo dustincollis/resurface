@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent } fro
 import { X, Send, MessageSquare, Loader2, Paperclip, FileText, Image as ImageIcon, Plus, Check } from 'lucide-react'
 import { useChatMessages, useSendMessage, fileToAttachment, type FileAttachment } from '../hooks/useChat'
 import { useCreateItem } from '../hooks/useItems'
-import { useStreams } from '../hooks/useStreams'
+import { useStreams, useCreateStream } from '../hooks/useStreams'
 import type { ChatActionEntry } from '../lib/types'
 
 // Clean up message content: extract just the message field from JSON if present,
@@ -141,8 +141,66 @@ function ProposedItemCard({ proposal }: ProposedItemCardProps) {
   )
 }
 
+interface ProposedStreamCardProps {
+  proposal: {
+    name: string
+    color?: string | null
+  }
+}
+
+function ProposedStreamCard({ proposal }: ProposedStreamCardProps) {
+  const createStream = useCreateStream()
+  const [created, setCreated] = useState(false)
+
+  const handleCreate = () => {
+    createStream.mutate(
+      {
+        name: proposal.name,
+        color: proposal.color ?? undefined,
+      },
+      { onSuccess: () => setCreated(true) }
+    )
+  }
+
+  const color = proposal.color ?? '#6B7280'
+
+  return (
+    <div className={`mt-2 rounded-lg border p-2 ${created ? 'border-green-800/50 bg-green-900/10' : 'border-gray-700 bg-gray-900'}`}>
+      <div className="flex items-center gap-2">
+        <div
+          className="h-3 w-3 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+        <div className="min-w-0 flex-1">
+          <p className={`text-xs font-medium ${created ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
+            {proposal.name}
+          </p>
+          <p className="text-[10px] text-gray-500">New stream</p>
+        </div>
+        {created ? (
+          <div className="flex items-center gap-1 text-[11px] text-green-400">
+            <Check size={12} /> Created
+          </div>
+        ) : (
+          <button
+            onClick={handleCreate}
+            disabled={createStream.isPending}
+            className="flex flex-shrink-0 items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+          >
+            <Plus size={10} /> Create
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function isProposedItem(action: ChatActionEntry): action is { type: 'proposed_item'; title: string; description?: string; stream_name?: string | null; next_action?: string | null; due_date?: string | null } {
   return typeof action === 'object' && action !== null && (action as { type?: string }).type === 'proposed_item'
+}
+
+function isProposedStream(action: ChatActionEntry): action is { type: 'proposed_stream'; name: string; color?: string | null; icon?: string | null } {
+  return typeof action === 'object' && action !== null && (action as { type?: string }).type === 'proposed_stream'
 }
 
 function isUpdated(action: ChatActionEntry): action is { type: 'updated'; item_id: string } {
@@ -334,6 +392,9 @@ export default function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
                       {msg.actions_taken.map((action, i) => {
                         if (isProposedItem(action)) {
                           return <ProposedItemCard key={i} proposal={action} />
+                        }
+                        if (isProposedStream(action)) {
+                          return <ProposedStreamCard key={i} proposal={action} />
                         }
                         if (isUpdated(action)) {
                           return (

@@ -222,7 +222,12 @@ ${fileContext}
 
 YOUR CAPABILITIES
 =================
-When the user asks you to create items or you identify tasks worth creating, propose them in the "actions" array. The user will see each proposed item as a card with a "Create" button — they confirm each one. Be proactive about proposing items, but the user has the final say. Update actions for existing items execute immediately since they're less risky.
+When the user asks you to create items or streams, or you identify ones worth creating, propose them in the "actions" array. The user sees each proposal as a card with a "Create" button — they confirm each one. Be proactive about proposing, but the user has the final say. Update actions for existing items execute immediately since they're less risky.
+
+You can propose:
+- New work items (tasks)
+- New streams (categories) — only when none of the existing streams fit
+- Updates to existing items (these execute immediately)
 
 OUTPUT FORMAT
 =============
@@ -241,6 +246,10 @@ The "actions" array contains operations. Each action is an object:
 Propose a new item (user will confirm):
 {"action": "create_item", "title": "string", "description": "string", "stream_name": "string", "next_action": "string", "due_date": "YYYY-MM-DD or null"}
 
+Propose a new stream (user will confirm):
+{"action": "create_stream", "name": "string", "color": "#RRGGBB"}
+Suggested colors: #3B82F6 (blue), #22C55E (green), #8B5CF6 (purple), #EF4444 (red), #EAB308 (yellow), #06B6D4 (cyan), #F97316 (orange), #EC4899 (pink)
+
 Update an existing item (executes immediately, use the 8-character ID prefix):
 {"action": "update_item", "item_id": "string", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string"}}
 
@@ -258,6 +267,10 @@ Response:
 User: "Here's my to-do list, please add these as items"
 Response:
 {"message": "I found 5 tasks worth tracking. Each is shown below — click Create to add the ones you want.", "actions": [{"action": "create_item", "title": "...", "stream_name": "...", "next_action": "..."}, {"action": "create_item", ...}]}
+
+User: "Create streams for my main work areas based on what I'm working on"
+Response:
+{"message": "I see you're working across a few areas. Here are streams I'd suggest creating — click Create on the ones you want.", "actions": [{"action": "create_stream", "name": "Adobe Partnerships", "color": "#3B82F6"}, {"action": "create_stream", "name": "Internal Operations", "color": "#22C55E"}, {"action": "create_stream", "name": "Business Development", "color": "#8B5CF6"}]}
 
 RULES
 =====
@@ -354,8 +367,8 @@ RULES
       }
     }
 
-    // Process actions: create_item becomes a proposal (user must confirm),
-    // update_item executes immediately (modifying existing data)
+    // Process actions: create_item and create_stream become proposals
+    // (user must confirm), update_item executes immediately
     const actionsTaken: Record<string, unknown>[] = [];
 
     if (parsedResponse.actions && Array.isArray(parsedResponse.actions)) {
@@ -363,7 +376,6 @@ RULES
         const a = action as Record<string, unknown>;
         try {
           if (a.action === "create_item") {
-            // Don't execute — save as proposal for user to confirm
             actionsTaken.push({
               type: "proposed_item",
               title: (a.title as string) ?? "",
@@ -371,6 +383,13 @@ RULES
               stream_name: (a.stream_name as string) ?? null,
               next_action: (a.next_action as string) ?? null,
               due_date: (a.due_date as string) ?? null,
+            });
+          } else if (a.action === "create_stream") {
+            actionsTaken.push({
+              type: "proposed_stream",
+              name: (a.name as string) ?? "",
+              color: (a.color as string) ?? null,
+              icon: (a.icon as string) ?? null,
             });
           } else if (a.action === "update_item" && a.item_id) {
             const updates = a.updates as Record<string, unknown>;
