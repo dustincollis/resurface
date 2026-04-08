@@ -27,23 +27,19 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SB_SERVICE_ROLE_KEY")!;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
-    // Create user client to verify ownership
-    const userClient = createClient(supabaseUrl, serviceRoleKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+    // Verify user from JWT
+    const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
-    } = await userClient.auth.getUser();
+    } = await adminClient.auth.getUser(token);
     if (!user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // Admin client for reads/writes
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     // Fetch the item
     const { data: item, error: itemError } = await adminClient

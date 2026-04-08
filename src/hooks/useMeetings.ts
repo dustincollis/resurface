@@ -85,17 +85,22 @@ export function useUploadTranscript() {
   return useMutation({
     mutationFn: async ({ meetingId, transcript }: { meetingId: string; transcript: string }) => {
       // Save transcript to meeting
-      await supabase
+      const { error: updateError } = await supabase
         .from('meetings')
         .update({ transcript, source: 'transcript_upload' })
         .eq('id', meetingId)
+
+      if (updateError) throw updateError
 
       // Trigger AI parsing
       const { data, error } = await supabase.functions.invoke('ai-parse-transcript', {
         body: { meeting_id: meetingId, transcript },
       })
 
-      if (error) throw error
+      if (error) {
+        console.error('ai-parse-transcript error:', error)
+        throw error
+      }
       return data
     },
     onSuccess: () => {
