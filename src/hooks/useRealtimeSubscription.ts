@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import type { QueryKey } from '@tanstack/react-query'
+
+let channelCounter = 0
 
 interface UseRealtimeOptions {
   table: string
@@ -16,9 +18,16 @@ export function useRealtimeSubscription({
   event = '*',
   queryKey,
 }: UseRealtimeOptions) {
+  const idRef = useRef<number | null>(null)
+
   useEffect(() => {
+    if (idRef.current === null) {
+      idRef.current = ++channelCounter
+    }
+    const channelName = `${table}-changes-${idRef.current}`
+
     const channel = supabase
-      .channel(`${table}-changes`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event, schema, table },
