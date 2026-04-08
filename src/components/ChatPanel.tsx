@@ -2,6 +2,38 @@ import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent } fro
 import { X, Send, MessageSquare, Loader2, Paperclip, FileText, Image as ImageIcon } from 'lucide-react'
 import { useChatMessages, useSendMessage, fileToAttachment, type FileAttachment } from '../hooks/useChat'
 
+// Clean up message content: extract just the message field from JSON if present,
+// strip code fences, and remove markdown asterisks
+function cleanMessage(content: string): string {
+  let text = content.trim()
+
+  // Strip code fences
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
+  }
+
+  // If it looks like JSON with a "message" field, extract that
+  if (text.startsWith('{') && text.includes('"message"')) {
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed.message === 'string') {
+        text = parsed.message
+      }
+    } catch {
+      // Try a regex extract as fallback
+      const match = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      if (match) {
+        text = match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+      }
+    }
+  }
+
+  // Strip leftover markdown emphasis markers
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+
+  return text
+}
+
 const ACCEPTED_TYPES = [
   'image/png', 'image/jpeg', 'image/gif', 'image/webp',
   'application/pdf',
@@ -195,7 +227,7 @@ export default function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
                       : 'bg-gray-800 text-gray-200'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <p className="whitespace-pre-wrap">{cleanMessage(msg.content)}</p>
                   {msg.actions_taken && msg.actions_taken.length > 0 && (
                     <div className="mt-2 border-t border-gray-700 pt-2">
                       {msg.actions_taken.map((action, i) => (

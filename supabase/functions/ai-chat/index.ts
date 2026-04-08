@@ -204,11 +204,6 @@ Deno.serve(async (req) => {
 
     const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system. You help the user manage their work items, understand priorities, and stay on top of everything.
 
-You can take these actions (return them in an "actions" array in your JSON response):
-- {"action": "create_item", "title": "...", "description": "...", "stream_name": "...", "next_action": "..."}
-- {"action": "update_item", "item_id": "...", "updates": {"status": "...", "next_action": "...", ...}}
-- {"action": "search", "query": "..."}
-
 Current context:
 Open items (${items?.length ?? 0} total):
 ${itemsSummary}
@@ -218,14 +213,27 @@ ${meetingsSummary}
 ${searchContext}
 ${fileContext}
 
-Rules:
-- Be conversational but concise.
-- When the user shares files (images, PDFs, spreadsheets, presentations), analyze their content thoroughly and provide useful insights.
-- When the user dumps unstructured text about a meeting or task, proactively extract items and suggest creating them.
+Behavior:
+- Be conversational, natural, and concise. Write plain prose responses.
+- DO NOT use markdown formatting like **bold** or *italic* — just write naturally.
+- When the user shares files, analyze their content and provide useful insights.
 - When asked "what should I do next?", recommend 3-5 items based on staleness, stakes, and due dates.
 - When asked to break down an item, suggest 3-5 sub-tasks.
-- Always respond in JSON format: {"message": "your response", "actions": [...]}
-- Actions are optional. Only include them when you're actually creating or updating items.`;
+- When the user dumps unstructured text about a meeting or task, proactively suggest extracting items.
+
+CRITICAL OUTPUT FORMAT:
+You MUST respond with ONLY a valid JSON object, no markdown wrapping, no code fences, no text before or after. The JSON has this exact shape:
+{
+  "message": "your conversational response as a plain string",
+  "actions": []
+}
+
+The "actions" array contains items to create or update. Only include actions when you actually need to modify data:
+- {"action": "create_item", "title": "...", "description": "...", "stream_name": "...", "next_action": "..."}
+- {"action": "update_item", "item_id": "...", "updates": {"status": "...", "next_action": "...", ...}}
+
+If you don't need to take any actions, use an empty array: "actions": []
+The user only sees the "message" field — your conversational response. They never see the JSON wrapper.`;
 
     // Build messages array with history
     const messages: { role: string; content: unknown }[] = [];
@@ -277,12 +285,30 @@ Rules:
     const aiResponse = await response.json();
     const rawContent = aiResponse.content?.[0]?.text ?? "";
 
-    // Try to parse as JSON, fall back to plain text
+    // Strip any code fence wrapping the model might have added
+    let cleanContent = rawContent.trim();
+    if (cleanContent.startsWith("```")) {
+      cleanContent = cleanContent
+        .replace(/^```(?:json)?\s*\n?/, "")
+        .replace(/\n?```\s*$/, "");
+    }
+
+    // Try to extract JSON object even if there's text around it
     let parsedResponse: { message: string; actions?: unknown[] };
     try {
-      parsedResponse = JSON.parse(rawContent);
+      parsedResponse = JSON.parse(cleanContent);
     } catch {
-      parsedResponse = { message: rawContent, actions: [] };
+      // Try to find JSON object in the text
+      const jsonMatch = cleanContent.match(/\{[\s\S]*"message"[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsedResponse = JSON.parse(jsonMatch[0]);
+        } catch {
+          parsedResponse = { message: cleanContent, actions: [] };
+        }
+      } else {
+        parsedResponse = { message: cleanContent, actions: [] };
+      }
     }
 
     // Execute actions

@@ -1,9 +1,37 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2, Check } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
 import { useCreateItem } from '../hooks/useItems'
 import type { Item } from '../lib/types'
+
+// Render inline markdown: **bold**, *italic*, `code`
+function renderInline(text: string): ReactNode {
+  const parts: ReactNode[] = []
+  let key = 0
+  // Match **bold**, *italic*, or `code`
+  const regex = /(\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    if (match[2]) {
+      parts.push(<strong key={key++} className="font-semibold text-gray-200">{match[2]}</strong>)
+    } else if (match[3]) {
+      parts.push(<em key={key++} className="italic">{match[3]}</em>)
+    } else if (match[4]) {
+      parts.push(<code key={key++} className="rounded bg-gray-800 px-1 py-0.5 text-xs text-gray-300">{match[4]}</code>)
+    }
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  return parts.length > 0 ? parts : text
+}
 
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
@@ -120,20 +148,28 @@ export default function MeetingDetail() {
                 const trimmed = line.trim()
                 if (!trimmed) return null
                 if (trimmed.startsWith('## ')) {
-                  return <h4 key={i} className="mt-4 text-xs font-semibold uppercase tracking-wider text-gray-300">{trimmed.slice(3)}</h4>
+                  return (
+                    <h4 key={i} className="mt-4 text-xs font-semibold uppercase tracking-wider text-gray-300">
+                      {renderInline(trimmed.slice(3))}
+                    </h4>
+                  )
+                }
+                if (trimmed.startsWith('# ')) {
+                  return (
+                    <h4 key={i} className="mt-4 text-sm font-semibold text-gray-200">
+                      {renderInline(trimmed.slice(2))}
+                    </h4>
+                  )
                 }
                 if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
                   return (
                     <div key={i} className="flex gap-2 pl-1">
                       <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-600" />
-                      <span>{trimmed.slice(2)}</span>
+                      <span>{renderInline(trimmed.slice(2))}</span>
                     </div>
                   )
                 }
-                if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-                  return <p key={i} className="font-medium text-gray-300">{trimmed.slice(2, -2)}</p>
-                }
-                return <p key={i}>{trimmed}</p>
+                return <p key={i}>{renderInline(trimmed)}</p>
               })}
             </div>
           </div>

@@ -95,10 +95,10 @@ Today's date: ${new Date().toISOString().split('T')[0]}
 
 Extract these elements:
 
-1. **Synopsis**: A structured markdown summary with these exact sections:
+1. Synopsis: A structured summary with these exact section headers (use "## " prefix for headers, plain prose otherwise — do NOT use **bold** or *italic* markers in the body text):
    - "## Overview" — one paragraph: who participated, what was discussed, primary outcome
-   - "## Key Topics Discussed" — bulleted list of main topics with 1-2 sentences of context for each
-   - "## Participants & Perspectives" — who said what, key positions and concerns
+   - "## Key Topics Discussed" — use "- " bullet points for main topics with 1-2 sentences of context each
+   - "## Participants & Perspectives" — who said what, key positions and concerns (use "- " bullets per participant)
    - "## Outcomes & Next Steps" — what was resolved, what remains open, what happens next
 
 2. **Action Items**: Tasks that need to be done. For each:
