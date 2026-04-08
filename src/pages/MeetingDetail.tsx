@@ -101,7 +101,7 @@ export default function MeetingDetail() {
               <Loader2 size={20} className="animate-spin text-purple-400" />
               <div>
                 <p className="text-sm font-medium text-white">Processing transcript...</p>
-                <p className="text-xs text-gray-500">AI is analyzing the discussion, extracting action items, decisions, and open questions. This may take 15-30 seconds.</p>
+                <p className="text-xs text-gray-500">Analyzing discussion content, extracting action items, decisions, and open questions. This may take 15-30 seconds.</p>
               </div>
             </div>
           </div>
@@ -230,7 +230,7 @@ export default function MeetingDetail() {
         {/* Transcript viewer */}
         {meeting.transcript && (
           <div className="border-b border-gray-800 px-6 py-4">
-            <h3 className="mb-2 text-sm font-medium text-gray-300">Transcript</h3>
+            <h3 className="mb-2 text-sm font-medium text-gray-300">Source Content</h3>
             <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded bg-gray-800 p-3 text-xs text-gray-400">
               {meeting.transcript}
             </pre>
@@ -245,14 +245,14 @@ export default function MeetingDetail() {
               className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800"
             >
               <Upload size={14} />
-              {meeting.transcript ? 'Replace Transcript' : 'Upload Transcript'}
+              {meeting.transcript ? 'Update Discussion Notes' : 'Add Discussion Notes'}
             </button>
           ) : (
             <div className="space-y-3">
               <textarea
                 value={transcriptText}
                 onChange={(e) => setTranscriptText(e.target.value)}
-                placeholder="Paste your transcript here..."
+                placeholder="Paste transcript, meeting notes, or any discussion content..."
                 rows={8}
                 className="block w-full resize-y rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
                 autoFocus
@@ -269,7 +269,7 @@ export default function MeetingDetail() {
                       Processing...
                     </>
                   ) : (
-                    'Upload & Parse'
+                    'Analyze'
                   )}
                 </button>
                 <button
@@ -284,7 +284,7 @@ export default function MeetingDetail() {
 
           {uploadTranscript.isError && (
             <p className="mt-2 text-xs text-red-400">
-              Failed to process transcript. Make sure the ai-parse-transcript edge function is deployed.
+              Failed to process. Make sure the ai-parse-transcript edge function is deployed.
             </p>
           )}
         </div>
