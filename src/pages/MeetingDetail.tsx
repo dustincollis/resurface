@@ -22,11 +22,10 @@ export default function MeetingDetail() {
 
   const handleUpload = () => {
     if (!transcriptText.trim()) return
-    uploadTranscript.mutate({
-      meetingId: meeting.id,
-      transcript: transcriptText.trim(),
-    })
-    setShowTranscriptInput(false)
+    uploadTranscript.mutate(
+      { meetingId: meeting.id, transcript: transcriptText.trim() },
+      { onSuccess: () => setShowTranscriptInput(false) }
+    )
   }
 
   const handleCreateItemFromAction = (index: number, action: { title: string; description?: string }) => {
@@ -95,14 +94,43 @@ export default function MeetingDetail() {
           )}
         </div>
 
+        {/* Processing indicator */}
+        {uploadTranscript.isPending && (
+          <div className="border-b border-gray-800 px-6 py-6">
+            <div className="flex items-center gap-3">
+              <Loader2 size={20} className="animate-spin text-purple-400" />
+              <div>
+                <p className="text-sm font-medium text-white">Processing transcript...</p>
+                <p className="text-xs text-gray-500">AI is analyzing the discussion, extracting action items, decisions, and open questions. This may take 15-30 seconds.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Discussion synopsis */}
         {meeting.transcript_summary && (
           <div className="border-b border-gray-800 px-6 py-4">
-            <h3 className="mb-2 text-sm font-medium text-gray-300">Synopsis</h3>
-            <div className="space-y-3 text-sm leading-relaxed text-gray-400">
-              {meeting.transcript_summary.split('\n\n').map((paragraph, i) => (
-                <p key={i}>{paragraph}</p>
-              ))}
+            <h3 className="mb-3 text-sm font-medium text-gray-300">Synopsis</h3>
+            <div className="synopsis space-y-3 text-sm leading-relaxed text-gray-400">
+              {meeting.transcript_summary.split('\n').map((line, i) => {
+                const trimmed = line.trim()
+                if (!trimmed) return null
+                if (trimmed.startsWith('## ')) {
+                  return <h4 key={i} className="mt-4 text-xs font-semibold uppercase tracking-wider text-gray-300">{trimmed.slice(3)}</h4>
+                }
+                if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                  return (
+                    <div key={i} className="flex gap-2 pl-1">
+                      <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-600" />
+                      <span>{trimmed.slice(2)}</span>
+                    </div>
+                  )
+                }
+                if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
+                  return <p key={i} className="font-medium text-gray-300">{trimmed.slice(2, -2)}</p>
+                }
+                return <p key={i}>{trimmed}</p>
+              })}
             </div>
           </div>
         )}

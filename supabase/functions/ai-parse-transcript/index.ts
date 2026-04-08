@@ -107,7 +107,7 @@ ${transcript.substring(0, 15000)}
 
 Respond with ONLY valid JSON (no markdown, no code fences):
 {
-  "summary": "A comprehensive synopsis of the discussion. Cover the key topics discussed, the flow of conversation, important context shared, positions taken by participants, and the overall outcome. Write 2-4 substantial paragraphs — this should serve as a complete record so someone who missed the discussion can fully understand what happened without reading the transcript.",
+  "summary": "A structured discussion synopsis using markdown formatting. Include these sections:\n\n## Overview\nOne paragraph: who participated, what the discussion was about, and the primary outcome.\n\n## Key Topics Discussed\nBulleted list of the main topics covered, with 1-2 sentences of context for each.\n\n## Participants & Perspectives\nWho said what — capture each participant's key positions, proposals, or concerns.\n\n## Outcomes & Next Steps\nWhat was resolved, what remains open, and what happens next.\n\nThis should serve as a complete record so someone who missed the discussion can fully understand what happened.",
   "action_items": [
     {"title": "...", "description": "...", "assignee": "user|name", "urgency": "high|medium|low", "related_item_ids": ["..."]}
   ],
