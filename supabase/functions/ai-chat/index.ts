@@ -1,6 +1,91 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
 
+interface FileAttachment {
+  name: string;
+  type: string; // mime type
+  data: string; // base64 encoded
+}
+
+// Build Claude content blocks from message text + file attachments
+function buildUserContent(
+  message: string,
+  attachments?: FileAttachment[]
+): unknown {
+  if (!attachments || attachments.length === 0) {
+    return message;
+  }
+
+  const content: unknown[] = [];
+
+  for (const file of attachments) {
+    const mimeType = file.type;
+
+    if (mimeType.startsWith("image/")) {
+      // Images: send as base64 image content block
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mimeType,
+          data: file.data,
+        },
+      });
+    } else if (mimeType === "application/pdf") {
+      // PDFs: send as document content block
+      content.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: file.data,
+        },
+      });
+    } else if (
+      mimeType === "text/csv" ||
+      mimeType === "text/plain" ||
+      mimeType === "text/markdown" ||
+      mimeType.includes("spreadsheetml") ||
+      mimeType.includes("presentationml")
+    ) {
+      // Text-based files: decode and include as text
+      try {
+        const decoded = atob(file.data);
+        content.push({
+          type: "text",
+          text: `[File: ${file.name}]\n${decoded}`,
+        });
+      } catch {
+        content.push({
+          type: "text",
+          text: `[File: ${file.name} - could not decode content]`,
+        });
+      }
+    } else {
+      // Unknown type: try to decode as text
+      try {
+        const decoded = atob(file.data);
+        content.push({
+          type: "text",
+          text: `[File: ${file.name}]\n${decoded}`,
+        });
+      } catch {
+        content.push({
+          type: "text",
+          text: `[File: ${file.name} - unsupported file type: ${mimeType}]`,
+        });
+      }
+    }
+  }
+
+  // Add the user's text message
+  if (message) {
+    content.push({ type: "text", text: message });
+  }
+
+  return content;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -15,16 +100,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { message, chat_history } = await req.json();
-    if (!message) {
-      return new Response(JSON.stringify({ error: "message required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const { message, chat_history, attachments } = await req.json();
+    if (!message && (!attachments || attachments.length === 0)) {
+      return new Response(
+        JSON.stringify({ error: "message or attachments required" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
+    const serviceRoleKey =
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+      Deno.env.get("SB_SERVICE_ROLE_KEY")!;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -44,7 +134,9 @@ Deno.serve(async (req) => {
     // Gather context: open items summary
     const { data: items } = await adminClient
       .from("items")
-      .select("id, title, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, streams(name)")
+      .select(
+        "id, title, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, streams(name)"
+      )
       .eq("user_id", user.id)
       .not("status", "in", '("done","dropped")')
       .order("staleness_score", { ascending: false })
@@ -52,8 +144,16 @@ Deno.serve(async (req) => {
 
     // Today's meetings
     const today = new Date();
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+    const startOfDay = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    ).toISOString();
+    const endOfDay = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() + 1
+    ).toISOString();
 
     const { data: meetings } = await adminClient
       .from("meetings")
@@ -63,9 +163,9 @@ Deno.serve(async (req) => {
       .lt("start_time", endOfDay)
       .order("start_time");
 
-    // Search for referenced entities if the message mentions specific things
+    // Search for referenced entities
     let searchResults = null;
-    if (message.length > 10) {
+    if (message && message.length > 10) {
       const { data: results } = await adminClient.rpc("search_everything", {
         search_query: message.substring(0, 100),
         searching_user_id: user.id,
@@ -75,12 +175,13 @@ Deno.serve(async (req) => {
     }
 
     // Build items summary
-    const itemsSummary = items
-      ?.map(
-        (i) =>
-          `- [${i.id.substring(0, 8)}] "${i.title}" (${i.status}, stream: ${(i.streams as { name: string } | null)?.name ?? "none"}, staleness: ${i.staleness_score?.toFixed(0) ?? 0}, stakes: ${i.stakes ?? "?"}, next: ${i.next_action ?? "none"}${i.due_date ? `, due: ${i.due_date}` : ""})`
-      )
-      .join("\n") ?? "No open items.";
+    const itemsSummary =
+      items
+        ?.map(
+          (i) =>
+            `- [${i.id.substring(0, 8)}] "${i.title}" (${i.status}, stream: ${(i.streams as { name: string } | null)?.name ?? "none"}, staleness: ${i.staleness_score?.toFixed(0) ?? 0}, stakes: ${i.stakes ?? "?"}, next: ${i.next_action ?? "none"}${i.due_date ? `, due: ${i.due_date}` : ""})`
+        )
+        .join("\n") ?? "No open items.";
 
     const meetingsSummary = meetings?.length
       ? meetings
@@ -95,7 +196,12 @@ Deno.serve(async (req) => {
       ? `\nSearch results for references in the message:\n${searchResults.map((r: { title: string; result_type: string; snippet: string }) => `- [${r.result_type}] "${r.title}": ${r.snippet}`).join("\n")}`
       : "";
 
-    // Build chat messages for Claude
+    // File context description
+    const fileContext =
+      attachments && attachments.length > 0
+        ? `\nThe user has attached ${attachments.length} file(s): ${(attachments as FileAttachment[]).map((f) => `${f.name} (${f.type})`).join(", ")}. Review and analyze the attached files as part of your response.`
+        : "";
+
     const systemPrompt = `You are the AI assistant for Resurface, a multi-stream task management system. You help the user manage their work items, understand priorities, and stay on top of everything.
 
 You can take these actions (return them in an "actions" array in your JSON response):
@@ -110,9 +216,11 @@ ${itemsSummary}
 Today's meetings:
 ${meetingsSummary}
 ${searchContext}
+${fileContext}
 
 Rules:
 - Be conversational but concise.
+- When the user shares files (images, PDFs, spreadsheets, presentations), analyze their content thoroughly and provide useful insights.
 - When the user dumps unstructured text about a meeting or task, proactively extract items and suggest creating them.
 - When asked "what should I do next?", recommend 3-5 items based on staleness, stakes, and due dates.
 - When asked to break down an item, suggest 3-5 sub-tasks.
@@ -120,7 +228,7 @@ Rules:
 - Actions are optional. Only include them when you're actually creating or updating items.`;
 
     // Build messages array with history
-    const messages: { role: string; content: string }[] = [];
+    const messages: { role: string; content: unknown }[] = [];
 
     if (chat_history && Array.isArray(chat_history)) {
       for (const msg of chat_history.slice(-20)) {
@@ -131,7 +239,14 @@ Rules:
       }
     }
 
-    messages.push({ role: "user", content: message });
+    // Build the current user message with attachments
+    messages.push({
+      role: "user",
+      content: buildUserContent(
+        message ?? "",
+        attachments as FileAttachment[] | undefined
+      ),
+    });
 
     // Call Claude
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -143,7 +258,7 @@ Rules:
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
+        max_tokens: 4096,
         temperature: 0.7,
         system: systemPrompt,
         messages,
@@ -153,13 +268,10 @@ Rules:
     if (!response.ok) {
       const errText = await response.text();
       console.error("Claude API error:", errText);
-      return new Response(
-        JSON.stringify({ error: "AI chat failed" }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+      return new Response(JSON.stringify({ error: "AI chat failed" }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const aiResponse = await response.json();
@@ -181,7 +293,6 @@ Rules:
         const a = action as Record<string, unknown>;
         try {
           if (a.action === "create_item") {
-            // Find stream by name if provided
             let streamId = null;
             if (a.stream_name && items) {
               const stream = items.find(
@@ -213,7 +324,9 @@ Rules:
                 .eq("user_id", user.id);
 
               if (!error) {
-                executedActions.push(`Updated item ${(a.item_id as string).substring(0, 8)}`);
+                executedActions.push(
+                  `Updated item ${(a.item_id as string).substring(0, 8)}`
+                );
               }
             }
           }
@@ -224,11 +337,16 @@ Rules:
     }
 
     // Save messages to chat_messages table
+    const userMsgContent =
+      attachments && attachments.length > 0
+        ? `${message ?? ""}\n\n[Attached: ${(attachments as FileAttachment[]).map((f) => f.name).join(", ")}]`
+        : message;
+
     await adminClient.from("chat_messages").insert([
       {
         user_id: user.id,
         role: "user",
-        content: message,
+        content: userMsgContent,
       },
       {
         user_id: user.id,
