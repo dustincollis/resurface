@@ -95,11 +95,15 @@ export default function MeetingDetail() {
           )}
         </div>
 
-        {/* Transcript summary */}
+        {/* Discussion synopsis */}
         {meeting.transcript_summary && (
           <div className="border-b border-gray-800 px-6 py-4">
-            <h3 className="mb-2 text-sm font-medium text-gray-300">Summary</h3>
-            <p className="text-sm text-gray-400">{meeting.transcript_summary}</p>
+            <h3 className="mb-2 text-sm font-medium text-gray-300">Synopsis</h3>
+            <div className="space-y-3 text-sm leading-relaxed text-gray-400">
+              {meeting.transcript_summary.split('\n\n').map((paragraph, i) => (
+                <p key={i}>{paragraph}</p>
+              ))}
+            </div>
           </div>
         )}
 

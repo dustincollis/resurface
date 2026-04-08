@@ -107,7 +107,7 @@ ${transcript.substring(0, 15000)}
 
 Respond with ONLY valid JSON (no markdown, no code fences):
 {
-  "summary": "2-3 sentence meeting summary",
+  "summary": "A comprehensive synopsis of the discussion. Cover the key topics discussed, the flow of conversation, important context shared, positions taken by participants, and the overall outcome. Write 2-4 substantial paragraphs — this should serve as a complete record so someone who missed the discussion can fully understand what happened without reading the transcript.",
   "action_items": [
     {"title": "...", "description": "...", "assignee": "user|name", "urgency": "high|medium|low", "related_item_ids": ["..."]}
   ],
