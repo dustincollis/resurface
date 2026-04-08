@@ -66,11 +66,11 @@ export function useItem(id: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('items')
-        .select('*, streams(*)')
+        .select('*, streams(*), source_meeting:meetings!source_meeting_id(id, title)')
         .eq('id', id)
         .single()
       if (error) throw error
-      return data as Item
+      return data as Item & { source_meeting?: { id: string; title: string } | null }
     },
     enabled: !!id,
   })

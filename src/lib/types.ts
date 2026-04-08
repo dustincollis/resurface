@@ -74,6 +74,7 @@ export interface CreateItemPayload {
   due_date?: string | null
   custom_fields?: Record<string, unknown>
   parent_id?: string | null
+  source_meeting_id?: string | null
 }
 
 export interface UpdateItemPayload extends Partial<CreateItemPayload> {

@@ -27,9 +27,13 @@ export default function MeetingDetail() {
   }
 
   const handleCreateItemFromAction = (action: { title: string; description?: string }) => {
+    const desc = action.description
+      ? `${action.description}\n\nFrom meeting: ${meeting.title}`
+      : `From meeting: ${meeting.title}`
     createItem.mutate({
       title: action.title,
-      description: action.description ?? '',
+      description: desc,
+      source_meeting_id: meeting.id,
     })
   }
 

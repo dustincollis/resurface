@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
@@ -114,6 +114,7 @@ export default function ItemDetail() {
   const staleness = stalenessLabel(item.staleness_score)
   const due = formatDueDate(item.due_date)
   const streamColor = item.streams?.color ?? '#6B7280'
+  const sourceMeeting = (item as { source_meeting?: { id: string; title: string } | null }).source_meeting
 
   const handleStatusChange = (status: ItemStatus) => {
     const completed_at = (status === 'done' || status === 'dropped')
@@ -200,6 +201,18 @@ export default function ItemDetail() {
                 {due.text}
               </div>
             </div>
+            {sourceMeeting && (
+              <div>
+                <span className="text-gray-500">From meeting</span>
+                <button
+                  onClick={() => navigate(`/meetings/${sourceMeeting.id}`)}
+                  className="mt-0.5 flex items-center gap-1 text-purple-400 hover:text-purple-300"
+                >
+                  <Calendar size={11} />
+                  {sourceMeeting.title}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
