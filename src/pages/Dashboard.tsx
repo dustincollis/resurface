@@ -1,23 +1,106 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Calendar } from 'lucide-react'
 import { useItems } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import ItemCard from '../components/ItemCard'
+import StatusBadge from '../components/StatusBadge'
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
 import { computePriority, priorityReason } from '../lib/priorityScore'
 import type { Item } from '../lib/types'
 
+function stalenessColor(score: number): string {
+  if (score < 20) return 'bg-green-500'
+  if (score < 40) return 'bg-yellow-500'
+  if (score < 60) return 'bg-orange-500'
+  return 'bg-red-500'
+}
+
+function formatDueDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Tomorrow'
+  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`
+  if (diffDays <= 7) return `${diffDays}d`
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 function FocusCard({ item, rank }: { item: Item; rank: number }) {
+  const navigate = useNavigate()
+  const streamColor = item.streams?.color ?? '#6B7280'
+  const isDue = item.due_date && new Date(item.due_date) <= new Date()
+
   return (
-    <div className="flex items-start gap-3">
-      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-purple-900/50 text-xs font-medium text-purple-300">
-        {rank}
-      </span>
-      <div className="flex-1">
-        <ItemCard item={item} />
-        <p className="mt-1 pl-1 text-xs text-gray-600">{priorityReason(item)}</p>
+    <button
+      onClick={() => navigate(`/items/${item.id}`)}
+      className="flex h-full flex-col rounded-xl border border-gray-800 bg-gray-900 p-4 text-left transition-colors hover:border-gray-700"
+    >
+      {/* Header: rank + stream */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-900/50 text-xs font-medium text-purple-300">
+            {rank}
+          </span>
+          {item.streams ? (
+            <span
+              className="rounded px-1.5 py-0.5 text-xs"
+              style={{
+                backgroundColor: `${streamColor}20`,
+                color: streamColor,
+              }}
+            >
+              {item.streams.name}
+            </span>
+          ) : (
+            <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500">
+              no stream
+            </span>
+          )}
+        </div>
+        <StatusBadge status={item.status} />
       </div>
-    </div>
+
+      {/* Title (wraps) */}
+      <h3 className="text-sm font-medium leading-snug text-white">
+        {item.title}
+      </h3>
+
+      {/* Next action (wraps, up to 2 lines) */}
+      {item.next_action && (
+        <p className="mt-2 line-clamp-2 text-xs text-gray-500">
+          Next: {item.next_action}
+        </p>
+      )}
+
+      {/* Spacer to push footer down */}
+      <div className="flex-1" />
+
+      {/* Footer: due date + staleness + reason */}
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          {item.due_date ? (
+            <span className={`flex items-center gap-1 text-xs ${isDue ? 'text-red-400' : 'text-gray-500'}`}>
+              <Calendar size={11} />
+              {formatDueDate(item.due_date)}
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="h-1 w-12 overflow-hidden rounded-full bg-gray-800">
+            <div
+              className={`h-full rounded-full ${stalenessColor(item.staleness_score)} ${
+                item.staleness_score >= 60 ? 'animate-pulse' : ''
+              }`}
+              style={{ width: `${Math.min(item.staleness_score, 100)}%` }}
+            />
+          </div>
+        </div>
+        <p className="text-xs italic text-gray-600">{priorityReason(item)}</p>
+      </div>
+    </button>
   )
 }
 
@@ -36,17 +119,15 @@ export default function Dashboard() {
     limit: 5,
   })
 
-  // Today's Focus: top 5 by composite priority score
   const focusItems = useMemo(() => {
     if (!activeItems) return []
     return [...activeItems]
       .map((item) => ({ item, score: computePriority(item) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
+      .slice(0, 6)
       .map((x) => x.item)
   }, [activeItems])
 
-  // Due soon: within 7 days
   const dueSoonItems = useMemo(() => {
     if (!activeItems) return []
     const weekFromNow = new Date(now + 7 * 24 * 60 * 60 * 1000)
@@ -55,16 +136,17 @@ export default function Dashboard() {
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
   }, [activeItems, now])
 
-  // Show onboarding if no streams exist
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <h1 className="mb-6 text-2xl font-semibold text-white">Dashboard</h1>
 
-      <QuickAddBar />
+      <div className="max-w-3xl">
+        <QuickAddBar />
+      </div>
 
       {/* Today's Focus */}
       <section className="mt-8">
@@ -74,7 +156,7 @@ export default function Dashboard() {
         {isLoading ? (
           <div className="text-sm text-gray-500">Loading...</div>
         ) : focusItems.length > 0 ? (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {focusItems.map((item, i) => (
               <FocusCard key={item.id} item={item} rank={i + 1} />
             ))}
@@ -88,7 +170,7 @@ export default function Dashboard() {
 
       {/* Due Soon */}
       {dueSoonItems.length > 0 && (
-        <section className="mt-8">
+        <section className="mt-8 max-w-3xl">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Due Soon
           </h2>
@@ -102,7 +184,7 @@ export default function Dashboard() {
 
       {/* Recently Touched */}
       {recentItems && recentItems.length > 0 && (
-        <section className="mt-8">
+        <section className="mt-8 max-w-3xl">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Recently Touched
           </h2>
