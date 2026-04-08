@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Plus, X } from 'lucide-react'
 import { useCreateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
@@ -10,6 +11,7 @@ interface QuickAddBarProps {
 }
 
 export default function QuickAddBar({ defaultStreamId, compact = false }: QuickAddBarProps) {
+  const navigate = useNavigate()
   const [text, setText] = useState('')
   const [expanded, setExpanded] = useState(!compact)
   const { data: streams } = useStreams()
@@ -26,11 +28,18 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
     if (!text.trim()) return
 
     const parsed = parseQuickAdd(text, streams ?? [])
-    createItem.mutate({
-      title: parsed.title,
-      stream_id: parsed.stream_id ?? defaultStreamId ?? null,
-      due_date: parsed.due_date ?? null,
-    })
+    createItem.mutate(
+      {
+        title: parsed.title,
+        stream_id: parsed.stream_id ?? defaultStreamId ?? null,
+        due_date: parsed.due_date ?? null,
+      },
+      {
+        onSuccess: (newItem) => {
+          navigate(`/items/${newItem.id}`)
+        },
+      }
+    )
     setText('')
     if (compact) setExpanded(false)
   }
