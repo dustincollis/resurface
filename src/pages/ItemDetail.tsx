@@ -6,6 +6,7 @@ import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
 import DecomposeSection from '../components/DecomposeSection'
+import { effectiveStalenessLevel, stalenessPillClass } from '../lib/priorityScore'
 import type { ItemStatus } from '../lib/types'
 
 const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
@@ -16,12 +17,6 @@ const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
   { value: 'dropped', label: 'Dropped' },
 ]
 
-function stalenessLabel(score: number): { text: string; className: string } {
-  if (score < 20) return { text: 'fresh', className: 'bg-green-900/50 text-green-300' }
-  if (score < 40) return { text: 'aging', className: 'bg-yellow-900/50 text-yellow-300' }
-  if (score < 60) return { text: 'stale', className: 'bg-orange-900/50 text-orange-300' }
-  return { text: 'critical', className: 'bg-red-900/50 text-red-300' }
-}
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -55,7 +50,7 @@ function DotRating({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-500">{label}</span>
+      <span className="text-xs font-medium text-gray-300">{label}</span>
       <div className="flex gap-1.5">
         {Array.from({ length: max }, (_, i) => (
           <button
@@ -115,7 +110,8 @@ export default function ItemDetail() {
     return <div className="text-gray-400">Loading...</div>
   }
 
-  const staleness = stalenessLabel(item.staleness_score)
+  const stalenessLevel = effectiveStalenessLevel(item)
+  const stalenessClass = stalenessPillClass(item)
   const due = formatDueDate(item.due_date)
   const streamColor = item.streams?.color ?? '#6B7280'
   const sourceMeeting = (item as { source_meeting?: { id: string; title: string } | null }).source_meeting
@@ -175,49 +171,60 @@ export default function ItemDetail() {
                 ))}
               </select>
             </div>
-            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${staleness.className}`}>
-              {staleness.text}
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${stalenessClass}`}
+              title={
+                stalenessLevel === 'critical'
+                  ? 'Needs immediate attention'
+                  : stalenessLevel === 'stale'
+                  ? 'Getting stale — review soon'
+                  : stalenessLevel === 'aging'
+                  ? 'Cooling down'
+                  : 'Recently touched'
+              }
+            >
+              {stalenessLevel}
             </span>
           </div>
 
-          <div className="mt-3">
+          <div className="mt-4">
             <InlineEditable
               value={item.title}
               onSave={(title) => updateItem.mutate({ id: item.id, title })}
               as="h1"
-              className="text-xl font-semibold text-white"
+              className="text-2xl font-bold leading-tight text-white"
             />
           </div>
 
-          <div className="mt-2">
+          <div className="mt-3">
             <InlineEditable
               value={item.description}
               onSave={(description) => updateItem.mutate({ id: item.id, description })}
               as="p"
-              className="text-sm text-gray-400"
+              className="text-sm leading-relaxed text-gray-400"
               placeholder="Add a description..."
               multiline
             />
           </div>
 
-          <div className="mt-4 flex gap-6 text-xs">
+          <div className="mt-5 flex gap-6 text-xs">
             <div>
-              <span className="text-gray-500">Created</span>
-              <div className="mt-0.5 text-gray-300">{formatDate(item.created_at)}</div>
+              <span className="text-gray-400">Created</span>
+              <div className="mt-0.5 text-gray-200">{formatDate(item.created_at)}</div>
             </div>
             <div>
-              <span className="text-gray-500">Last touched</span>
-              <div className="mt-0.5 text-gray-300">{formatDate(item.last_touched_at)}</div>
+              <span className="text-gray-400">Last touched</span>
+              <div className="mt-0.5 text-gray-200">{formatDate(item.last_touched_at)}</div>
             </div>
             <div>
-              <span className="text-gray-500">Due</span>
-              <div className={`mt-0.5 ${due.urgent ? 'font-medium text-red-400' : 'text-gray-300'}`}>
+              <span className="text-gray-400">Due</span>
+              <div className={`mt-0.5 ${due.urgent ? 'font-semibold text-red-400' : 'text-gray-200'}`}>
                 {due.text}
               </div>
             </div>
             {sourceMeeting && (
               <div>
-                <span className="text-gray-500">From discussion</span>
+                <span className="text-gray-400">From discussion</span>
                 <button
                   onClick={() => navigate(`/meetings/${sourceMeeting.id}`)}
                   className="mt-0.5 flex items-center gap-1 text-purple-400 hover:text-purple-300"
@@ -229,7 +236,7 @@ export default function ItemDetail() {
             )}
             {parent && (
               <div>
-                <span className="text-gray-500">Parent</span>
+                <span className="text-gray-400">Parent</span>
                 <button
                   onClick={() => navigate(`/items/${parent.id}`)}
                   className="mt-0.5 flex items-center gap-1 text-purple-400 hover:text-purple-300"
@@ -299,46 +306,59 @@ export default function ItemDetail() {
           />
         </div>
 
-        {/* Action bar */}
-        <div className="flex items-center gap-3 px-6 py-4">
-          <button
-            onClick={() => touchItem.mutate(item.id)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-700 py-2 text-sm text-gray-300 hover:bg-gray-800"
-          >
-            <Clock size={14} /> Touch +1d
-          </button>
+        {/* Sentiment ratings (separate section, not in action bar) */}
+        <div className="border-b border-gray-800 px-6 py-4">
+          <h3 className="mb-3 text-sm font-medium text-gray-300">How does this feel?</h3>
+          <div className="flex items-center gap-8">
+            <DotRating
+              value={item.resistance}
+              onChange={(resistance) => updateItem.mutate({ id: item.id, resistance })}
+              label="Resist"
+            />
+            <DotRating
+              value={item.stakes}
+              onChange={(stakes) => updateItem.mutate({ id: item.id, stakes })}
+              label="Stakes"
+            />
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Resist: how much you dread doing this. Stakes: cost of letting it slip.
+          </p>
+        </div>
 
-          <DotRating
-            value={item.resistance}
-            onChange={(resistance) => updateItem.mutate({ id: item.id, resistance })}
-            label="Resist"
-          />
-
-          <DotRating
-            value={item.stakes}
-            onChange={(stakes) => updateItem.mutate({ id: item.id, stakes })}
-            label="Stakes"
-          />
-
+        {/* Action bar — Complete is the dominant action */}
+        <div className="px-6 py-4">
           <button
             onClick={() => handleStatusChange('done')}
-            className="rounded-lg border border-green-800 px-3 py-2 text-sm text-green-400 hover:bg-green-900/30"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-purple-500"
+            title="Mark this item as done"
           >
-            Complete
+            <Clock size={14} /> Mark Complete
           </button>
-          <button
-            onClick={() => handleStatusChange('dropped')}
-            className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:bg-gray-800"
-          >
-            Drop
-          </button>
-          <button
-            onClick={handleDelete}
-            className="rounded-lg border border-gray-700 p-2 text-gray-500 hover:bg-gray-800 hover:text-red-400"
-            title="Delete item"
-          >
-            <Trash2 size={16} />
-          </button>
+
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={() => touchItem.mutate(item.id)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-700 py-2 text-xs text-gray-300 hover:bg-gray-800"
+              title="Bump 'last touched' to now so it stops getting stale"
+            >
+              <Clock size={12} /> Touch +1d
+            </button>
+            <button
+              onClick={() => handleStatusChange('dropped')}
+              className="flex flex-1 items-center justify-center rounded-lg border border-gray-700 py-2 text-xs text-gray-400 hover:bg-gray-800"
+              title="Mark as not pursuing — won't appear in active lists"
+            >
+              Drop
+            </button>
+            <button
+              onClick={handleDelete}
+              className="rounded-lg border border-gray-700 p-2 text-gray-500 hover:bg-gray-800 hover:text-red-400"
+              title="Delete item permanently"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         </div>
       </div>
 

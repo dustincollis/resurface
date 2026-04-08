@@ -131,7 +131,7 @@ function ProposedItemCard({ proposal }: ProposedItemCardProps) {
           <button
             onClick={handleCreate}
             disabled={createItem.isPending}
-            className="flex flex-shrink-0 items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+            className="flex flex-shrink-0 items-center gap-1 rounded border border-purple-800/60 bg-purple-900/30 px-2 py-1 text-[11px] font-medium text-purple-200 hover:bg-purple-900/50 disabled:opacity-50"
           >
             <Plus size={10} /> Create
           </button>
@@ -185,7 +185,7 @@ function ProposedStreamCard({ proposal }: ProposedStreamCardProps) {
           <button
             onClick={handleCreate}
             disabled={createStream.isPending}
-            className="flex flex-shrink-0 items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+            className="flex flex-shrink-0 items-center gap-1 rounded border border-purple-800/60 bg-purple-900/30 px-2 py-1 text-[11px] font-medium text-purple-200 hover:bg-purple-900/50 disabled:opacity-50"
           >
             <Plus size={10} /> Create
           </button>
@@ -325,7 +325,7 @@ export default function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
 
   return (
     <div
-      className="fixed inset-y-0 right-0 z-40 flex w-96 flex-col border-l border-gray-800 bg-gray-900 shadow-2xl"
+      className="flex w-[340px] flex-shrink-0 flex-col border-l border-gray-800 bg-gray-900"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
@@ -382,7 +382,7 @@ export default function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                     msg.role === 'user'
-                      ? 'bg-purple-600 text-white'
+                      ? 'bg-purple-900/40 text-purple-100 border border-purple-800/50'
                       : 'bg-gray-800 text-gray-200'
                   }`}
                 >

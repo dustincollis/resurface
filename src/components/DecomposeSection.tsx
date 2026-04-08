@@ -112,6 +112,7 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
         <button
           onClick={handleDecompose}
           disabled={decompose.isPending}
+          title="Ask AI to break this item into 3-7 actionable sub-tasks"
           className="flex items-center gap-1.5 rounded-lg border border-purple-700 bg-purple-900/30 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-900/50 disabled:opacity-50"
         >
           {decompose.isPending ? (

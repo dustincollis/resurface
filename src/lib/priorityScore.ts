@@ -29,6 +29,48 @@ export function computePriority(item: Item): number {
   return stalenessComponent + stakesComponent + resistanceComponent + dueComponent
 }
 
+// Effective staleness label that takes due date into account.
+// An overdue item is always "critical" regardless of staleness_score.
+// An item due within 24h is at least "stale".
+export type StalenessLevel = 'fresh' | 'aging' | 'stale' | 'critical'
+
+export function effectiveStalenessLevel(item: Item): StalenessLevel {
+  if (item.due_date) {
+    const ms = new Date(item.due_date).getTime() - Date.now()
+    const hoursUntil = ms / (1000 * 60 * 60)
+    if (hoursUntil < 0) return 'critical'
+    if (hoursUntil < 24) return 'critical'
+    if (hoursUntil < 72) return 'stale'
+  }
+  const score = item.staleness_score ?? 0
+  if (score < 20) return 'fresh'
+  if (score < 40) return 'aging'
+  if (score < 60) return 'stale'
+  return 'critical'
+}
+
+const STALENESS_BG: Record<StalenessLevel, string> = {
+  fresh: 'bg-green-500',
+  aging: 'bg-yellow-500',
+  stale: 'bg-orange-500',
+  critical: 'bg-red-500',
+}
+
+const STALENESS_PILL: Record<StalenessLevel, string> = {
+  fresh: 'bg-green-900/50 text-green-300',
+  aging: 'bg-yellow-900/50 text-yellow-300',
+  stale: 'bg-orange-900/50 text-orange-300',
+  critical: 'bg-red-900/50 text-red-300',
+}
+
+export function stalenessFillClass(item: Item): string {
+  return STALENESS_BG[effectiveStalenessLevel(item)]
+}
+
+export function stalenessPillClass(item: Item): string {
+  return STALENESS_PILL[effectiveStalenessLevel(item)]
+}
+
 export function priorityReason(item: Item): string {
   const reasons: string[] = []
 

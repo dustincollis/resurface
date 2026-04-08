@@ -130,7 +130,7 @@ export default function Layout() {
             onClick={() => setChatOpen(!chatOpen)}
             className={`rounded-lg p-2 transition-colors ${
               chatOpen
-                ? 'bg-purple-600 text-white'
+                ? 'bg-purple-900/40 text-purple-300 border border-purple-800/50'
                 : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
             }`}
             title="AI Chat"
@@ -145,8 +145,10 @@ export default function Layout() {
         </main>
       </div>
 
-      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* Chat panel — flex sibling, pushes content when open */}
       <ChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
 }

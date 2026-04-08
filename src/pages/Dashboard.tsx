@@ -7,15 +7,8 @@ import ItemCard from '../components/ItemCard'
 import StatusBadge from '../components/StatusBadge'
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
-import { computePriority, priorityReason } from '../lib/priorityScore'
+import { computePriority, priorityReason, effectiveStalenessLevel, stalenessFillClass } from '../lib/priorityScore'
 import type { Item } from '../lib/types'
-
-function stalenessColor(score: number): string {
-  if (score < 20) return 'bg-green-500'
-  if (score < 40) return 'bg-yellow-500'
-  if (score < 60) return 'bg-orange-500'
-  return 'bg-red-500'
-}
 
 function formatDueDate(dateStr: string): string {
   const date = new Date(dateStr)
@@ -32,21 +25,26 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
   const navigate = useNavigate()
   const streamColor = item.streams?.color ?? '#6B7280'
   const isDue = item.due_date && new Date(item.due_date) <= new Date()
+  const level = effectiveStalenessLevel(item)
+  const fillWidth = Math.min(
+    Math.max(item.staleness_score ?? 0, level === 'critical' ? 90 : level === 'stale' ? 60 : 0),
+    100
+  )
 
   return (
     <button
       onClick={() => navigate(`/items/${item.id}`)}
-      className="flex w-full flex-col rounded-xl border border-gray-800 bg-gray-900 p-4 text-left transition-colors hover:border-gray-700"
+      className="flex w-full flex-col rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
     >
       {/* Header: rank + stream */}
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-900/50 text-xs font-medium text-purple-300">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-900/50 text-[11px] font-medium text-purple-300">
             {rank}
           </span>
           {item.streams ? (
             <span
-              className="rounded px-1.5 py-0.5 text-xs"
+              className="rounded px-1.5 py-0.5 text-[11px]"
               style={{
                 backgroundColor: `${streamColor}20`,
                 color: streamColor,
@@ -55,7 +53,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               {item.streams.name}
             </span>
           ) : (
-            <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500">
+            <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[11px] text-gray-400">
               no stream
             </span>
           )}
@@ -63,42 +61,42 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
         <StatusBadge status={item.status} />
       </div>
 
-      {/* Title (wraps) */}
-      <h3 className="text-sm font-medium leading-snug text-white">
+      {/* Title (wraps, dominant) */}
+      <h3 className="text-base font-semibold leading-snug text-white">
         {item.title}
       </h3>
 
       {/* Next action (wraps, up to 2 lines) */}
       {item.next_action && (
-        <p className="mt-2 line-clamp-2 text-xs text-gray-500">
+        <p className="mt-1.5 line-clamp-2 text-xs text-gray-400">
           Next: {item.next_action}
         </p>
       )}
 
-      {/* Spacer to push footer down */}
-      <div className="flex-1" />
-
       {/* Footer: due date + staleness + reason */}
-      <div className="mt-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          {item.due_date ? (
-            <span className={`flex items-center gap-1 text-xs ${isDue ? 'text-red-400' : 'text-gray-500'}`}>
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-800/60 pt-2">
+        <div className="flex items-center gap-3">
+          {item.due_date && (
+            <span className={`flex items-center gap-1 text-xs ${isDue ? 'font-medium text-red-400' : 'text-gray-400'}`}>
               <Calendar size={11} />
               {formatDueDate(item.due_date)}
             </span>
-          ) : (
-            <span />
           )}
-          <div className="h-1 w-12 overflow-hidden rounded-full bg-gray-800">
-            <div
-              className={`h-full rounded-full ${stalenessColor(item.staleness_score)} ${
-                item.staleness_score >= 60 ? 'animate-pulse' : ''
-              }`}
-              style={{ width: `${Math.min(item.staleness_score, 100)}%` }}
-            />
-          </div>
+          <span className="text-[11px] italic text-gray-500" title={`Priority reason: ${priorityReason(item)}`}>
+            {priorityReason(item)}
+          </span>
         </div>
-        <p className="text-xs italic text-gray-600">{priorityReason(item)}</p>
+        <div
+          className="h-1 w-12 flex-shrink-0 overflow-hidden rounded-full bg-gray-800"
+          title={`Attention level: ${level}`}
+        >
+          <div
+            className={`h-full rounded-full ${stalenessFillClass(item)} ${
+              level === 'critical' ? 'animate-pulse' : ''
+            }`}
+            style={{ width: `${fillWidth}%` }}
+          />
+        </div>
       </div>
     </button>
   )

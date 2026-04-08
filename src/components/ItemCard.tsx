@@ -1,21 +1,8 @@
 import { useNavigate } from 'react-router-dom'
 import { Calendar } from 'lucide-react'
 import StatusBadge from './StatusBadge'
+import { effectiveStalenessLevel, stalenessFillClass } from '../lib/priorityScore'
 import type { Item } from '../lib/types'
-
-function stalenessColor(score: number): string {
-  if (score < 20) return 'bg-green-500'
-  if (score < 40) return 'bg-yellow-500'
-  if (score < 60) return 'bg-orange-500'
-  return 'bg-red-500'
-}
-
-function stalenessLabel(score: number): string {
-  if (score < 20) return 'fresh'
-  if (score < 40) return 'aging'
-  if (score < 60) return 'stale'
-  return 'critical'
-}
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr)
@@ -35,6 +22,8 @@ export default function ItemCard({ item }: { item: Item }) {
   const navigate = useNavigate()
   const streamColor = item.streams?.color ?? '#6B7280'
   const isDue = item.due_date && new Date(item.due_date) <= new Date()
+  const level = effectiveStalenessLevel(item)
+  const fillWidth = Math.min(Math.max(item.staleness_score ?? 0, level === 'critical' ? 90 : level === 'stale' ? 60 : 0), 100)
 
   return (
     <button
@@ -48,7 +37,7 @@ export default function ItemCard({ item }: { item: Item }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium text-white">{item.title}</span>
+          <span className="truncate text-sm font-semibold text-white">{item.title}</span>
           {item.streams ? (
             <span
               className="flex-shrink-0 rounded px-1.5 py-0.5 text-xs"
@@ -60,20 +49,20 @@ export default function ItemCard({ item }: { item: Item }) {
               {item.streams.name}
             </span>
           ) : (
-            <span className="flex-shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500">
+            <span className="flex-shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-400">
               no stream
             </span>
           )}
         </div>
         {item.next_action && (
-          <div className="mt-0.5 truncate text-xs text-gray-500">
+          <div className="mt-0.5 truncate text-xs text-gray-400">
             Next: {item.next_action}
           </div>
         )}
       </div>
 
       {item.due_date && (
-        <div className={`flex items-center gap-1 text-xs ${isDue ? 'text-red-400' : 'text-gray-500'}`}>
+        <div className={`flex items-center gap-1 text-xs ${isDue ? 'text-red-400' : 'text-gray-400'}`}>
           <Calendar size={12} />
           {formatDate(item.due_date)}
         </div>
@@ -82,13 +71,13 @@ export default function ItemCard({ item }: { item: Item }) {
       {/* Staleness heat bar */}
       <div
         className="h-1 w-10 flex-shrink-0 overflow-hidden rounded-full bg-gray-800"
-        title={`Staleness: ${item.staleness_score.toFixed(0)} (${stalenessLabel(item.staleness_score)})`}
+        title={`Attention level: ${level}`}
       >
         <div
-          className={`h-full rounded-full ${stalenessColor(item.staleness_score)} ${
-            item.staleness_score >= 60 ? 'animate-pulse' : ''
+          className={`h-full rounded-full ${stalenessFillClass(item)} ${
+            level === 'critical' ? 'animate-pulse' : ''
           }`}
-          style={{ width: `${Math.min(item.staleness_score, 100)}%` }}
+          style={{ width: `${fillWidth}%` }}
         />
       </div>
 
