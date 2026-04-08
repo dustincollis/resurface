@@ -96,6 +96,29 @@ export function useChildItems(parentId: string) {
   })
 }
 
+export function useUncategorizedItems() {
+  const { user } = useAuth()
+
+  useRealtimeSubscription({
+    table: 'items',
+    queryKey: ['items'],
+  })
+
+  return useQuery({
+    queryKey: ['items', 'uncategorized'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('items')
+        .select('*, streams(*)')
+        .is('stream_id', null)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data as Item[]
+    },
+    enabled: !!user,
+  })
+}
+
 export function useItemsByDiscussion(meetingId: string) {
   return useQuery({
     queryKey: ['items', 'discussion', meetingId],

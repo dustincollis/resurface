@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Pencil, Archive, List, Columns } from 'lucide-react'
+import { ArrowLeft, Pencil, Archive, List, Columns, FileQuestion } from 'lucide-react'
 import { useStream, useUpdateStream, useArchiveStream } from '../hooks/useStreams'
-import { useItemsByStream, useUpdateItem } from '../hooks/useItems'
+import { useItemsByStream, useUncategorizedItems, useUpdateItem } from '../hooks/useItems'
 import ItemCard from '../components/ItemCard'
 import KanbanBoard from '../components/KanbanBoard'
 import QuickAddBar from '../components/QuickAddBar'
@@ -13,24 +13,35 @@ import type { CreateStreamPayload, ItemStatus } from '../lib/types'
 export default function StreamDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: stream, isLoading: streamLoading } = useStream(id!)
-  const { data: items, isLoading: itemsLoading } = useItemsByStream(id!)
+  const isUncategorized = id === 'uncategorized'
+
+  const { data: stream, isLoading: streamLoading } = useStream(isUncategorized ? '' : id!)
+  const { data: streamItems, isLoading: streamItemsLoading } = useItemsByStream(
+    isUncategorized ? '' : id!
+  )
+  const { data: uncategorizedItems, isLoading: uncategorizedLoading } = useUncategorizedItems()
+
+  const items = isUncategorized ? uncategorizedItems : streamItems
+  const itemsLoading = isUncategorized ? uncategorizedLoading : streamItemsLoading
+
   const updateStream = useUpdateStream()
   const updateItem = useUpdateItem()
   const archiveStream = useArchiveStream()
   const [showEditModal, setShowEditModal] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list')
 
-  if (streamLoading || !stream) {
+  if (!isUncategorized && (streamLoading || !stream)) {
     return <div className="text-gray-400">Loading...</div>
   }
 
   const handleEdit = (payload: CreateStreamPayload) => {
+    if (!stream) return
     updateStream.mutate({ id: stream.id, ...payload })
     setShowEditModal(false)
   }
 
   const handleArchive = () => {
+    if (!stream) return
     archiveStream.mutate(stream.id)
     navigate('/streams')
   }
@@ -55,11 +66,20 @@ export default function StreamDetail() {
       </button>
 
       <div className="mb-6 flex items-center gap-3">
-        <div
-          className="h-4 w-4 rounded-full"
-          style={{ backgroundColor: stream.color }}
-        />
-        <h1 className="flex-1 text-2xl font-semibold text-white">{stream.name}</h1>
+        {isUncategorized ? (
+          <>
+            <FileQuestion size={20} className="text-gray-500" />
+            <h1 className="flex-1 text-2xl font-semibold italic text-white">Uncategorized</h1>
+          </>
+        ) : (
+          <>
+            <div
+              className="h-4 w-4 rounded-full"
+              style={{ backgroundColor: stream!.color }}
+            />
+            <h1 className="flex-1 text-2xl font-semibold text-white">{stream!.name}</h1>
+          </>
+        )}
 
         {/* View toggle */}
         <div className="flex rounded-lg border border-gray-700">
@@ -83,23 +103,33 @@ export default function StreamDetail() {
           </button>
         </div>
 
-        <button
-          onClick={() => setShowEditModal(true)}
-          className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
-          title="Edit stream"
-        >
-          <Pencil size={16} />
-        </button>
-        <button
-          onClick={handleArchive}
-          className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-red-400"
-          title="Archive stream"
-        >
-          <Archive size={16} />
-        </button>
+        {!isUncategorized && (
+          <>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+              title="Edit stream"
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              onClick={handleArchive}
+              className="rounded p-2 text-gray-400 hover:bg-gray-800 hover:text-red-400"
+              title="Archive stream"
+            >
+              <Archive size={16} />
+            </button>
+          </>
+        )}
       </div>
 
-      <QuickAddBar defaultStreamId={id} />
+      {isUncategorized ? (
+        <p className="mb-4 text-xs text-gray-500">
+          Tasks created without a stream. Open each one to assign it to a stream and clear the backlog.
+        </p>
+      ) : (
+        <QuickAddBar defaultStreamId={id} />
+      )}
 
       {itemsLoading ? (
         <div className="mt-4 text-gray-400">Loading tasks...</div>
@@ -120,7 +150,9 @@ export default function StreamDetail() {
             </div>
           ) : (
             <div className="mt-6 rounded-lg border border-dashed border-gray-700 py-8 text-center">
-              <p className="text-gray-400">No active tasks in this stream.</p>
+              <p className="text-gray-400">
+                {isUncategorized ? 'No uncategorized tasks. Nice work.' : 'No active tasks in this stream.'}
+              </p>
             </div>
           )}
 
@@ -139,7 +171,7 @@ export default function StreamDetail() {
         </>
       )}
 
-      {showEditModal && (
+      {showEditModal && stream && (
         <StreamFormModal
           stream={stream}
           onSave={handleEdit}
