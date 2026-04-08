@@ -7,10 +7,8 @@ import ItemCard from '../components/ItemCard'
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
 import {
-  computePriority,
   getSurfaceReasons,
   getSuggestedMove,
-  getScoreBreakdown,
   getClusterFactors,
   sortByPriority,
   effectiveStalenessLevel,
@@ -59,10 +57,8 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
   const touchItem = useTouchItem()
   const updateItem = useUpdateItem()
 
-  const score = Math.round(computePriority(item))
   const reasons = getSurfaceReasons(item)
   const suggestedMove = getSuggestedMove(item)
-  const breakdown = getScoreBreakdown(item)
   const dueLabel = item.due_date ? formatDueLabel(item.due_date) : null
   const streamColor = item.streams?.color ?? '#6B7280'
   const level = effectiveStalenessLevel(item)
@@ -94,13 +90,6 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
       status: 'done',
       completed_at: new Date().toISOString(),
     })
-  }
-
-  const breakdownColor = (value: number) => {
-    if (value >= 80) return 'text-red-400'
-    if (value >= 60) return 'text-orange-400'
-    if (value >= 40) return 'text-yellow-400'
-    return 'text-gray-400'
   }
 
   return (
@@ -157,10 +146,20 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               {item.title}
             </h3>
 
-            {/* Next action */}
+            {/* Notes (description) — shown collapsed too */}
+            {item.description && (
+              <p className={`mt-1 text-xs text-gray-400 ${expanded ? 'line-clamp-5' : 'line-clamp-2'}`}>
+                {item.description}
+              </p>
+            )}
+
+            {/* Next step */}
             {item.next_action && (
-              <p className="mt-1 line-clamp-1 text-xs text-gray-400">
-                <span className="text-gray-500">Next:</span> {item.next_action}
+              <p
+                className="mt-1.5 line-clamp-1 text-xs text-gray-300"
+                title="The very next physical step to make progress on this item. Editable on the item detail page."
+              >
+                <span className="text-gray-500">Next step:</span> {item.next_action}
               </p>
             )}
 
@@ -174,8 +173,8 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             )}
           </div>
 
-          {/* Right rail: suggested action + score */}
-          <div className="flex flex-col items-end gap-1">
+          {/* Right rail: suggested action only */}
+          <div className="flex-shrink-0">
             <button
               onClick={handleSuggestedAction}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
@@ -190,9 +189,6 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               <SuggestedIcon size={12} />
               {suggestedMove}
             </button>
-            <span className="text-[10px] uppercase tracking-wider text-gray-600">
-              score <span className="text-gray-500">{score}</span>
-            </span>
           </div>
         </div>
       </button>
@@ -238,38 +234,8 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             </button>
           </div>
 
-          {/* Score breakdown */}
-          <div className="mb-4 grid grid-cols-4 gap-2 rounded-lg border border-gray-800 bg-gray-900 p-3">
-            <div className="text-center">
-              <div className={`text-lg font-bold ${breakdownColor(breakdown.staleness)}`}>{breakdown.staleness}</div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Staleness</div>
-            </div>
-            <div className="text-center">
-              <div className={`text-lg font-bold ${breakdownColor(breakdown.stakes)}`}>{breakdown.stakes}</div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Stakes</div>
-            </div>
-            <div className="text-center">
-              <div className={`text-lg font-bold ${breakdownColor(breakdown.resistance)}`}>{breakdown.resistance}</div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Resistance</div>
-            </div>
-            <div className="text-center">
-              <div className={`text-lg font-bold ${breakdownColor(breakdown.due_risk)}`}>{breakdown.due_risk}</div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-500">Due Risk</div>
-            </div>
-          </div>
-
-          {/* Description */}
-          {item.description && (
-            <div className="mb-3">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                Notes
-              </div>
-              <p className="line-clamp-3 text-xs text-gray-400">{item.description}</p>
-            </div>
-          )}
-
           {/* Bottom row: complete + open detail */}
-          <div className="flex items-center justify-between gap-2 border-t border-gray-800/60 pt-3">
+          <div className="flex items-center justify-between gap-2">
             <button
               onClick={handleComplete}
               disabled={updateItem.isPending}
@@ -331,9 +297,9 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-2xl">
       {/* Today's Focus */}
-      <section className="max-w-2xl">
+      <section>
         <div className="mb-3 flex items-end justify-between">
           <div>
             <div className="flex items-baseline gap-2">
@@ -383,7 +349,7 @@ export default function Dashboard() {
 
       {/* Due Soon */}
       {dueSoonItems.length > 0 && (
-        <section className="mt-8 max-w-2xl">
+        <section className="mt-8">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Due Soon
           </h2>
@@ -397,7 +363,7 @@ export default function Dashboard() {
 
       {/* Recently Touched */}
       {recentItems && recentItems.length > 0 && (
-        <section className="mt-8 max-w-2xl">
+        <section className="mt-8">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
             Recently Touched
           </h2>
