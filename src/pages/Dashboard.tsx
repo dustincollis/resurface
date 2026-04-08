@@ -36,7 +36,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
   return (
     <button
       onClick={() => navigate(`/items/${item.id}`)}
-      className="flex h-full flex-col rounded-xl border border-gray-800 bg-gray-900 p-4 text-left transition-colors hover:border-gray-700"
+      className="flex w-full flex-col rounded-xl border border-gray-800 bg-gray-900 p-4 text-left transition-colors hover:border-gray-700"
     >
       {/* Header: rank + stream */}
       <div className="mb-3 flex items-center justify-between">
