@@ -234,8 +234,8 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             </button>
           </div>
 
-          {/* Bottom row: complete + open detail */}
-          <div className="flex items-center justify-between gap-2">
+          {/* Bottom row: Mark Complete on the right (Open lives in top-right corner) */}
+          <div className="flex items-center justify-end">
             <button
               onClick={handleComplete}
               disabled={updateItem.isPending}
@@ -243,12 +243,6 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               title="Mark this item as done"
             >
               <Check size={12} /> Mark Complete
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
-              className="text-xs text-purple-400 hover:text-purple-300"
-            >
-              Open full detail →
             </button>
           </div>
         </div>
