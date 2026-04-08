@@ -1,8 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2 } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
+import ItemLinkSection from '../components/ItemLinkSection'
 import type { ItemStatus } from '../lib/types'
 
 const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
@@ -68,6 +69,35 @@ function DotRating({
   )
 }
 
+const ACTIVITY_ICONS: Record<string, { icon: typeof Plus; color: string }> = {
+  created: { icon: Plus, color: 'text-green-500' },
+  status_changed: { icon: ArrowRight, color: 'text-blue-400' },
+  field_updated: { icon: Pencil, color: 'text-gray-400' },
+  touched: { icon: Clock, color: 'text-purple-400' },
+  linked: { icon: LinkIcon, color: 'text-gray-400' },
+}
+
+function activityLabel(action: string, details: Record<string, unknown>): string {
+  switch (action) {
+    case 'created':
+      return 'Created'
+    case 'status_changed': {
+      const fields = details.fields as string[] | undefined
+      if (fields?.includes('status')) return 'Status changed'
+      return 'Updated'
+    }
+    case 'field_updated': {
+      const fields = details.fields as string[] | undefined
+      if (fields && fields.length > 0) return `Updated ${fields.join(', ')}`
+      return 'Updated'
+    }
+    case 'touched':
+      return 'Touched'
+    default:
+      return action.replace(/_/g, ' ')
+  }
+}
+
 export default function ItemDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -97,12 +127,10 @@ export default function ItemDetail() {
     navigate(-1)
   }
 
-  // Custom fields from stream's field_templates
   const fieldTemplates = item.streams?.field_templates ?? []
 
   return (
     <div className="mx-auto max-w-3xl">
-      {/* Back button */}
       <button
         onClick={() => navigate(-1)}
         className="mb-4 flex items-center gap-1 text-sm text-gray-400 hover:text-gray-200"
@@ -110,7 +138,6 @@ export default function ItemDetail() {
         <ArrowLeft size={16} /> Back
       </button>
 
-      {/* Main card */}
       <div className="rounded-xl border border-gray-800 bg-gray-900">
         {/* Header */}
         <div className="border-b border-gray-800 px-6 py-4">
@@ -138,7 +165,6 @@ export default function ItemDetail() {
             </span>
           </div>
 
-          {/* Title */}
           <div className="mt-3">
             <InlineEditable
               value={item.title}
@@ -148,7 +174,6 @@ export default function ItemDetail() {
             />
           </div>
 
-          {/* Description */}
           <div className="mt-2">
             <InlineEditable
               value={item.description}
@@ -160,7 +185,6 @@ export default function ItemDetail() {
             />
           </div>
 
-          {/* Metadata row */}
           <div className="mt-4 flex gap-6 text-xs">
             <div>
               <span className="text-gray-500">Created</span>
@@ -218,6 +242,9 @@ export default function ItemDetail() {
             </div>
           </div>
         )}
+
+        {/* Linked items */}
+        <ItemLinkSection itemId={item.id} />
 
         {/* Due date */}
         <div className="border-b border-gray-800 px-6 py-4">
@@ -277,20 +304,31 @@ export default function ItemDetail() {
       {activities && activities.length > 0 && (
         <div className="mt-6">
           <h3 className="mb-3 text-sm font-medium text-gray-400">Activity</h3>
-          <div className="space-y-2">
-            {activities.map((entry) => (
-              <div key={entry.id} className="flex items-center gap-3 text-xs text-gray-500">
-                <span className="w-24 flex-shrink-0">
-                  {new Date(entry.created_at).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </span>
-                <span className="capitalize">{entry.action.replace(/_/g, ' ')}</span>
-              </div>
-            ))}
+          <div className="relative border-l border-gray-800 pl-4">
+            {activities.map((entry) => {
+              const config = ACTIVITY_ICONS[entry.action] ?? { icon: Clock, color: 'text-gray-500' }
+              const Icon = config.icon
+              return (
+                <div key={entry.id} className="relative mb-3 flex items-start gap-3">
+                  <div className={`absolute -left-[1.28rem] mt-0.5 rounded-full bg-gray-950 p-0.5 ${config.color}`}>
+                    <Icon size={12} />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs text-gray-300">
+                      {activityLabel(entry.action, entry.details)}
+                    </span>
+                    <span className="ml-2 text-xs text-gray-600">
+                      {new Date(entry.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

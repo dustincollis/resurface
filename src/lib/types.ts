@@ -81,6 +81,18 @@ export interface UpdateItemPayload extends Partial<CreateItemPayload> {
   completed_at?: string | null
 }
 
+export type LinkType = 'related' | 'blocks' | 'blocked_by' | 'parent' | 'follow_up'
+
+export interface ItemLink {
+  id: string
+  source_item_id: string
+  target_item_id: string
+  link_type: LinkType
+  created_at: string
+  source_item?: Pick<Item, 'id' | 'title' | 'status'>
+  target_item?: Pick<Item, 'id' | 'title' | 'status'>
+}
+
 export interface CreateStreamPayload {
   name: string
   color?: string

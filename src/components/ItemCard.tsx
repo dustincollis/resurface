@@ -10,6 +10,13 @@ function stalenessColor(score: number): string {
   return 'bg-red-500'
 }
 
+function stalenessLabel(score: number): string {
+  if (score < 20) return 'fresh'
+  if (score < 40) return 'aging'
+  if (score < 60) return 'stale'
+  return 'critical'
+}
+
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
@@ -55,9 +62,18 @@ export default function ItemCard({ item }: { item: Item }) {
         </div>
       )}
 
-      <div className={`h-2 w-2 flex-shrink-0 rounded-full ${stalenessColor(item.staleness_score)}`}
-        title={`Staleness: ${item.staleness_score.toFixed(0)}`}
-      />
+      {/* Staleness heat bar */}
+      <div
+        className="h-1 w-10 flex-shrink-0 overflow-hidden rounded-full bg-gray-800"
+        title={`Staleness: ${item.staleness_score.toFixed(0)} (${stalenessLabel(item.staleness_score)})`}
+      >
+        <div
+          className={`h-full rounded-full ${stalenessColor(item.staleness_score)} ${
+            item.staleness_score >= 60 ? 'animate-pulse' : ''
+          }`}
+          style={{ width: `${Math.min(item.staleness_score, 100)}%` }}
+        />
+      </div>
 
       <StatusBadge status={item.status} />
     </button>
