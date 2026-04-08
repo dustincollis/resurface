@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "resurface": {
+      "command": "node",
+      "args": ["REPLACE_WITH_PATH_TO/mcp-server/dist/index.js"],
+      "env": {
+        "RESURFACE_SUPABASE_URL": "https://biapwycemhtdhcpmgshp.supabase.co",
+        "RESURFACE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpYXB3eWNlbWh0ZGhjcG1nc2hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1ODk5ODIsImV4cCI6MjA5MTE2NTk4Mn0.NYZFAInBK7-lFBaLe0r4zVSbeRlXqC_I5oiYiFzYox8",
+        "RESURFACE_EMAIL": "REPLACE_WITH_YOUR_RESURFACE_EMAIL",
+        "RESURFACE_PASSWORD": "REPLACE_WITH_YOUR_RESURFACE_PASSWORD"
+      }
+    }
+  }
+}
