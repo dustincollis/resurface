@@ -12,26 +12,41 @@ function cleanMessage(content: string): string {
     text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
   }
 
-  // If it looks like JSON with a "message" field, extract that
-  if (text.startsWith('{') && text.includes('"message"')) {
-    try {
-      const parsed = JSON.parse(text)
-      if (typeof parsed.message === 'string') {
-        text = parsed.message
+  // If the text contains a JSON object with a "message" field anywhere,
+  // extract just that message field — even if there's prose before/after
+  if (text.includes('"message"')) {
+    // Try parsing the whole thing as JSON first
+    if (text.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text)
+        if (typeof parsed.message === 'string') {
+          return cleanMarkdown(parsed.message)
+        }
+      } catch {
+        // fall through
       }
-    } catch {
-      // Try a regex extract as fallback
-      const match = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)
-      if (match) {
-        text = match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
-      }
+    }
+
+    // Find the JSON object in the text and extract its message field
+    // Match the message field value, handling escaped quotes
+    const match = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    if (match) {
+      const decoded = match[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\')
+        .replace(/\\t/g, '\t')
+      return cleanMarkdown(decoded)
     }
   }
 
-  // Strip leftover markdown emphasis markers
-  text = text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+  return cleanMarkdown(text)
+}
 
+function cleanMarkdown(text: string): string {
   return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
 }
 
 const ACCEPTED_TYPES = [
