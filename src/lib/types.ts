@@ -94,12 +94,17 @@ export interface ItemLink {
   target_item?: Pick<Item, 'id' | 'title' | 'status'>
 }
 
+export type ChatActionEntry =
+  | string // legacy: plain text confirmation
+  | { type: 'proposed_item'; title: string; description?: string; stream_name?: string | null; next_action?: string | null; due_date?: string | null }
+  | { type: 'updated'; item_id: string }
+
 export interface ChatMessage {
   id: string
   user_id: string
   role: 'user' | 'assistant'
   content: string
-  actions_taken: string[]
+  actions_taken: ChatActionEntry[]
   created_at: string
 }
 

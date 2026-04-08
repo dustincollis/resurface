@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
-import { X, Send, MessageSquare, Loader2, Paperclip, FileText, Image as ImageIcon } from 'lucide-react'
+import { X, Send, MessageSquare, Loader2, Paperclip, FileText, Image as ImageIcon, Plus, Check } from 'lucide-react'
 import { useChatMessages, useSendMessage, fileToAttachment, type FileAttachment } from '../hooks/useChat'
+import { useCreateItem } from '../hooks/useItems'
+import { useStreams } from '../hooks/useStreams'
+import type { ChatActionEntry } from '../lib/types'
 
 // Clean up message content: extract just the message field from JSON if present,
 // strip code fences, and remove markdown asterisks
@@ -61,6 +64,89 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 function fileIcon(type: string) {
   if (type.startsWith('image/')) return <ImageIcon size={12} />
   return <FileText size={12} />
+}
+
+interface ProposedItemCardProps {
+  proposal: {
+    title: string
+    description?: string
+    stream_name?: string | null
+    next_action?: string | null
+    due_date?: string | null
+  }
+}
+
+function ProposedItemCard({ proposal }: ProposedItemCardProps) {
+  const createItem = useCreateItem()
+  const { data: streams } = useStreams()
+  const [created, setCreated] = useState(false)
+
+  const handleCreate = () => {
+    const matchedStream = proposal.stream_name
+      ? streams?.find((s) => s.name.toLowerCase() === proposal.stream_name?.toLowerCase())
+      : null
+
+    createItem.mutate(
+      {
+        title: proposal.title,
+        description: proposal.description ?? '',
+        stream_id: matchedStream?.id ?? null,
+        next_action: proposal.next_action ?? undefined,
+        due_date: proposal.due_date ?? null,
+      },
+      {
+        onSuccess: () => setCreated(true),
+      }
+    )
+  }
+
+  return (
+    <div className={`mt-2 rounded-lg border p-2 ${created ? 'border-green-800/50 bg-green-900/10' : 'border-gray-700 bg-gray-900'}`}>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className={`text-xs font-medium ${created ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
+            {proposal.title}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {proposal.stream_name && (
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+                {proposal.stream_name}
+              </span>
+            )}
+            {proposal.due_date && (
+              <span className="rounded bg-blue-900/40 px-1.5 py-0.5 text-[10px] text-blue-300">
+                due {new Date(proposal.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </span>
+            )}
+          </div>
+          {proposal.next_action && !created && (
+            <p className="mt-1 text-[11px] text-gray-500">Next: {proposal.next_action}</p>
+          )}
+        </div>
+        {created ? (
+          <div className="flex items-center gap-1 text-[11px] text-green-400">
+            <Check size={12} /> Created
+          </div>
+        ) : (
+          <button
+            onClick={handleCreate}
+            disabled={createItem.isPending}
+            className="flex flex-shrink-0 items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+          >
+            <Plus size={10} /> Create
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function isProposedItem(action: ChatActionEntry): action is { type: 'proposed_item'; title: string; description?: string; stream_name?: string | null; next_action?: string | null; due_date?: string | null } {
+  return typeof action === 'object' && action !== null && (action as { type?: string }).type === 'proposed_item'
+}
+
+function isUpdated(action: ChatActionEntry): action is { type: 'updated'; item_id: string } {
+  return typeof action === 'object' && action !== null && (action as { type?: string }).type === 'updated'
 }
 
 function formatSize(bytes: number): string {
@@ -245,11 +331,26 @@ export default function ChatPanel({ isOpen, onClose }: ChatPanelProps) {
                   <p className="whitespace-pre-wrap">{cleanMessage(msg.content)}</p>
                   {msg.actions_taken && msg.actions_taken.length > 0 && (
                     <div className="mt-2 border-t border-gray-700 pt-2">
-                      {msg.actions_taken.map((action, i) => (
-                        <p key={i} className="text-xs text-green-400">
-                          {action}
-                        </p>
-                      ))}
+                      {msg.actions_taken.map((action, i) => {
+                        if (isProposedItem(action)) {
+                          return <ProposedItemCard key={i} proposal={action} />
+                        }
+                        if (isUpdated(action)) {
+                          return (
+                            <p key={i} className="text-xs text-green-400">
+                              Updated item {action.item_id.substring(0, 8)}
+                            </p>
+                          )
+                        }
+                        if (typeof action === 'string') {
+                          return (
+                            <p key={i} className="text-xs text-green-400">
+                              {action}
+                            </p>
+                          )
+                        }
+                        return null
+                      })}
                     </div>
                   )}
                 </div>

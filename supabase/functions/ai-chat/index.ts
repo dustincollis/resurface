@@ -222,7 +222,7 @@ ${fileContext}
 
 YOUR CAPABILITIES
 =================
-You can directly create and update work items by including them in the "actions" array of your response. The user does NOT need to confirm — actions you include WILL be executed automatically. Use this capability proactively when the user asks you to create tasks, add items, or organize work.
+When the user asks you to create items or you identify tasks worth creating, propose them in the "actions" array. The user will see each proposed item as a card with a "Create" button — they confirm each one. Be proactive about proposing items, but the user has the final say. Update actions for existing items execute immediately since they're less risky.
 
 OUTPUT FORMAT
 =============
@@ -236,12 +236,12 @@ Response shape:
 
 The "message" field is what the user reads. Write it naturally, conversationally, as if texting a colleague. Plain text only — no markdown asterisks, no JSON, no code blocks. Mention what you did (e.g. "Created 5 items based on your spreadsheet").
 
-The "actions" array contains operations to execute. Each action is an object:
+The "actions" array contains operations. Each action is an object:
 
-Create an item:
-{"action": "create_item", "title": "string", "description": "string", "stream_name": "string", "next_action": "string"}
+Propose a new item (user will confirm):
+{"action": "create_item", "title": "string", "description": "string", "stream_name": "string", "next_action": "string", "due_date": "YYYY-MM-DD or null"}
 
-Update an item (use the 8-character ID prefix from the items list):
+Update an existing item (executes immediately, use the 8-character ID prefix):
 {"action": "update_item", "item_id": "string", "updates": {"status": "open|in_progress|waiting|done|dropped", "next_action": "string"}}
 
 EXAMPLES
@@ -253,11 +253,11 @@ Response:
 
 User: "Create a task to call John about the contract"
 Response:
-{"message": "Done — created that task in Business Development.", "actions": [{"action": "create_item", "title": "Call John about the contract", "description": "", "stream_name": "Business Development", "next_action": "Schedule call with John this week"}]}
+{"message": "Here's a proposed task for you to review.", "actions": [{"action": "create_item", "title": "Call John about the contract", "description": "", "stream_name": "Business Development", "next_action": "Schedule call with John this week"}]}
 
 User: "Here's my to-do list, please add these as items"
 Response:
-{"message": "I added 5 items across your streams: 3 in Business Development, 1 in Internal Operations, and 1 in Technical Development.", "actions": [{"action": "create_item", "title": "...", "stream_name": "...", "next_action": "..."}, {"action": "create_item", ...}]}
+{"message": "I found 5 tasks worth tracking. Each is shown below — click Create to add the ones you want.", "actions": [{"action": "create_item", "title": "...", "stream_name": "...", "next_action": "..."}, {"action": "create_item", ...}]}
 
 RULES
 =====
@@ -354,35 +354,24 @@ RULES
       }
     }
 
-    // Execute actions
-    const executedActions: string[] = [];
+    // Process actions: create_item becomes a proposal (user must confirm),
+    // update_item executes immediately (modifying existing data)
+    const actionsTaken: Record<string, unknown>[] = [];
 
     if (parsedResponse.actions && Array.isArray(parsedResponse.actions)) {
       for (const action of parsedResponse.actions) {
         const a = action as Record<string, unknown>;
         try {
           if (a.action === "create_item") {
-            let streamId = null;
-            if (a.stream_name && items) {
-              const stream = items.find(
-                (i) =>
-                  (i.streams as { name: string } | null)?.name?.toLowerCase() ===
-                  (a.stream_name as string).toLowerCase()
-              );
-              if (stream) streamId = stream.stream_id;
-            }
-
-            const { error } = await adminClient.from("items").insert({
-              user_id: user.id,
-              title: a.title as string,
+            // Don't execute — save as proposal for user to confirm
+            actionsTaken.push({
+              type: "proposed_item",
+              title: (a.title as string) ?? "",
               description: (a.description as string) ?? "",
-              stream_id: streamId,
+              stream_name: (a.stream_name as string) ?? null,
               next_action: (a.next_action as string) ?? null,
+              due_date: (a.due_date as string) ?? null,
             });
-
-            if (!error) {
-              executedActions.push(`Created item: "${a.title}"`);
-            }
           } else if (a.action === "update_item" && a.item_id) {
             const updates = a.updates as Record<string, unknown>;
             if (updates) {
@@ -393,9 +382,10 @@ RULES
                 .eq("user_id", user.id);
 
               if (!error) {
-                executedActions.push(
-                  `Updated item ${(a.item_id as string).substring(0, 8)}`
-                );
+                actionsTaken.push({
+                  type: "updated",
+                  item_id: a.item_id as string,
+                });
               }
             }
           }
@@ -421,14 +411,14 @@ RULES
         user_id: user.id,
         role: "assistant",
         content: parsedResponse.message,
-        actions_taken: executedActions,
+        actions_taken: actionsTaken,
       },
     ]);
 
     return new Response(
       JSON.stringify({
         message: parsedResponse.message,
-        actions_taken: executedActions,
+        actions_taken: actionsTaken,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
