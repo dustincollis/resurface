@@ -124,7 +124,6 @@ export default function Dashboard() {
     return [...activeItems]
       .map((item) => ({ item, score: computePriority(item) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
       .map((x) => x.item)
   }, [activeItems])
 
@@ -149,14 +148,14 @@ export default function Dashboard() {
       </div>
 
       {/* Today's Focus */}
-      <section className="mt-8">
+      <section className="mt-8 max-w-md">
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
           Today&apos;s Focus
         </h2>
         {isLoading ? (
           <div className="text-sm text-gray-500">Loading...</div>
         ) : focusItems.length > 0 ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-3 overflow-y-auto">
             {focusItems.map((item, i) => (
               <FocusCard key={item.id} item={item} rank={i + 1} />
             ))}
