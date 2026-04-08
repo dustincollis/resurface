@@ -93,6 +93,15 @@ export interface ItemLink {
   target_item?: Pick<Item, 'id' | 'title' | 'status'>
 }
 
+export interface ChatMessage {
+  id: string
+  user_id: string
+  role: 'user' | 'assistant'
+  content: string
+  actions_taken: string[]
+  created_at: string
+}
+
 export interface CreateStreamPayload {
   name: string
   color?: string

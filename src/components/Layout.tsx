@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Layers, Calendar, Settings, Search, LogOut } from 'lucide-react'
+import { LayoutDashboard, Layers, Calendar, Settings, Search, LogOut, MessageSquare } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import SearchModal from './SearchModal'
+import ChatPanel from './ChatPanel'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -16,6 +17,7 @@ export default function Layout() {
   const { session, user, loading, signOut } = useAuth()
   const { data: streams } = useStreams()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -124,6 +126,17 @@ export default function Layout() {
             <Search size={16} className="text-gray-500" />
             <span className="text-sm text-gray-500">Search... (Cmd+K)</span>
           </button>
+          <button
+            onClick={() => setChatOpen(!chatOpen)}
+            className={`rounded-lg p-2 transition-colors ${
+              chatOpen
+                ? 'bg-purple-600 text-white'
+                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+            }`}
+            title="AI Chat"
+          >
+            <MessageSquare size={18} />
+          </button>
         </header>
 
         {/* Page content */}
@@ -133,6 +146,7 @@ export default function Layout() {
       </div>
 
       <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   )
 }
