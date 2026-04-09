@@ -5,6 +5,7 @@ import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, ty
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
 import { useCommitmentsByMeeting } from '../hooks/useCommitments'
+import AddToPursuit from '../components/AddToPursuit'
 import { queryClient } from '../lib/queryClient'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -234,6 +235,9 @@ export default function MeetingDetail() {
               ))}
             </div>
           )}
+          <div className="mt-3">
+            <AddToPursuit memberType="meeting" memberId={meeting.id} />
+          </div>
         </div>
 
         {/* Processing indicator */}

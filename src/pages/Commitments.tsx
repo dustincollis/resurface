@@ -21,6 +21,7 @@ import {
   useDeleteCommitment,
   useCreateCommitment,
 } from '../hooks/useCommitments'
+import AddToPursuit from '../components/AddToPursuit'
 import type { Commitment, CommitmentStatus, CommitmentDirection } from '../lib/types'
 
 const STATUS_LABEL: Record<CommitmentStatus, string> = {
@@ -192,13 +193,16 @@ function CommitmentRow({ commitment }: { commitment: Commitment }) {
           >
             Cancel
           </button>
-          <button
-            onClick={() => del.mutate(commitment.id)}
-            className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-[11px] text-gray-600 hover:text-red-400"
-            title="Delete"
-          >
-            <Trash2 size={11} />
-          </button>
+          <div className="ml-auto flex items-center gap-1.5">
+            <AddToPursuit memberType="commitment" memberId={commitment.id} variant="compact" />
+            <button
+              onClick={() => del.mutate(commitment.id)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-gray-600 hover:text-red-400"
+              title="Delete"
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -233,6 +233,48 @@ export interface UpdateCommitmentPayload extends Partial<CreateCommitmentPayload
   completed_at?: string | null
 }
 
+// ============================================================
+// Pursuits — user-flagged threads of focus
+// ============================================================
+
+export type PursuitStatus = 'active' | 'won' | 'lost' | 'archived'
+export type PursuitMemberType = 'item' | 'commitment' | 'meeting'
+
+export interface Pursuit {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  company: string | null
+  status: PursuitStatus
+  color: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface CreatePursuitPayload {
+  name: string
+  description?: string | null
+  company?: string | null
+  status?: PursuitStatus
+  color?: string
+  sort_order?: number
+}
+
+export interface UpdatePursuitPayload extends Partial<CreatePursuitPayload> {
+  completed_at?: string | null
+}
+
+export interface PursuitMember {
+  id: string
+  pursuit_id: string
+  member_type: PursuitMemberType
+  member_id: string
+  added_at: string
+}
+
 export interface Proposal {
   id: string
   user_id: string

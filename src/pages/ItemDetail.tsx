@@ -7,6 +7,7 @@ import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
 import { useCommitmentsByItem } from '../hooks/useCommitments'
+import AddToPursuit from '../components/AddToPursuit'
 import DecomposeSection from '../components/DecomposeSection'
 import { effectiveStalenessLevel, stalenessPillClass } from '../lib/priorityScore'
 import type { ItemStatus } from '../lib/types'
@@ -356,6 +357,11 @@ export default function ItemDetail() {
 
         {/* Sub-items / decompose */}
         <DecomposeSection item={item} />
+
+        {/* Pursuits */}
+        <div className="border-b border-gray-800 px-6 py-4">
+          <AddToPursuit memberType="item" memberId={item.id} />
+        </div>
 
         {/* Linked items */}
         <ItemLinkSection itemId={item.id} />
