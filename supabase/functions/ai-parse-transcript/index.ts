@@ -35,8 +35,21 @@ Deno.serve(async (req) => {
     // Auth: support both browser-side user JWTs AND server-to-server
     // service role calls (from the Python sync script). The two flows
     // diverge on how we determine the target user_id.
-    const token = authHeader.replace("Bearer ", "");
-    const isServiceRole = token === serviceRoleKey;
+    //
+    // Also accept the apikey header as an alternative service-role channel,
+    // since some clients send the key there instead of in Authorization.
+    const apiKeyHeader = req.headers.get("apikey") ?? req.headers.get("ApiKey") ?? "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isServiceRole =
+      (serviceRoleKey && token === serviceRoleKey) ||
+      (serviceRoleKey && apiKeyHeader === serviceRoleKey);
+
+    // Debug fingerprint helper — never logs full keys
+    function fingerprint(s: string | null | undefined): string {
+      if (!s) return "<empty>";
+      if (s.length < 16) return `<short:${s.length}>`;
+      return `${s.slice(0, 6)}...${s.slice(-4)}(len=${s.length})`;
+    }
 
     // Look up the meeting first regardless of auth path. Service role calls
     // derive user_id from the meeting record; user JWT calls verify ownership.
@@ -64,10 +77,28 @@ Deno.serve(async (req) => {
         data: { user },
       } = await adminClient.auth.getUser(token);
       if (!user) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            error: "Unauthorized",
+            diag: {
+              auth_header_present: Boolean(authHeader),
+              auth_token_fp: fingerprint(token),
+              apikey_header_fp: fingerprint(apiKeyHeader),
+              service_role_env_fp: fingerprint(serviceRoleKey),
+              token_equals_service_role: token === serviceRoleKey,
+              apikey_equals_service_role: apiKeyHeader === serviceRoleKey,
+              service_role_env_source: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+                ? "SUPABASE_SERVICE_ROLE_KEY"
+                : Deno.env.get("SB_SERVICE_ROLE_KEY")
+                  ? "SB_SERVICE_ROLE_KEY"
+                  : "<none>",
+            },
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
       if (meeting.user_id !== user.id) {
         return new Response(JSON.stringify({ error: "Forbidden" }), {
