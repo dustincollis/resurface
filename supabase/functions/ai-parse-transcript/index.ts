@@ -122,6 +122,20 @@ Deno.serve(async (req) => {
       userEmail?.split("@")[0] ||
       "the user";
 
+    // Resolve relative dates ("tomorrow", "next week", "by Friday") against
+    // the date the MEETING took place, not the date we happen to be parsing.
+    // Otherwise a meeting from April 2nd that says "I'll do it tomorrow"
+    // would get a due date based on today, which can be a week or more off.
+    // Falls back to today's date if start_time isn't set on the meeting.
+    const meetingDate: Date =
+      meeting.start_time ? new Date(meeting.start_time as string) : new Date();
+    const meetingDateStr = isNaN(meetingDate.getTime())
+      ? new Date().toISOString().split("T")[0]
+      : meetingDate.toISOString().split("T")[0];
+    const meetingDayOfWeek = isNaN(meetingDate.getTime())
+      ? ""
+      : new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(meetingDate);
+
     // Get user's existing items for cross-referencing
     const { data: items } = await adminClient
       .from("items")
@@ -158,7 +172,9 @@ Deno.serve(async (req) => {
 ${meeting.attendees && meeting.attendees.length > 0 ? `\n**Known meeting attendees**: ${meeting.attendees.join(", ")}\nUse this list as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use this attendee list and contextual cues — names mentioned, people addressed directly, "as you said" references — to attribute statements to specific people where you can. If you cannot tell who said something, mark it as "unknown" rather than guessing.\n` : ""}
 **Extraction philosophy**: Capture ALL real action items regardless of who they belong to. Do NOT drop items just because they're not assigned to ${userDisplayName} — better to surface a few items that turn out to be for someone else than to miss real commitments because attribution was unclear. The user will triage in the review queue.
 
-${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : `\nToday's date: ${new Date().toISOString().split('T')[0]}\n`}
+${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : ""}
+**This meeting took place on ${meetingDateStr}${meetingDayOfWeek ? ` (a ${meetingDayOfWeek})` : ""}.** When the transcript uses relative date language ("tomorrow", "next week", "by Friday", "end of month"), resolve it against the MEETING date — NOT against the date you're processing this transcript. "Tomorrow" in a meeting on April 2nd means April 3rd, regardless of when the parse runs.
+
 Extract these elements:
 
 1. Synopsis: A structured summary with these exact section headers (use "## " prefix for headers, plain prose otherwise — do NOT use **bold** or *italic* markers in the body text):
@@ -200,7 +216,7 @@ Extract these elements:
    - Whatever the assignee, INCLUDE THE ITEM. Do not drop items because attribution is uncertain. The user will triage manually.
    - **evidence_quote**: A short verbatim quote from the transcript (under 200 chars) that directly supports this being a real commitment. This is the actual sentence where the commitment was made. If you cannot point to a quote, the item is not real and you should drop it.
    - Assign urgency (high/medium/low)
-   - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. Use today's date as the reference. If no due date is implied, use null.
+   - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. **Use the meeting date (${meetingDateStr}) as the reference for resolving any relative date language**, NOT today's date. If no due date is implied, use null.
    - **Identify the company / account / client** this task is about, if applicable. Look at the discussion title (e.g. "S&P pricing call", "Adobe HCLS - Follow up", "Acme Corp standup") and the content for an org name. Use the cleanest short form (e.g. "Adobe", "S&P", "Acme Corp"). If the task is internal-only or no company is mentioned, use null. Do NOT invent company names. **If the discussion is clearly about a single company, set the company field on EVERY action item to that company name** — don't leave action items blank just because the company isn't repeated in that specific bullet.
 
 3. **Decisions**: Things that were decided/agreed upon
@@ -237,7 +253,7 @@ Extract these elements:
    - **description**: longer context if helpful
    - **counterpart**: the person ${userDisplayName} made the promise TO (free text — e.g. "Holly", "the procurement team"). null if unclear.
    - **company**: the account/client this is about, same rules as action items
-   - **do_by**: YYYY-MM-DD if a date is mentioned or strongly implied. **This is the primary date.** If "next week" is said, infer a date. If only a vague timing is given ("soon", "this week"), still try — be best-effort. null only if there's truly no temporal signal at all.
+   - **do_by**: YYYY-MM-DD if a date is mentioned or strongly implied. **This is the primary date.** Resolve any relative dates ("next week", "by Friday", "tomorrow") against the MEETING date (${meetingDateStr}), NOT today. If only a vague timing is given ("soon", "this week"), still try — be best-effort. null only if there's truly no temporal signal at all.
    - **promised_by**: usually the same as do_by; only set differently if the user said "I told them by X but I need it ready by Y"
    - **needs_review_by**: only if explicitly mentioned ("I need someone to review it before X")
    - **evidence_quote**: verbatim from the transcript, the line where the user made the commitment
