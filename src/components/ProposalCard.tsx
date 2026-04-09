@@ -13,13 +13,16 @@ import {
   Trash2,
   AlertTriangle,
   Loader2,
+  Eye,
 } from 'lucide-react'
 import { useStreams } from '../hooks/useStreams'
 import { useSearch } from '../hooks/useSearch'
+import { useAuth } from '../hooks/useAuth'
 import {
   useAcceptProposal,
   useRejectProposal,
   useMergeProposal,
+  useTrackProposalAsCommitment,
 } from '../hooks/useProposals'
 import type {
   Proposal,
@@ -51,7 +54,9 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
   const acceptMut = useAcceptProposal()
   const rejectMut = useRejectProposal()
   const mergeMut = useMergeProposal()
-  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending
+  const trackMut = useTrackProposalAsCommitment()
+  const { user } = useAuth()
+  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending || trackMut.isPending
 
   const confidenceColor =
     proposal.confidence == null
@@ -71,6 +76,18 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
   const sourceTitle = proposal.source_title ?? null
   const isTask = proposal.proposal_type === 'task'
   const isCommitment = proposal.proposal_type === 'commitment'
+
+  // Detect when a task proposal is attributed to someone other than the
+  // current user — that's when "Track as commitment" makes sense.
+  const taskAssignee = (payload as TaskProposalPayload | undefined)?.assignee
+  const userEmailLocal = user?.email?.split('@')[0]?.toLowerCase() ?? ''
+  const isAssignedToOther = Boolean(
+    isTask &&
+      taskAssignee &&
+      taskAssignee !== 'user' &&
+      taskAssignee !== 'unknown' &&
+      taskAssignee.toLowerCase() !== userEmailLocal
+  )
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900">
@@ -218,6 +235,17 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 >
                   <GitMerge size={12} />
                   Merge into existing
+                </button>
+              )}
+              {isAssignedToOther && (
+                <button
+                  onClick={() => trackMut.mutate({ proposal })}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-300 hover:bg-blue-900/50 disabled:opacity-50"
+                  title={`Track as an incoming commitment from ${taskAssignee}`}
+                >
+                  {trackMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                  Track as commitment
                 </button>
               )}
             </>

@@ -186,10 +186,11 @@ export interface CommitmentProposalPayload {
 }
 
 // ============================================================
-// Commitments — outgoing soft obligations
+// Commitments — soft obligations (outgoing or incoming)
 // ============================================================
 
 export type CommitmentStatus = 'open' | 'met' | 'broken' | 'cancelled' | 'waiting'
+export type CommitmentDirection = 'outgoing' | 'incoming'
 
 export interface Commitment {
   id: string
@@ -202,6 +203,7 @@ export interface Commitment {
   promised_by: string | null
   needs_review_by: string | null
   status: CommitmentStatus
+  direction: CommitmentDirection
   source_meeting_id: string | null
   source_item_id: string | null
   evidence_text: string | null
@@ -220,6 +222,7 @@ export interface CreateCommitmentPayload {
   promised_by?: string | null
   needs_review_by?: string | null
   status?: CommitmentStatus
+  direction?: CommitmentDirection
   source_meeting_id?: string | null
   source_item_id?: string | null
   evidence_text?: string | null

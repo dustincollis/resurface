@@ -6,12 +6,14 @@ import { useRealtimeSubscription } from './useRealtimeSubscription'
 import type {
   Commitment,
   CommitmentStatus,
+  CommitmentDirection,
   CreateCommitmentPayload,
   UpdateCommitmentPayload,
 } from '../lib/types'
 
 interface CommitmentFilters {
   status?: CommitmentStatus | CommitmentStatus[]
+  direction?: CommitmentDirection
   source_meeting_id?: string
   source_item_id?: string
 }
@@ -35,6 +37,9 @@ export function useCommitments(filters?: CommitmentFilters) {
         } else {
           query = query.eq('status', filters.status)
         }
+      }
+      if (filters?.direction) {
+        query = query.eq('direction', filters.direction)
       }
       if (filters?.source_meeting_id) {
         query = query.eq('source_meeting_id', filters.source_meeting_id)

@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Plus,
   Loader2,
+  ArrowUpRight,
+  ArrowDownLeft,
 } from 'lucide-react'
 import {
   useCommitments,
@@ -19,7 +21,7 @@ import {
   useDeleteCommitment,
   useCreateCommitment,
 } from '../hooks/useCommitments'
-import type { Commitment, CommitmentStatus } from '../lib/types'
+import type { Commitment, CommitmentStatus, CommitmentDirection } from '../lib/types'
 
 const STATUS_LABEL: Record<CommitmentStatus, string> = {
   open: 'Open',
@@ -65,8 +67,14 @@ function CommitmentRow({ commitment }: { commitment: Commitment }) {
               </span>
             )}
             {commitment.counterpart && (
-              <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-xs text-amber-300">
-                for {commitment.counterpart}
+              <span
+                className={`rounded px-1.5 py-0.5 text-xs ${
+                  commitment.direction === 'incoming'
+                    ? 'bg-blue-900/30 text-blue-300'
+                    : 'bg-amber-900/30 text-amber-300'
+                }`}
+              >
+                {commitment.direction === 'incoming' ? 'from' : 'for'} {commitment.counterpart}
               </span>
             )}
             <span
@@ -202,21 +210,29 @@ export default function Commitments() {
   const createCommitment = useCreateCommitment()
   const [showForm, setShowForm] = useState(false)
 
-  const grouped = useMemo(() => {
-    const groups: Record<CommitmentStatus, Commitment[]> = {
-      open: [],
-      waiting: [],
-      met: [],
-      broken: [],
-      cancelled: [],
+  // Split by direction first, then group by status within each.
+  const { outgoing, incoming, hasIncoming } = useMemo(() => {
+    const outgoingGroups: Record<CommitmentStatus, Commitment[]> = {
+      open: [], waiting: [], met: [], broken: [], cancelled: [],
     }
+    const incomingGroups: Record<CommitmentStatus, Commitment[]> = {
+      open: [], waiting: [], met: [], broken: [], cancelled: [],
+    }
+    let anyIncoming = false
     for (const c of commitments ?? []) {
-      groups[c.status].push(c)
+      if (c.direction === 'incoming') {
+        incomingGroups[c.status].push(c)
+        anyIncoming = true
+      } else {
+        outgoingGroups[c.status].push(c)
+      }
     }
-    return groups
+    return { outgoing: outgoingGroups, incoming: incomingGroups, hasIncoming: anyIncoming }
   }, [commitments])
 
-  const totalLive = grouped.open.length + grouped.waiting.length
+  const totalLive =
+    outgoing.open.length + outgoing.waiting.length +
+    incoming.open.length + incoming.waiting.length
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -262,24 +278,57 @@ export default function Commitments() {
           </p>
         </div>
       ) : (
-        <div className="space-y-6">
-          {grouped.open.length > 0 && (
-            <Section title="Open" items={grouped.open} />
-          )}
-          {grouped.waiting.length > 0 && (
-            <Section title="Waiting" items={grouped.waiting} />
-          )}
-          {grouped.met.length > 0 && (
-            <Section title="Met" items={grouped.met} dim />
-          )}
-          {grouped.broken.length > 0 && (
-            <Section title="Broken" items={grouped.broken} dim />
-          )}
-          {grouped.cancelled.length > 0 && (
-            <Section title="Cancelled" items={grouped.cancelled} dim />
+        <div className="space-y-8">
+          {/* You owe — outgoing commitments */}
+          <DirectionGroup
+            heading="You owe"
+            icon={<ArrowUpRight size={14} className="text-amber-400" />}
+            groups={outgoing}
+            showHeading={hasIncoming}
+          />
+
+          {/* Owed to you — incoming commitments. Hidden when empty so the
+              page looks identical to before for outgoing-only users. */}
+          {hasIncoming && (
+            <DirectionGroup
+              heading="Owed to you"
+              icon={<ArrowDownLeft size={14} className="text-blue-400" />}
+              groups={incoming}
+              showHeading
+            />
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function DirectionGroup({
+  heading,
+  icon,
+  groups,
+  showHeading,
+}: {
+  heading: string
+  icon: React.ReactNode
+  groups: Record<CommitmentStatus, Commitment[]>
+  showHeading: boolean
+}) {
+  const total = groups.open.length + groups.waiting.length + groups.met.length + groups.broken.length + groups.cancelled.length
+  if (total === 0) return null
+  return (
+    <div className="space-y-4">
+      {showHeading && (
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+          {icon}
+          {heading}
+        </h2>
+      )}
+      {groups.open.length > 0 && <Section title="Open" items={groups.open} />}
+      {groups.waiting.length > 0 && <Section title="Waiting" items={groups.waiting} />}
+      {groups.met.length > 0 && <Section title="Met" items={groups.met} dim />}
+      {groups.broken.length > 0 && <Section title="Broken" items={groups.broken} dim />}
+      {groups.cancelled.length > 0 && <Section title="Cancelled" items={groups.cancelled} dim />}
     </div>
   )
 }
@@ -313,6 +362,7 @@ function NewCommitmentForm({ onCancel, onSaved, createCommitment }: NewCommitmen
   const [doBy, setDoBy] = useState('')
   const [promisedBy, setPromisedBy] = useState('')
   const [needsReviewBy, setNeedsReviewBy] = useState('')
+  const [direction, setDirection] = useState<CommitmentDirection>('outgoing')
   const [showExtraDates, setShowExtraDates] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -331,6 +381,7 @@ function NewCommitmentForm({ onCancel, onSaved, createCommitment }: NewCommitmen
         do_by: doBy || null,
         promised_by: promisedBy || null,
         needs_review_by: needsReviewBy || null,
+        direction,
         status: 'open',
       })
       onSaved()
@@ -341,10 +392,37 @@ function NewCommitmentForm({ onCancel, onSaved, createCommitment }: NewCommitmen
 
   return (
     <div className="mb-6 space-y-3 rounded-xl border border-gray-700 bg-gray-900 p-4">
+      {/* Direction toggle — small but always visible so the user can flip */}
+      <div className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 p-0.5 text-xs w-fit">
+        <button
+          type="button"
+          onClick={() => setDirection('outgoing')}
+          className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+            direction === 'outgoing'
+              ? 'bg-amber-700/40 text-amber-200'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <ArrowUpRight size={11} />
+          I owe
+        </button>
+        <button
+          type="button"
+          onClick={() => setDirection('incoming')}
+          className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+            direction === 'incoming'
+              ? 'bg-blue-700/40 text-blue-200'
+              : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <ArrowDownLeft size={11} />
+          Owed to me
+        </button>
+      </div>
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="What did you commit to?"
+        placeholder={direction === 'outgoing' ? 'What did you commit to?' : 'What did they commit to do for you?'}
         autoFocus
         className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
       />
@@ -359,7 +437,7 @@ function NewCommitmentForm({ onCancel, onSaved, createCommitment }: NewCommitmen
         <input
           value={counterpart}
           onChange={(e) => setCounterpart(e.target.value)}
-          placeholder="For (counterpart)"
+          placeholder={direction === 'outgoing' ? 'For (whom)' : 'From (whom)'}
           className="flex-1 min-w-[160px] rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
         />
         <input

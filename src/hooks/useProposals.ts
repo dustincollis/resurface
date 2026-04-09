@@ -231,6 +231,70 @@ export function useRejectProposal() {
 }
 
 // ============================================================
+// Track a task proposal as an incoming commitment instead of accepting
+// it as a task. Used when an action item belongs to someone other than
+// the user — they're not doing it, they're tracking it.
+// ============================================================
+
+export function useTrackProposalAsCommitment() {
+  const { user } = useAuth()
+
+  return useMutation({
+    mutationFn: async ({ proposal }: { proposal: Proposal }) => {
+      if (proposal.proposal_type !== 'task') {
+        throw new Error(
+          `Track-as-commitment is only available for task proposals (got '${proposal.proposal_type}')`
+        )
+      }
+      const p = proposal.normalized_payload as unknown as TaskProposalPayload
+      const insertPayload: CreateCommitmentPayload & { user_id: string } = {
+        user_id: user!.id,
+        title: p.title,
+        description: p.description ?? null,
+        counterpart: p.assignee && p.assignee !== 'user' && p.assignee !== 'unknown'
+          ? p.assignee
+          : null,
+        company: p.company ?? null,
+        do_by: p.due_date ?? null,
+        promised_by: null,
+        needs_review_by: null,
+        status: 'open',
+        direction: 'incoming',
+        source_meeting_id: p.source_meeting_id ?? null,
+        evidence_text: proposal.evidence_text ?? null,
+        confidence: proposal.confidence ?? null,
+      }
+      const { data: commitmentRow, error: insertErr } = await supabase
+        .from('commitments')
+        .insert(insertPayload)
+        .select()
+        .single()
+      if (insertErr) throw insertErr
+      const commitment = commitmentRow as Commitment
+
+      const { error: updateErr } = await supabase
+        .from('proposals')
+        .update({
+          status: 'accepted',
+          review_action: 'accept',
+          accepted_payload: insertPayload as unknown as Record<string, unknown>,
+          resulting_object_type: 'commitment',
+          resulting_object_id: commitment.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', proposal.id)
+      if (updateErr) throw updateErr
+
+      return commitment
+    },
+    onSuccess: () => {
+      invalidateProposals()
+      queryClient.invalidateQueries({ queryKey: ['commitments'] })
+    },
+  })
+}
+
+// ============================================================
 // Merge into existing item (task proposals only for chunk 0)
 // ============================================================
 
