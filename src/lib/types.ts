@@ -41,6 +41,7 @@ export interface Item {
   parent_id: string | null
   source_meeting_id: string | null
   snoozed_until: string | null
+  pinned: boolean
   // Joined fields
   streams?: Stream | null
 }

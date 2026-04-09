@@ -140,7 +140,7 @@ async function execListTasks(
   let query = ctx.adminClient
     .from("items")
     .select(
-      "id, title, description, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, last_touched_at, created_at, custom_fields, streams(name)"
+      "id, title, description, status, stream_id, staleness_score, next_action, due_date, stakes, resistance, last_touched_at, created_at, custom_fields, pinned, streams(name)"
     )
     .eq("user_id", ctx.userId);
 
@@ -200,6 +200,7 @@ async function execListTasks(
       status: t.status,
       stream: (t.streams as { name: string } | null)?.name ?? null,
       company: ((t.custom_fields as Record<string, unknown> | null)?.company as string | undefined) ?? null,
+      pinned: t.pinned ?? false,
       next_action: t.next_action,
       due_date: t.due_date,
       stakes: t.stakes,

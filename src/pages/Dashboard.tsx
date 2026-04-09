@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, Sparkles, Play, Zap } from 'lucide-react'
+import { Clock, Check, ChevronDown, Sparkles, Play, Zap, Pin } from 'lucide-react'
 import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
@@ -106,9 +106,17 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
         className="w-full px-4 py-3 text-left"
       >
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex-shrink-0 text-sm font-medium text-gray-600">
-            {rank}
-          </span>
+          {item.pinned ? (
+            <Pin
+              size={14}
+              className="mt-1 flex-shrink-0 text-yellow-400"
+              aria-label="Pinned to focus"
+            />
+          ) : (
+            <span className="mt-0.5 flex-shrink-0 text-sm font-medium text-gray-600">
+              {rank}
+            </span>
+          )}
 
           <div className="min-w-0 flex-1">
             {/* Stream + company + due tag */}
@@ -291,31 +299,38 @@ export default function Dashboard() {
 
   const FOCUS_LIMIT = 10
   // Filter out snoozed items (Touch +1d snoozes for 24h)
-  const unsnoozedActiveItems = useMemo(() => {
+  // Pinned items always show, regardless of snooze
+  const visibleActiveItems = useMemo(() => {
     if (!activeItems) return []
     return activeItems.filter(
-      (item) => !item.snoozed_until || new Date(item.snoozed_until) <= new Date(now)
+      (item) =>
+        item.pinned ||
+        !item.snoozed_until ||
+        new Date(item.snoozed_until) <= new Date(now)
     )
   }, [activeItems, now])
   const sortedActiveItems = useMemo(
-    () => sortByPriority(unsnoozedActiveItems),
-    [unsnoozedActiveItems]
+    () => sortByPriority(visibleActiveItems),
+    [visibleActiveItems]
   )
-  const focusItems = useMemo(
-    () => sortedActiveItems.slice(0, FOCUS_LIMIT),
-    [sortedActiveItems]
-  )
+  // Always include pinned items + top FOCUS_LIMIT by priority
+  const focusItems = useMemo(() => {
+    const pinned = sortedActiveItems.filter((item) => item.pinned)
+    const unpinned = sortedActiveItems.filter((item) => !item.pinned)
+    const remainingSlots = Math.max(FOCUS_LIMIT - pinned.length, 0)
+    return [...pinned, ...unpinned.slice(0, remainingSlots)]
+  }, [sortedActiveItems])
   const hiddenCount = sortedActiveItems.length - focusItems.length
-  const snoozedCount = (activeItems?.length ?? 0) - unsnoozedActiveItems.length
+  const snoozedCount = (activeItems?.length ?? 0) - visibleActiveItems.length
   const clusterFactors = useMemo(() => getClusterFactors(focusItems), [focusItems])
 
   const dueSoonItems = useMemo(() => {
-    if (!unsnoozedActiveItems) return []
+    if (!visibleActiveItems) return []
     const weekFromNow = new Date(now + 7 * 24 * 60 * 60 * 1000)
-    return unsnoozedActiveItems
+    return visibleActiveItems
       .filter((item) => item.due_date && new Date(item.due_date) <= weekFromNow)
       .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
-  }, [unsnoozedActiveItems, now])
+  }, [visibleActiveItems, now])
 
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />

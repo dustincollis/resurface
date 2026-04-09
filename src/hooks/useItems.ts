@@ -263,6 +263,22 @@ export function useTouchItem() {
   })
 }
 
+export function useTogglePin() {
+  return useMutation({
+    mutationFn: async ({ id, pinned }: { id: string; pinned: boolean }) => {
+      const { error } = await supabase
+        .from('items')
+        .update({ pinned })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['items'] })
+      queryClient.invalidateQueries({ queryKey: ['items', variables.id] })
+    },
+  })
+}
+
 // Manual unsnooze (e.g. if user wants the item back today)
 export function useUnsnoozeItem() {
   return useMutation({

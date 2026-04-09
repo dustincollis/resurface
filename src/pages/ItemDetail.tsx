@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check } from 'lucide-react'
-import { useItem, useUpdateItem, useTouchItem, useDeleteItem } from '../hooks/useItems'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check, Pin, PinOff } from 'lucide-react'
+import { useItem, useUpdateItem, useTouchItem, useDeleteItem, useTogglePin } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
@@ -114,6 +114,7 @@ export default function ItemDetail() {
   const updateItem = useUpdateItem()
   const touchItem = useTouchItem()
   const deleteItem = useDeleteItem()
+  const togglePin = useTogglePin()
   const { data: activities } = useActivityLog(id!)
   const [touchedFlash, setTouchedFlash] = useState(false)
 
@@ -221,13 +222,18 @@ export default function ItemDetail() {
             </span>
           </div>
 
-          <div className="mt-4">
-            <InlineEditable
-              value={item.title}
-              onSave={(title) => updateItem.mutate({ id: item.id, title })}
-              as="h1"
-              className="text-2xl font-bold leading-tight text-white"
-            />
+          <div className="mt-4 flex items-start gap-2">
+            {item.pinned && (
+              <Pin size={18} className="mt-1 flex-shrink-0 text-yellow-400" aria-label="Pinned to focus" />
+            )}
+            <div className="flex-1">
+              <InlineEditable
+                value={item.title}
+                onSave={(title) => updateItem.mutate({ id: item.id, title })}
+                as="h1"
+                className="text-2xl font-bold leading-tight text-white"
+              />
+            </div>
           </div>
 
           <div className="mt-3">
@@ -395,6 +401,30 @@ export default function ItemDetail() {
           </button>
 
           <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={() => togglePin.mutate({ id: item.id, pinned: !item.pinned })}
+              disabled={togglePin.isPending}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border py-2 text-xs transition-colors disabled:opacity-50 ${
+                item.pinned
+                  ? 'border-yellow-700 bg-yellow-900/30 text-yellow-300 hover:bg-yellow-900/50'
+                  : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+              }`}
+              title={
+                item.pinned
+                  ? "Remove from Today's Focus"
+                  : "Pin to Today's Focus regardless of priority score"
+              }
+            >
+              {item.pinned ? (
+                <>
+                  <PinOff size={12} /> Unpin from Focus
+                </>
+              ) : (
+                <>
+                  <Pin size={12} /> Pin to Focus
+                </>
+              )}
+            </button>
             <button
               onClick={handleTouch}
               disabled={touchItem.isPending}

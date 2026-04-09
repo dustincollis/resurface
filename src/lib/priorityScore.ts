@@ -226,8 +226,13 @@ export function getClusterFactors(items: Item[]): ClusterFactor[] {
   return factors.sort((a, b) => b.count - a.count).slice(0, 3)
 }
 
-// Sort items by composite priority (descending). Use this everywhere
-// items need to be ranked: dashboard, stream lists, etc.
+// Sort items by composite priority (descending). Pinned items always
+// come first regardless of score. Use this everywhere items need to
+// be ranked: dashboard, stream lists, etc.
 export function sortByPriority(items: Item[]): Item[] {
-  return [...items].sort((a, b) => computePriority(b) - computePriority(a))
+  return [...items].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return computePriority(b) - computePriority(a)
+  })
 }
