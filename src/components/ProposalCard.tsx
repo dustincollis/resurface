@@ -26,7 +26,7 @@ import {
   defaultAcceptAs,
   type AcceptAs,
 } from '../hooks/useProposals'
-import { usePursuits } from '../hooks/usePursuits'
+import { usePursuits, useCreatePursuit } from '../hooks/usePursuits'
 import type {
   Proposal,
   ProposalType,
@@ -61,8 +61,24 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
   const acceptMut = useAcceptProposal()
   const rejectMut = useRejectProposal()
   const mergeMut = useMergeProposal()
+  const createPursuit = useCreatePursuit()
   const { data: activePursuits } = usePursuits({ status: 'active' })
-  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending
+  const [creatingPursuit, setCreatingPursuit] = useState(false)
+  const [newPursuitName, setNewPursuitName] = useState('')
+  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending || createPursuit.isPending
+
+  const handleCreatePursuit = async () => {
+    if (!newPursuitName.trim()) return
+    try {
+      const pursuit = await createPursuit.mutateAsync({ name: newPursuitName.trim() })
+      setPursuitId(pursuit.id)
+      setNewPursuitName('')
+      setCreatingPursuit(false)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      alert(`Could not create pursuit: ${msg}`)
+    }
+  }
 
   const confidenceColor =
     proposal.confidence == null
@@ -251,29 +267,72 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
             </button>
           </div>
 
-          {/* Pursuit selector — only show if user has at least one active pursuit */}
-          {(activePursuits ?? []).length > 0 && (
-            <>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                · Pursuit
-              </span>
-              <div className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 px-1.5 py-0.5">
-                <Target size={10} className="text-gray-500" />
-                <select
-                  value={pursuitId ?? ''}
-                  onChange={(e) => setPursuitId(e.target.value || null)}
-                  disabled={busy}
-                  className="border-none bg-transparent text-[11px] text-gray-300 focus:outline-none disabled:opacity-50"
-                >
-                  <option value="">none</option>
-                  {(activePursuits ?? []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
+          {/* Pursuit selector — always show; users can create a new pursuit
+              inline even if they have zero existing ones */}
+          <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+            · Pursuit
+          </span>
+          {creatingPursuit ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={newPursuitName}
+                onChange={(e) => setNewPursuitName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreatePursuit()
+                  if (e.key === 'Escape') {
+                    setCreatingPursuit(false)
+                    setNewPursuitName('')
+                  }
+                }}
+                placeholder="New pursuit name..."
+                autoFocus
+                disabled={busy}
+                className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[11px] text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={handleCreatePursuit}
+                disabled={!newPursuitName.trim() || busy}
+                className="rounded bg-purple-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+              >
+                {createPursuit.isPending ? <Loader2 size={10} className="animate-spin" /> : 'Create'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingPursuit(false)
+                  setNewPursuitName('')
+                }}
+                disabled={busy}
+                className="rounded px-1.5 py-0.5 text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 px-1.5 py-0.5">
+              <Target size={10} className="text-gray-500" />
+              <select
+                value={pursuitId ?? ''}
+                onChange={(e) => {
+                  if (e.target.value === '__new__') {
+                    setCreatingPursuit(true)
+                  } else {
+                    setPursuitId(e.target.value || null)
+                  }
+                }}
+                disabled={busy}
+                className="border-none bg-transparent text-[11px] text-gray-300 focus:outline-none disabled:opacity-50"
+              >
+                <option value="">none</option>
+                {(activePursuits ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+                <option value="__new__">+ Create new pursuit...</option>
+              </select>
+            </div>
           )}
         </div>
       )}
