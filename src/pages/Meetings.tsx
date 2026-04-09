@@ -134,6 +134,7 @@ export default function Meetings() {
       let resolvedStartTime: string | undefined = newDate
         ? new Date(`${newDate}T12:00:00`).toISOString()
         : undefined
+      let resolvedAttendees: string[] | undefined = undefined
 
       if (transcriptTrimmed && isHiNotesUrl(transcriptTrimmed)) {
         const { data, error } = await supabase.functions.invoke('hinotes-fetch', {
@@ -159,14 +160,15 @@ export default function Meetings() {
           start_time?: string | null
           speaker_mapping?: Record<string, string>
           speakers_named?: number
+          attendees?: string[]
         }
         if (!fetched.content) {
           throw new Error('HiNotes returned no content for that share URL.')
         }
-        // Diagnostic — surface speaker mapping in console so we can verify
-        // whether HiNotes' summary actually contains Speaker N (Name) hints.
+        // Diagnostic — surface speaker mapping + attendees in console.
         console.log('[hinotes-fetch] speakers_named =', fetched.speakers_named ?? 0)
         console.log('[hinotes-fetch] speaker_mapping =', fetched.speaker_mapping ?? {})
+        console.log('[hinotes-fetch] attendees =', fetched.attendees ?? [])
         if (fetched.content) {
           console.log('[hinotes-fetch] first 500 chars of content =', fetched.content.slice(0, 500))
         }
@@ -179,6 +181,9 @@ export default function Meetings() {
         if (fetched.start_time) {
           resolvedStartTime = fetched.start_time
         }
+        if (fetched.attendees && fetched.attendees.length > 0) {
+          resolvedAttendees = fetched.attendees
+        }
       }
 
       // Title fallback: explicit/resolved title > "Untitled discussion".
@@ -190,6 +195,7 @@ export default function Meetings() {
         title,
         start_time: resolvedStartTime,
         import_mode: newMode,
+        attendees: resolvedAttendees,
       })
 
       // If we have content to parse, upload + parse in the same action so

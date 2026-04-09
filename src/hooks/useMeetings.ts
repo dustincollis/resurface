@@ -83,6 +83,7 @@ export function useCreateMeeting() {
       start_time?: string
       end_time?: string
       import_mode?: MeetingImportMode
+      attendees?: string[]
     }) => {
       const { data, error } = await supabase
         .from('meetings')

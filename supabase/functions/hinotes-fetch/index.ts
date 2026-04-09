@@ -92,6 +92,34 @@ function formatOffset(ms: number): string {
 const NAME_BEFORE_SPEAKER = /([A-Z][a-zA-Z'\-.]*(?:\s+[A-Z][a-zA-Z'\-.]+)*)\s*\(Speaker\s+(\d+)\)/g;
 const SPEAKER_BEFORE_NAME = /Speaker\s+(\d+)\s*\(([^)]+)\)/gi;
 
+// Extract a flat attendee list from the markdown's "Attendee:" line.
+// HiNotes' newer GPT-4.1 summaries write a simple comma-separated list of
+// names rather than Speaker N (Name) annotations, so this is the most
+// reliable place to find a known cast for a meeting.
+//
+// Returns e.g. ["Dustin", "Holly", "Tomas", "Vicky"]
+function extractAttendees(markdown: string | null): string[] {
+  if (!markdown) return [];
+  // Match "**Attendee**: ..." or "Attendee: ..." up to the end of the line
+  const m = markdown.match(/(?:\*\*)?Attendee(?:\*\*)?\s*:\s*([^\n]+)/i);
+  if (!m) return [];
+  const raw = m[1].trim();
+  // Split on commas, strip parenthesized annotations like "(mentioned)" or
+  // "(Speaker 1)", and drop generic catch-all phrases.
+  const names: string[] = [];
+  for (const part of raw.split(/,| and /)) {
+    const cleaned = part
+      .replace(/\([^)]*\)/g, "") // strip parenthesized annotations
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) continue;
+    // Skip catch-all phrases
+    if (/^(other team members.*|adobe representatives|.*team|et al\.?)$/i.test(cleaned)) continue;
+    names.push(cleaned);
+  }
+  return names;
+}
+
 function extractSpeakerMapping(markdown: string | null): Record<string, string> {
   if (!markdown) return {};
   const mapping: Record<string, string> = {};
@@ -273,6 +301,11 @@ Deno.serve(async (req) => {
     // transcript stays as-is.
     const speakerMapping = extractSpeakerMapping(markdown);
 
+    // Extract a flat attendee list from the markdown — even when speaker
+    // mapping isn't available, knowing the cast helps the parser attribute
+    // statements via context.
+    const attendees = extractAttendees(markdown);
+
     // Verbatim transcription is best-effort: if it fails we still return the
     // markdown so the user gets something rather than nothing.
     let verbatimTranscript: string | null = null;
@@ -321,6 +354,10 @@ Deno.serve(async (req) => {
         language,
         tags: tagsStr ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean) : [],
         member_count: memberCount ? Number(memberCount) : null,
+        // Attendee list extracted from the markdown summary. The frontend
+        // sets this on the meeting record so the parser can use it as
+        // context for action attribution.
+        attendees,
         // Diagnostic: which speaker mappings were extracted from the summary.
         // Lets the user verify whether HiNotes' summarization includes
         // Speaker N (Name) annotations at all.

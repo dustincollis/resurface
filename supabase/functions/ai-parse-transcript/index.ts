@@ -154,11 +154,10 @@ Deno.serve(async (req) => {
             role: "user",
             content: `You are analyzing a discussion transcript or notes. The content may be in any format: raw text, timestamped notes, VTT/SRT subtitles, or structured meeting notes. Handle all formats gracefully.
 
-**The user uploading this transcript is ${userDisplayName}.** When you see "${userDisplayName}" (or a clear first-name match) speaking in the transcript, that IS the user. Treat their statements as first-person.
+**The user uploading this transcript is ${userDisplayName}.** When you see "${userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user.
+${meeting.attendees && meeting.attendees.length > 0 ? `\n**Known meeting attendees**: ${meeting.attendees.join(", ")}\nUse this list as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use this attendee list and contextual cues — names mentioned, people addressed directly, "as you said" references — to attribute statements to specific people where you can. If you cannot tell who said something, mark it as "unknown" rather than guessing.\n` : ""}
+**Extraction philosophy**: Capture ALL real action items regardless of who they belong to. Do NOT drop items just because they're not assigned to ${userDisplayName} — better to surface a few items that turn out to be for someone else than to miss real commitments because attribution was unclear. The user will triage in the review queue.
 
-**CRITICAL — User presence check:** Before extracting any "user" action items, verify that ${userDisplayName} actually appears as a speaker or named participant in the transcript. If ${userDisplayName} is NOT a speaker and is NOT mentioned by name anywhere in the content, you MUST mark every action item with the actual speaker's name (e.g. "Brandon", "Sarkis"). Do NOT fall back to assignee="user" just because the upload happened — the user being absent from the conversation means none of the action items are theirs. The system will filter accordingly. It is correct and expected to return zero "user" action items in this case.
-
-${meeting.attendees && meeting.attendees.length > 0 ? `Known meeting attendees (from calendar metadata): ${meeting.attendees.join(", ")}\n` : ""}
 ${typeof user_context === "string" && user_context.length > 0 ? "\n" + user_context + "\n" : `\nToday's date: ${new Date().toISOString().split('T')[0]}\n`}
 Extract these elements:
 
@@ -168,7 +167,7 @@ Extract these elements:
    - "## Participants & Perspectives" — who said what, key positions and concerns (use "- " bullets per participant)
    - "## Outcomes & Next Steps" — what was resolved, what remains open, what happens next
 
-2. **Action Items — STRICT CRITERIA**: Only extract items that are real commitments to act, not topics that were merely discussed. Be conservative. It is much better to return zero action items than to return a speculative or aspirational one.
+2. **Action Items — STRICT CRITERIA**: Only extract items that are real commitments to act, not topics that were merely discussed. Be conservative on what counts as a real commitment, but be GENEROUS about including items regardless of who owns them.
 
    An item COUNTS as an action item ONLY if it meets at least one of these:
    - A person explicitly committed to do something with first-person language: "I'll send X", "I'm going to fix Y", "Let me grab that", "I'll follow up"
@@ -184,8 +183,9 @@ Extract these elements:
    - A general capability or wish: "Eventually we want to have X"
 
    Examples:
-   - ✓ COUNT — "I'll have the deck to you by Friday" → explicit user commitment, due Friday
-   - ✓ COUNT — "Holly: Can you review the contract?" "${userDisplayName}: Yeah, I'll get to it tomorrow" → explicit accepted assignment
+   - ✓ COUNT — "I'll have the deck to you by Friday" → explicit commitment by speaker
+   - ✓ COUNT — "Holly: Can you review the contract?" "Yeah, I'll get to it tomorrow" → explicit accepted assignment to whoever said yes
+   - ✓ COUNT — "Tom is going to update the spreadsheet by Wednesday" → explicit commitment by Tom
    - ✗ SKIP — "We should probably revisit pricing at some point" → speculative, no commitment
    - ✗ SKIP — "It would be great if marketing could help with this" → aspirational, no commitment
    - ✗ SKIP — "We talked about needing better dashboards" → discussion topic, no actor or commitment
@@ -193,10 +193,11 @@ Extract these elements:
 
    For each real action item, return:
    - **commitment_strength**: "explicit" (direct verbal commitment with clear actor and verb) | "implied" (strong implication but not stated directly, e.g. someone restates a plan they're owning). Do NOT return items weaker than "implied" — those are not action items, they are topics.
-   - **assignee**: This is the most important field. Use exactly one of these values:
-     - **"user"** — if the action belongs to ${userDisplayName}. This includes: things ${userDisplayName} explicitly said they'd do ("I'll send the deck"), things others assigned to ${userDisplayName} that ${userDisplayName} accepted, and tasks where ${userDisplayName} is the clear owner. When in doubt and ${userDisplayName} is the speaker stating their own commitment, use "user".
-     - **"<person's name>"** — if the action belongs to someone other than ${userDisplayName}. Use the actual name (e.g. "Holly", "Sarah Chen"). Things others said they'd do, even if relevant to ${userDisplayName}, go here. Do NOT use "user" for these.
-     - **"unknown"** — only if the assignee is genuinely unclear from the transcript.
+   - **assignee**: Best-effort attribution. Use one of:
+     - **"user"** — if the action clearly belongs to ${userDisplayName} (e.g. ${userDisplayName} is the speaker stating their own commitment, or someone explicitly hands the task to ${userDisplayName})
+     - **"<person's name>"** — if you can identify a specific other person who owns the action (use the attendee list when available)
+     - **"unknown"** — when you can tell something was committed but you genuinely cannot determine who said it (common when transcripts have no speaker labels)
+   - Whatever the assignee, INCLUDE THE ITEM. Do not drop items because attribution is uncertain. The user will triage manually.
    - **evidence_quote**: A short verbatim quote from the transcript (under 200 chars) that directly supports this being a real commitment. This is the actual sentence where the commitment was made. If you cannot point to a quote, the item is not real and you should drop it.
    - Assign urgency (high/medium/low)
    - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. Use today's date as the reference. If no due date is implied, use null.
@@ -391,7 +392,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
           ...parsed,
           title: meetingUpdate.title ?? currentTitle,
           proposals_created: 0,
-          skipped_for_others: 0,
+          not_for_user: 0,
           skipped_speculative: 0,
           import_mode: "archive",
         }),
@@ -443,15 +444,12 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
         ? parsed.company.trim()
         : null;
 
-    // Decide which extracted action items belong to the user. STRICT match —
-    // we only accept items where the AI explicitly identified the user.
-    // null/missing/"unknown" are NOT included: those are signs the AI couldn't
-    // place the action with confidence, and historically these were the source
-    // of false positives where users got tagged with random meeting items.
-    //
-    // We normalize the display name to handle email-derived fallbacks
-    // ("dustin.collis", "dustincollis") and compare against the assignee's
-    // tokens too (so "Dustin C." and "Dustin Collis" both match).
+    // We used to filter action items by user assignee, but that dropped real
+    // items whenever attribution was unclear (which is common when transcripts
+    // lack speaker labels). New approach: include all real action items
+    // regardless of who they belong to. The user triages in the review queue.
+    // Speculative items are still dropped — those are topics, not actions.
+
     function normalizeName(s: string): string {
       return s
         .toLowerCase()
@@ -467,13 +465,10 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       if (!assignee) return false;
       const raw = assignee.trim().toLowerCase();
       if (raw === "user") return true;
-      // "unknown" is dropped — too noisy in practice
       if (raw === "unknown") return false;
       const norm = normalizeName(assignee);
       if (norm === userNameNorm) return true;
-      // First-name match only when first name is distinctive (>=3 chars)
       if (userFirstToken.length >= 3 && norm === userFirstToken) return true;
-      // Multi-token match: assignee tokens are a subset of user tokens
       const assigneeTokens = norm.split(" ").filter((t) => t.length >= 2);
       if (
         assigneeTokens.length > 0 &&
@@ -487,16 +482,16 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     const titledActionItems = actionItems.filter(
       (a) => typeof a?.title === "string" && a.title.trim().length > 0
     );
-    // Drop anything the model still labeled speculative even after the
-    // strict prompt — belt and suspenders.
     const realCommitments = titledActionItems.filter(
       (a) => a.commitment_strength !== "speculative"
     );
     const skippedSpeculative = titledActionItems.length - realCommitments.length;
-    const userActionItems = realCommitments.filter((a) => isUserAssignee(a.assignee));
-    const skippedForOthers = realCommitments.length - userActionItems.length;
+    const allActionItems = realCommitments;
+    // Track how many items couldn't be attributed to the user, for the
+    // success banner — but include them all in the proposals queue.
+    const notForUser = allActionItems.filter((a) => !isUserAssignee(a.assignee)).length;
 
-    const proposalRows: ProposalInsert[] = userActionItems.map((a) => {
+    const proposalRows: ProposalInsert[] = allActionItems.map((a) => {
       const flags: string[] = [];
       if (!a.suggested_due_date) {
         flags.push("no_due_date");
@@ -611,7 +606,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
         title: meetingUpdate.title ?? currentTitle,
         proposals_created: proposalRows.length,
         commitments_created: commitmentRows.length,
-        skipped_for_others: skippedForOthers,
+        not_for_user: notForUser,
         skipped_speculative: skippedSpeculative,
         import_mode: "active",
       }),

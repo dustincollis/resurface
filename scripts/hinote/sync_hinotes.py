@@ -89,9 +89,6 @@ def hinotes_list_notes(page_index=0, page_size=20):
     return body["data"]["content"]
 
 
-_DEBUG_DUMPED = {"transcription": False, "speakers": False, "detail": False}
-
-
 def hinotes_get_transcription(note_id: str):
     """Fetch timestamped, speaker-diarized transcript for a note."""
     resp = requests.post(
@@ -103,42 +100,7 @@ def hinotes_get_transcription(note_id: str):
     body = resp.json()
     if body.get("error") != 0:
         raise RuntimeError(f"HiNotes transcription error: {body}")
-    data = body["data"]
-    # One-time debug: summarize the speaker field across ALL segments so
-    # we can see whether HiNotes is providing speaker IDs at all.
-    if not _DEBUG_DUMPED["transcription"] and data:
-        _DEBUG_DUMPED["transcription"] = True
-        if isinstance(data, list):
-            print(
-                f"\n[DEBUG] /v2/note/transcription/list — segment count: {len(data)}",
-                file=sys.stderr,
-            )
-            if data:
-                first = data[0]
-                if isinstance(first, dict):
-                    print(
-                        f"[DEBUG] first segment keys: {list(first.keys())}",
-                        file=sys.stderr,
-                    )
-                    # Print all non-sentence/token fields of the first segment
-                    quiet = {k: v for k, v in first.items() if k not in ("sentence", "tokens")}
-                    print(
-                        f"[DEBUG] first segment (excluding sentence/tokens): {json.dumps(quiet, default=str)}",
-                        file=sys.stderr,
-                    )
-                    # Distinct speaker values across all segments
-                    speaker_values = {}
-                    for seg in data:
-                        if isinstance(seg, dict):
-                            sp = seg.get("speaker")
-                            key = repr(sp)  # captures None vs "" vs "Speaker 1" distinctly
-                            speaker_values[key] = speaker_values.get(key, 0) + 1
-                    print(
-                        f"[DEBUG] distinct speaker values across {len(data)} segments: {speaker_values}",
-                        file=sys.stderr,
-                    )
-            print("", file=sys.stderr)
-    return data
+    return body["data"]
 
 
 def hinotes_get_detail(note_id: str):
@@ -152,27 +114,7 @@ def hinotes_get_detail(note_id: str):
     body = resp.json()
     if body.get("error") != 0:
         raise RuntimeError(f"HiNotes detail error: {body}")
-    note = body["data"]["note"]
-    # One-time debug: dump the note's top-level keys + the first ~1200 chars
-    # of any field that looks summary-shaped, so we can find the markdown
-    # and see whether it contains "Speaker N" annotations.
-    if not _DEBUG_DUMPED["detail"]:
-        _DEBUG_DUMPED["detail"] = True
-        if isinstance(note, dict):
-            print(
-                f"\n[DEBUG] /v2/note/detail — note top-level keys: {list(note.keys())}",
-                file=sys.stderr,
-            )
-            # Always dump these specific fields if present, regardless of content
-            for key in ("markdown", "summary", "html"):
-                val = note.get(key)
-                if isinstance(val, str) and val:
-                    print(
-                        f"[DEBUG] note['{key}'] (first 1200 chars):\n{val[:1200]}\n---",
-                        file=sys.stderr,
-                    )
-            print("", file=sys.stderr)
-    return note
+    return body["data"]["note"]
 
 
 def hinotes_get_speakers(note_id: str):
@@ -186,15 +128,7 @@ def hinotes_get_speakers(note_id: str):
     body = resp.json()
     if body.get("error") != 0:
         return []
-    data = body.get("data", []) or []
-    # One-time debug: dump the speaker list's raw structure
-    if not _DEBUG_DUMPED["speakers"]:
-        _DEBUG_DUMPED["speakers"] = True
-        print(
-            f"\n[DEBUG] /v2/note/speaker/list — full response data: {json.dumps(data, default=str)[:600]}\n",
-            file=sys.stderr,
-        )
-    return data
+    return body.get("data", []) or []
 
 
 # ---------------------------------------------------------------------------
@@ -216,19 +150,14 @@ SPEAKER_BEFORE_NAME = re.compile(r"Speaker\s+(\d+)\s*\(([^)]+)\)", re.IGNORECASE
 def extract_speaker_mapping(detail) -> dict:
     """
     Build a {"Speaker 1": "Robin", "Speaker 3": "Dustin"} mapping from a
-    HiNotes note detail. Searches the entire JSON-stringified detail object
-    so we don't depend on a specific field name (markdown / outline /
-    summary / etc).
-
-    Returns an empty dict if no patterns are found — caller falls back to
-    the original "Speaker N" labels.
+    HiNotes note detail. Only useful when HiNotes' summary actually contains
+    Speaker N annotations — most don't, so this usually returns {}.
     """
     if not detail:
         return {}
     haystack = json.dumps(detail) if not isinstance(detail, str) else detail
     mapping = {}
 
-    # Pattern 1: Name (Speaker N) — current GPT-4.1 format
     for match in NAME_BEFORE_SPEAKER.finditer(haystack):
         name = match.group(1).strip()
         num = match.group(2)
@@ -236,7 +165,6 @@ def extract_speaker_mapping(detail) -> dict:
         if key not in mapping:
             mapping[key] = name
 
-    # Pattern 2: Speaker N (Name) — older format, only fill in gaps
     for match in SPEAKER_BEFORE_NAME.finditer(haystack):
         num = match.group(1)
         name = match.group(2).strip()
@@ -247,6 +175,57 @@ def extract_speaker_mapping(detail) -> dict:
             mapping[key] = name
 
     return mapping
+
+
+# Match the "Attendee" line in HiNotes' markdown/html summary, e.g.:
+#   - **Attendee**: Dustin, Holly, Tomas, Vicky, Monica
+#   <strong>Attendee</strong>: Dustin, Holly, ...
+ATTENDEE_LINE = re.compile(
+    r"(?:\*\*|<strong>)?\s*Attendee\s*(?:\*\*|</strong>)?\s*[:：]\s*([^\n<]+)",
+    re.IGNORECASE,
+)
+# Catch-all phrases we should NOT treat as attendees
+ATTENDEE_NOISE = re.compile(
+    r"^(other team members.*|.*representatives|.*team|et al\.?|and\s+others?)$",
+    re.IGNORECASE,
+)
+
+
+def extract_attendees_from_summary(detail) -> list:
+    """
+    Pull a flat list of attendee names from a HiNotes note detail. HiNotes'
+    GPT-4.1 summarizer writes a comma-separated list under "Attendee:" in
+    both the markdown and html fields. We search both because either may be
+    populated.
+
+    Returns e.g. ["Dustin", "Holly", "Tomas", "Vicky", "Monica"].
+    """
+    if not detail or not isinstance(detail, dict):
+        return []
+    sources = []
+    for field in ("markdown", "html", "summary"):
+        val = detail.get(field)
+        if isinstance(val, str) and val:
+            sources.append(val)
+    seen = set()
+    out = []
+    for src in sources:
+        m = ATTENDEE_LINE.search(src)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        for part in re.split(r",|\sand\s", raw):
+            cleaned = re.sub(r"\([^)]*\)", "", part)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            if not cleaned or cleaned.lower() in seen:
+                continue
+            if ATTENDEE_NOISE.match(cleaned):
+                continue
+            seen.add(cleaned.lower())
+            out.append(cleaned)
+        if out:
+            break  # use the first source that yielded anything
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -429,18 +408,25 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
                 errors += 1
                 continue
 
-            # Best-effort: fetch the note detail to get the summary markdown,
-            # which contains "Name (Speaker N)" annotations from HiNotes' AI.
-            # The mapping lets us substitute generic speaker labels with real
-            # names in the verbatim transcript before the parser sees it.
+            # Best-effort: fetch the note detail for two purposes:
+            #   1. Speaker mapping (rare — only when HiNotes diarized AND
+            #      summarized with Speaker N annotations).
+            #   2. Attendee list (common — HiNotes' GPT-4.1 summarizer puts
+            #      a flat name list under "Attendee:" in the markdown/html).
+            # The attendee list is what makes the parser able to attribute
+            # statements when transcripts have no speaker labels at all.
             speaker_mapping = {}
+            summary_attendees: list = []
             try:
                 detail = hinotes_get_detail(note_id)
                 speaker_mapping = extract_speaker_mapping(detail)
+                summary_attendees = extract_attendees_from_summary(detail)
                 if speaker_mapping:
                     print(f"    Speakers identified: {len(speaker_mapping)} ({', '.join(f'{k}={v}' for k, v in speaker_mapping.items())})")
+                if summary_attendees:
+                    print(f"    Attendees from summary: {', '.join(summary_attendees)}")
             except Exception as e:
-                print(f"    Could not fetch note detail (no speaker mapping): {e}")
+                print(f"    Could not fetch note detail: {e}")
 
             if not segments:
                 print(f"    No transcript segments, skipping.")
@@ -448,7 +434,12 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
                 continue
 
             transcript = format_transcript(segments, speaker_mapping)
-            attendees = extract_attendees(segments, speakers_data, speaker_mapping)
+            # Prefer the summary's attendee list (real names) over the
+            # generic speaker labels from segments.
+            if summary_attendees:
+                attendees = summary_attendees
+            else:
+                attendees = extract_attendees(segments, speakers_data, speaker_mapping)
 
             # Calculate end_time from last segment
             last_end_ms = max(s.get("endTime", 0) for s in segments)

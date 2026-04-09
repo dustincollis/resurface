@@ -595,22 +595,15 @@ export default function MeetingDetail() {
           {uploadTranscript.isSuccess && uploadTranscript.data && (() => {
             const data = uploadTranscript.data as {
               proposals_created?: number
-              skipped_for_others?: number
+              not_for_user?: number
               skipped_speculative?: number
             }
             const count = data.proposals_created ?? 0
-            const skippedOthers = data.skipped_for_others ?? 0
+            const notForUser = data.not_for_user ?? 0
             const skippedSpec = data.skipped_speculative ?? 0
-            const skipNotes: string[] = []
-            if (skippedOthers > 0) {
-              skipNotes.push(`${skippedOthers} for other people`)
-            }
-            if (skippedSpec > 0) {
-              skipNotes.push(`${skippedSpec} speculative`)
-            }
             return (
               <div className="mt-2 rounded border border-green-900/40 bg-green-950/30 px-3 py-2 text-xs">
-                {count === 0 && skippedOthers === 0 && skippedSpec === 0 ? (
+                {count === 0 && skippedSpec === 0 ? (
                   <div className="flex items-center gap-2 text-gray-300">
                     <Check size={14} className="text-green-400" />
                     <span>Processed. No action items extracted from this discussion.</span>
@@ -619,7 +612,7 @@ export default function MeetingDetail() {
                   <div className="flex items-center gap-2 text-gray-300">
                     <Check size={14} className="text-green-400" />
                     <span>
-                      Processed. No commitments for you — skipped {skipNotes.join(' and ')}.
+                      Processed. No real action items — {skippedSpec} speculative item{skippedSpec !== 1 ? 's' : ''} dropped.
                     </span>
                   </div>
                 ) : (
@@ -628,8 +621,13 @@ export default function MeetingDetail() {
                     <span>
                       {count} proposal{count !== 1 ? 's' : ''} created from this discussion.
                     </span>
-                    {skipNotes.length > 0 && (
-                      <span className="text-gray-400">· skipped {skipNotes.join(', ')}</span>
+                    {notForUser > 0 && (
+                      <span className="text-gray-400">
+                        · {notForUser} {notForUser === 1 ? 'is' : 'are'} for other people (triage in queue)
+                      </span>
+                    )}
+                    {skippedSpec > 0 && (
+                      <span className="text-gray-400">· {skippedSpec} speculative dropped</span>
                     )}
                     <Link
                       to={`/proposals?source_type=meeting&source_id=${meeting.id}`}
