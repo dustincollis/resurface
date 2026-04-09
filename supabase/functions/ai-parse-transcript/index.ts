@@ -32,24 +32,18 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Verify user from JWT
+    // Auth: support both browser-side user JWTs AND server-to-server
+    // service role calls (from the Python sync script). The two flows
+    // diverge on how we determine the target user_id.
     const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-    } = await adminClient.auth.getUser(token);
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const isServiceRole = token === serviceRoleKey;
 
-    // Verify meeting ownership
+    // Look up the meeting first regardless of auth path. Service role calls
+    // derive user_id from the meeting record; user JWT calls verify ownership.
     const { data: meeting, error: meetingError } = await adminClient
       .from("meetings")
       .select("*")
       .eq("id", meeting_id)
-      .eq("user_id", user.id)
       .single();
 
     if (meetingError || !meeting) {
@@ -59,23 +53,49 @@ Deno.serve(async (req) => {
       });
     }
 
+    let userId: string;
+    let userEmail: string | null = null;
+    if (isServiceRole) {
+      // Trust the caller; the meeting row already tells us who owns it.
+      userId = meeting.user_id;
+    } else {
+      // Browser flow: verify the JWT and check ownership.
+      const {
+        data: { user },
+      } = await adminClient.auth.getUser(token);
+      if (!user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (meeting.user_id !== user.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+      userEmail = user.email ?? null;
+    }
+
     // Fetch user's display name so we can teach the AI who "the user" is
     // by name, and so we can later filter action items by assignee.
     const { data: profile } = await adminClient
       .from("profiles")
       .select("display_name")
-      .eq("id", user.id)
+      .eq("id", userId)
       .single();
     const userDisplayName: string =
       (profile?.display_name as string | undefined)?.trim() ||
-      user.email?.split("@")[0] ||
+      userEmail?.split("@")[0] ||
       "the user";
 
     // Get user's existing items for cross-referencing
     const { data: items } = await adminClient
       .from("items")
       .select("id, title, stream_id, streams(name)")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .not("status", "in", '("done","dropped")')
       .limit(50);
 
@@ -330,7 +350,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       await adminClient
         .from("proposals")
         .delete()
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("source_type", "meeting")
         .eq("source_id", meeting_id)
         .eq("status", "pending");
@@ -356,7 +376,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     await adminClient
       .from("proposals")
       .delete()
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("source_type", "meeting")
       .eq("source_id", meeting_id)
       .eq("status", "pending");
@@ -466,7 +486,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
           : null;
 
       return {
-        user_id: user.id,
+        user_id: userId,
         proposal_type: "task",
         source_type: "meeting",
         source_id: meeting_id,
@@ -522,7 +542,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
         const company = c.company ?? discussionCompany;
 
         return {
-          user_id: user.id,
+          user_id: userId,
           proposal_type: "commitment",
           source_type: "meeting",
           source_id: meeting_id,
