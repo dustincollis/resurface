@@ -86,8 +86,14 @@ interface DecomposeSectionProps {
 export default function DecomposeSection({ item }: DecomposeSectionProps) {
   const navigate = useNavigate()
   const { data: children } = useChildItems(item.id)
+  const { data: parentChildren } = useChildItems(item.parent_id ?? '')
   const decompose = useDecomposeItem()
   const [proposals, setProposals] = useState<ProposedSubTask[] | null>(null)
+
+  // Siblings = other children of the same parent (excludes self)
+  const siblings = item.parent_id
+    ? (parentChildren ?? []).filter((c) => c.id !== item.id)
+    : []
 
   const handleDecompose = () => {
     decompose.mutate(item.id, {
@@ -146,6 +152,28 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
         </div>
       )}
 
+      {/* Siblings — other sub-tasks of the same parent */}
+      {siblings.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-gray-500">
+            Other sub-tasks in this group ({siblings.length})
+          </p>
+          <div className="space-y-1.5">
+            {siblings.map((sibling) => (
+              <button
+                key={sibling.id}
+                onClick={() => navigate(`/items/${sibling.id}`)}
+                className="flex w-full items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-900"
+              >
+                <ChevronRight size={14} className="flex-shrink-0 text-gray-600" />
+                <span className="flex-1 truncate text-sm text-gray-300">{sibling.title}</span>
+                <StatusBadge status={sibling.status} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Proposed sub-tasks */}
       {proposals && proposals.length > 0 && (
         <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
@@ -180,7 +208,7 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
         </p>
       )}
 
-      {!hasChildren && !proposals && !decompose.isPending && (
+      {!hasChildren && !proposals && !decompose.isPending && siblings.length === 0 && (
         <p className="text-xs text-gray-600">
           Click &ldquo;Break down&rdquo; to get AI-suggested sub-tasks for this task.
         </p>
