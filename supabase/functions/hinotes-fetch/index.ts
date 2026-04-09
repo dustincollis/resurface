@@ -80,21 +80,72 @@ function formatOffset(ms: number): string {
   return `${mm}:${ss}`;
 }
 
+// Find speaker-name annotations anywhere in the markdown summary and
+// build a mapping from generic speaker labels to identified names.
+//
+// HiNotes' GPT-4.1 summarizer writes "Name (Speaker N)" — capitalized
+// name(s) immediately followed by "(Speaker N)". An older summarizer
+// used the inverse "Speaker N (Name)". We try both patterns so format
+// drift doesn't break us.
+//
+// Returns e.g. { "Speaker 1": "Robin", "Speaker 3": "Dustin" }
+const NAME_BEFORE_SPEAKER = /([A-Z][a-zA-Z'\-.]*(?:\s+[A-Z][a-zA-Z'\-.]+)*)\s*\(Speaker\s+(\d+)\)/g;
+const SPEAKER_BEFORE_NAME = /Speaker\s+(\d+)\s*\(([^)]+)\)/gi;
+
+function extractSpeakerMapping(markdown: string | null): Record<string, string> {
+  if (!markdown) return {};
+  const mapping: Record<string, string> = {};
+
+  // Pattern 1: Name (Speaker N) — current GPT-4.1 format
+  NAME_BEFORE_SPEAKER.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = NAME_BEFORE_SPEAKER.exec(markdown)) !== null) {
+    const name = m[1].trim();
+    const num = m[2];
+    const key = `Speaker ${num}`;
+    if (!(key in mapping)) {
+      mapping[key] = name;
+    }
+  }
+
+  // Pattern 2: Speaker N (Name) — older format, only fill in gaps
+  SPEAKER_BEFORE_NAME.lastIndex = 0;
+  while ((m = SPEAKER_BEFORE_NAME.exec(markdown)) !== null) {
+    const num = m[1];
+    const name = m[2].trim();
+    if (/^mentioned$/i.test(name)) continue;
+    const key = `Speaker ${num}`;
+    if (!(key in mapping)) {
+      mapping[key] = name;
+    }
+  }
+
+  return mapping;
+}
+
 // Parse the /v1/share/transcription/list response into a single readable
 // transcript string. Each <data> block has speaker + sentence + beginTime.
-function parseTranscriptionXml(xml: string): string {
+// If a speakerMapping is provided, generic "Speaker N" labels are replaced
+// with their identified names.
+function parseTranscriptionXml(
+  xml: string,
+  speakerMapping: Record<string, string> = {}
+): string {
   // Each utterance is wrapped in a <data> block at the top level of <Result>.
   // We split on </data> to get the blocks (the regex approach in pickAllTags
   // doesn't work because <data> contains nested tags).
   const blocks = xml.split(/<\/data>/);
   const lines: string[] = [];
   for (const block of blocks) {
-    const speaker = pickTag(block, "speaker");
+    const rawSpeaker = pickTag(block, "speaker");
     const sentence = pickTag(block, "sentence");
     const beginTimeStr = pickTag(block, "beginTime");
     if (!sentence) continue;
     const beginTime = beginTimeStr ? Number(beginTimeStr) : null;
     const stamp = beginTime != null && !isNaN(beginTime) ? `[${formatOffset(beginTime)}] ` : "";
+    const speaker = rawSpeaker
+      ? (speakerMapping[rawSpeaker] ?? rawSpeaker)
+      : null;
     const who = speaker ? `${speaker}: ` : "";
     lines.push(`${stamp}${who}${sentence}`);
   }
@@ -189,20 +240,6 @@ Deno.serve(async (req) => {
 
     const xml = await noteRes.text();
 
-    // Verbatim transcription is best-effort: if it fails we still return the
-    // markdown so the user gets something rather than nothing.
-    let verbatimTranscript: string | null = null;
-    if (transcriptionRes.ok) {
-      const transcriptionXml = await transcriptionRes.text();
-      const tErr = pickTag(transcriptionXml, "error");
-      if (!tErr || tErr === "0") {
-        const formatted = parseTranscriptionXml(transcriptionXml);
-        if (formatted.length > 0) {
-          verbatimTranscript = formatted;
-        }
-      }
-    }
-
     // The XML envelope wraps the success/error code. Surface upstream errors.
     const upstreamError = pickTag(xml, "error");
     if (upstreamError && upstreamError !== "0") {
@@ -228,6 +265,27 @@ Deno.serve(async (req) => {
     const language = pickTag(xml, "language");
     const tagsStr = pickTag(xml, "tags");
     const memberCount = pickTag(xml, "memberCount");
+
+    // Build the speaker name mapping FROM the markdown summary so we can
+    // substitute generic "Speaker N" labels with real names in the verbatim
+    // transcript before returning. If the summary doesn't contain any
+    // Speaker N (Name) annotations, this is an empty object and the
+    // transcript stays as-is.
+    const speakerMapping = extractSpeakerMapping(markdown);
+
+    // Verbatim transcription is best-effort: if it fails we still return the
+    // markdown so the user gets something rather than nothing.
+    let verbatimTranscript: string | null = null;
+    if (transcriptionRes.ok) {
+      const transcriptionXml = await transcriptionRes.text();
+      const tErr = pickTag(transcriptionXml, "error");
+      if (!tErr || tErr === "0") {
+        const formatted = parseTranscriptionXml(transcriptionXml, speakerMapping);
+        if (formatted.length > 0) {
+          verbatimTranscript = formatted;
+        }
+      }
+    }
 
     const createTime = createTimeStr ? Number(createTimeStr) : null;
     const startTimeISO =
@@ -263,6 +321,11 @@ Deno.serve(async (req) => {
         language,
         tags: tagsStr ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean) : [],
         member_count: memberCount ? Number(memberCount) : null,
+        // Diagnostic: which speaker mappings were extracted from the summary.
+        // Lets the user verify whether HiNotes' summarization includes
+        // Speaker N (Name) annotations at all.
+        speaker_mapping: speakerMapping,
+        speakers_named: Object.keys(speakerMapping).length,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

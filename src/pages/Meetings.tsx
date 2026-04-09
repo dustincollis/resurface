@@ -157,9 +157,18 @@ export default function Meetings() {
           content?: string
           content_source?: 'verbatim_transcript' | 'markdown_outline'
           start_time?: string | null
+          speaker_mapping?: Record<string, string>
+          speakers_named?: number
         }
         if (!fetched.content) {
           throw new Error('HiNotes returned no content for that share URL.')
+        }
+        // Diagnostic — surface speaker mapping in console so we can verify
+        // whether HiNotes' summary actually contains Speaker N (Name) hints.
+        console.log('[hinotes-fetch] speakers_named =', fetched.speakers_named ?? 0)
+        console.log('[hinotes-fetch] speaker_mapping =', fetched.speaker_mapping ?? {})
+        if (fetched.content) {
+          console.log('[hinotes-fetch] first 500 chars of content =', fetched.content.slice(0, 500))
         }
         resolvedTranscript = fetched.content
         // Only override the title with the HiNotes one if the user didn't
