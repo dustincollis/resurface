@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, Che
 import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, type MeetingImportMode } from '../hooks/useMeetings'
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
+import { useCommitmentsByMeeting } from '../hooks/useCommitments'
 import { queryClient } from '../lib/queryClient'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -46,6 +47,7 @@ export default function MeetingDetail() {
   const { data: meeting, isLoading } = useMeeting(id!)
   const { data: linkedTasks } = useItemsByDiscussion(id!)
   const { data: meetingProposals } = useProposalsBySource('meeting', id!)
+  const { data: meetingCommitments } = useCommitmentsByMeeting(id!)
   const uploadTranscript = useUploadTranscript()
   const updateMeeting = useUpdateMeeting()
   const deleteMeeting = useDeleteMeeting()
@@ -321,6 +323,50 @@ export default function MeetingDetail() {
                   </button>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Commitments tied to this discussion */}
+        {meetingCommitments && meetingCommitments.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 text-sm font-medium text-gray-300">
+              Commitments from this discussion ({meetingCommitments.length})
+            </h3>
+            <div className="space-y-1.5">
+              {meetingCommitments.map((c) => (
+                <Link
+                  key={c.id}
+                  to="/commitments"
+                  className="flex w-full items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-900"
+                >
+                  <ChevronRight size={14} className="flex-shrink-0 text-gray-600" />
+                  <span className="flex-1 truncate text-sm text-gray-200">{c.title}</span>
+                  {c.counterpart && (
+                    <span className="flex-shrink-0 rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      for {c.counterpart}
+                    </span>
+                  )}
+                  {c.do_by && (
+                    <span className="flex-shrink-0 text-[10px] text-gray-500">
+                      by {new Date(c.do_by + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                  <span
+                    className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
+                      c.status === 'open'
+                        ? 'bg-amber-900/30 text-amber-300'
+                        : c.status === 'met'
+                          ? 'bg-green-900/30 text-green-300'
+                          : c.status === 'waiting'
+                            ? 'bg-blue-900/30 text-blue-300'
+                            : 'bg-gray-800 text-gray-500'
+                    }`}
+                  >
+                    {c.status}
+                  </span>
+                </Link>
+              ))}
             </div>
           </div>
         )}

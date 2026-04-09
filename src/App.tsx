@@ -12,6 +12,7 @@ import ItemDetail from './pages/ItemDetail'
 import Meetings from './pages/Meetings'
 import MeetingDetail from './pages/MeetingDetail'
 import Proposals from './pages/Proposals'
+import Commitments from './pages/Commitments'
 import Settings from './pages/Settings'
 import MicrosoftCallback from './pages/MicrosoftCallback'
 
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="meetings" element={<Meetings />} />
               <Route path="meetings/:id" element={<MeetingDetail />} />
               <Route path="proposals" element={<Proposals />} />
+              <Route path="commitments" element={<Commitments />} />
               <Route path="settings" element={<Settings />} />
               <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
             </Route>

@@ -21,7 +21,12 @@ import {
   useRejectProposal,
   useMergeProposal,
 } from '../hooks/useProposals'
-import type { Proposal, ProposalType, TaskProposalPayload } from '../lib/types'
+import type {
+  Proposal,
+  ProposalType,
+  TaskProposalPayload,
+  CommitmentProposalPayload,
+} from '../lib/types'
 
 interface ProposalCardProps {
   proposal: Proposal
@@ -32,7 +37,7 @@ const TYPE_META: Record<
   { icon: typeof CheckSquare; label: string; supported: boolean }
 > = {
   task: { icon: CheckSquare, label: 'Task', supported: true },
-  commitment: { icon: Handshake, label: 'Commitment', supported: false },
+  commitment: { icon: Handshake, label: 'Commitment', supported: true },
   memory: { icon: Brain, label: 'Memory', supported: false },
   draft: { icon: FileEdit, label: 'Draft', supported: false },
   deadline_adjustment: { icon: CalendarClock, label: 'Deadline change', supported: false },
@@ -57,13 +62,15 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
           ? 'bg-yellow-900/40 text-yellow-300'
           : 'bg-orange-900/40 text-orange-300'
 
-  // Pull account context from the payload for the prominent header
-  const taskPayload =
-    proposal.proposal_type === 'task'
-      ? (proposal.normalized_payload as unknown as TaskProposalPayload)
-      : null
-  const company = taskPayload?.company ?? null
+  // Pull account context from the payload for the prominent header.
+  // Both task and commitment payloads carry a `company` field.
+  const payload = proposal.normalized_payload as unknown as
+    | (Partial<TaskProposalPayload> & Partial<CommitmentProposalPayload>)
+    | undefined
+  const company = payload?.company ?? null
   const sourceTitle = proposal.source_title ?? null
+  const isTask = proposal.proposal_type === 'task'
+  const isCommitment = proposal.proposal_type === 'commitment'
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900">
@@ -119,17 +126,31 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
       <div className="px-4 py-3">
         {meta.supported ? (
           mode === 'edit' ? (
-            <TaskEditor
-              proposal={proposal}
-              onCancel={() => setMode('view')}
-              onSave={(edited) => {
-                acceptMut.mutate(
-                  { proposal, editedPayload: edited as unknown as Record<string, unknown> },
-                  { onSuccess: () => setMode('view') }
-                )
-              }}
-              busy={busy}
-            />
+            isCommitment ? (
+              <CommitmentEditor
+                proposal={proposal}
+                onCancel={() => setMode('view')}
+                onSave={(edited) => {
+                  acceptMut.mutate(
+                    { proposal, editedPayload: edited as unknown as Record<string, unknown> },
+                    { onSuccess: () => setMode('view') }
+                  )
+                }}
+                busy={busy}
+              />
+            ) : (
+              <TaskEditor
+                proposal={proposal}
+                onCancel={() => setMode('view')}
+                onSave={(edited) => {
+                  acceptMut.mutate(
+                    { proposal, editedPayload: edited as unknown as Record<string, unknown> },
+                    { onSuccess: () => setMode('view') }
+                  )
+                }}
+                busy={busy}
+              />
+            )
           ) : mode === 'merge' ? (
             <MergePicker
               onCancel={() => setMode('view')}
@@ -141,6 +162,8 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
               }}
               busy={busy}
             />
+          ) : isCommitment ? (
+            <CommitmentInterpretation proposal={proposal} />
           ) : (
             <TaskInterpretation proposal={proposal} />
           )
@@ -187,14 +210,16 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 <Pencil size={12} />
                 Edit
               </button>
-              <button
-                onClick={() => setMode('merge')}
-                disabled={busy}
-                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
-              >
-                <GitMerge size={12} />
-                Merge into existing
-              </button>
+              {isTask && (
+                <button
+                  onClick={() => setMode('merge')}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                >
+                  <GitMerge size={12} />
+                  Merge into existing
+                </button>
+              )}
             </>
           )}
           <button
@@ -334,6 +359,176 @@ function TaskEditor({ proposal, onSave, onCancel, busy }: TaskEditorProps) {
           className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
         />
       </div>
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={busy || !title.trim()}
+          className="flex items-center gap-1.5 rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+          Save & accept
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Commitment interpretation (read-only)
+// ============================================================
+
+function formatDate(d: string): string {
+  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function CommitmentInterpretation({ proposal }: { proposal: Proposal }) {
+  const p = proposal.normalized_payload as unknown as CommitmentProposalPayload
+  return (
+    <div className="space-y-1.5">
+      <div className="text-base font-semibold text-white">{p.title}</div>
+      {p.description && (
+        <div className="text-xs leading-relaxed text-gray-400">{p.description}</div>
+      )}
+      <div className="flex flex-wrap gap-2 pt-1 text-xs">
+        {p.counterpart && (
+          <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-amber-300">
+            for {p.counterpart}
+          </span>
+        )}
+        {p.do_by && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-300">
+            do by {formatDate(p.do_by)}
+          </span>
+        )}
+        {p.promised_by && p.promised_by !== p.do_by && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-400">
+            promised by {formatDate(p.promised_by)}
+          </span>
+        )}
+        {p.needs_review_by && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-400">
+            review by {formatDate(p.needs_review_by)}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Commitment editor
+// ============================================================
+
+interface CommitmentEditorProps {
+  proposal: Proposal
+  onSave: (payload: CommitmentProposalPayload) => void
+  onCancel: () => void
+  busy: boolean
+}
+
+function CommitmentEditor({ proposal, onSave, onCancel, busy }: CommitmentEditorProps) {
+  const initial = proposal.normalized_payload as unknown as CommitmentProposalPayload
+  const [title, setTitle] = useState(initial.title ?? '')
+  const [description, setDescription] = useState(initial.description ?? '')
+  const [counterpart, setCounterpart] = useState(initial.counterpart ?? '')
+  const [doBy, setDoBy] = useState(initial.do_by ?? '')
+  const [promisedBy, setPromisedBy] = useState(initial.promised_by ?? '')
+  const [needsReviewBy, setNeedsReviewBy] = useState(initial.needs_review_by ?? '')
+  const [company, setCompany] = useState(initial.company ?? '')
+  const [showExtraDates, setShowExtraDates] = useState(
+    Boolean(initial.promised_by || initial.needs_review_by)
+  )
+
+  const handleSave = () => {
+    if (!title.trim()) return
+    onSave({
+      ...initial,
+      title: title.trim(),
+      description: description.trim() || undefined,
+      counterpart: counterpart.trim() || null,
+      do_by: doBy || null,
+      promised_by: promisedBy || null,
+      needs_review_by: needsReviewBy || null,
+      company: company.trim() || null,
+    })
+  }
+
+  return (
+    <div className="space-y-2">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Commitment"
+        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        autoFocus
+      />
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Notes"
+        rows={2}
+        className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={counterpart}
+          onChange={(e) => setCounterpart(e.target.value)}
+          placeholder="For (counterpart)"
+          className="flex-1 min-w-[120px] rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+        <input
+          value={company}
+          onChange={(e) => setCompany(e.target.value)}
+          placeholder="Company"
+          className="flex-1 min-w-[120px] rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-[11px] uppercase tracking-wider text-gray-500">Do by</label>
+        <input
+          type="date"
+          value={doBy ?? ''}
+          onChange={(e) => setDoBy(e.target.value)}
+          className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+        />
+        {!showExtraDates && (
+          <button
+            type="button"
+            onClick={() => setShowExtraDates(true)}
+            className="text-[11px] text-purple-400 hover:text-purple-300"
+          >
+            + add promised-by / review dates
+          </button>
+        )}
+      </div>
+      {showExtraDates && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-[11px] uppercase tracking-wider text-gray-500">Promised by</label>
+          <input
+            type="date"
+            value={promisedBy ?? ''}
+            onChange={(e) => setPromisedBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+          />
+          <label className="text-[11px] uppercase tracking-wider text-gray-500">Review by</label>
+          <input
+            type="date"
+            value={needsReviewBy ?? ''}
+            onChange={(e) => setNeedsReviewBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+          />
+        </div>
+      )}
       <div className="flex gap-2 pt-1">
         <button
           onClick={handleSave}

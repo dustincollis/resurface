@@ -172,6 +172,64 @@ export interface TaskProposalPayload {
   company?: string | null
 }
 
+// Payload shape for proposal_type='commitment'. Outgoing-only for now.
+export interface CommitmentProposalPayload {
+  title: string
+  description?: string
+  counterpart?: string | null
+  company?: string | null
+  do_by?: string | null
+  promised_by?: string | null
+  needs_review_by?: string | null
+  source_meeting_id?: string | null
+  source_item_id?: string | null
+}
+
+// ============================================================
+// Commitments — outgoing soft obligations
+// ============================================================
+
+export type CommitmentStatus = 'open' | 'met' | 'broken' | 'cancelled' | 'waiting'
+
+export interface Commitment {
+  id: string
+  user_id: string
+  title: string
+  description: string | null
+  counterpart: string | null
+  company: string | null
+  do_by: string | null
+  promised_by: string | null
+  needs_review_by: string | null
+  status: CommitmentStatus
+  source_meeting_id: string | null
+  source_item_id: string | null
+  evidence_text: string | null
+  confidence: number | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface CreateCommitmentPayload {
+  title: string
+  description?: string | null
+  counterpart?: string | null
+  company?: string | null
+  do_by?: string | null
+  promised_by?: string | null
+  needs_review_by?: string | null
+  status?: CommitmentStatus
+  source_meeting_id?: string | null
+  source_item_id?: string | null
+  evidence_text?: string | null
+  confidence?: number | null
+}
+
+export interface UpdateCommitmentPayload extends Partial<CreateCommitmentPayload> {
+  completed_at?: string | null
+}
+
 export interface Proposal {
   id: string
   user_id: string

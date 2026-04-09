@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check, Pin, PinOff } from 'lucide-react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check, Pin, PinOff, Handshake } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem, useTogglePin } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
+import { useCommitmentsByItem } from '../hooks/useCommitments'
 import DecomposeSection from '../components/DecomposeSection'
 import { effectiveStalenessLevel, stalenessPillClass } from '../lib/priorityScore'
 import type { ItemStatus } from '../lib/types'
@@ -116,6 +117,7 @@ export default function ItemDetail() {
   const deleteItem = useDeleteItem()
   const togglePin = useTogglePin()
   const { data: activities } = useActivityLog(id!)
+  const { data: itemCommitments } = useCommitmentsByItem(id!)
   const [touchedFlash, setTouchedFlash] = useState(false)
 
   const handleTouch = () => {
@@ -357,6 +359,35 @@ export default function ItemDetail() {
 
         {/* Linked items */}
         <ItemLinkSection itemId={item.id} />
+
+        {/* Commitments tied to this item */}
+        {itemCommitments && itemCommitments.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-300">
+              <Handshake size={14} />
+              Commitments ({itemCommitments.length})
+            </h3>
+            <div className="space-y-1.5">
+              {itemCommitments.map((c) => (
+                <Link
+                  key={c.id}
+                  to="/commitments"
+                  className="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/50 px-3 py-2 text-xs hover:border-gray-700 hover:bg-gray-900"
+                >
+                  <span className="flex-1 truncate text-gray-200">{c.title}</span>
+                  {c.counterpart && (
+                    <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      for {c.counterpart}
+                    </span>
+                  )}
+                  <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-gray-400">
+                    {c.status}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Due date */}
         <div className="border-b border-gray-800 px-6 py-4">

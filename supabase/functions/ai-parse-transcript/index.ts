@@ -155,11 +155,47 @@ Extract these elements:
 
 4. **Open Questions**: Unresolved items that need follow-up
 
-5. **References**: Match against existing work items where applicable
+5. **Commitments — OUTGOING SOFT OBLIGATIONS**: Things ${userDisplayName} acknowledged owing or agreed to do, where the obligation is **relational or social** rather than a clean deliverable. These often slip because they're not formal tasks at the moment they happen.
 
-6. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
+   Extract a commitment ONLY if ALL of these are true:
+   - ${userDisplayName} is the one making the commitment (it goes FROM the user TO someone else — outgoing only, never incoming)
+   - The statement is verbatim from the user's mouth or is a clear paraphrase of something the user said
+   - It is a real obligation, not banter or hypothetical
 
-7. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
+   Things that COUNT as commitments:
+   - "I owe him one" / "I owe you for that"
+   - "I'll get back to you next week"
+   - "Let me follow up with you on that"
+   - "I'll think about it and circle back"
+   - "I'll make sure that gets done"
+   - Acknowledgments of prior promises being remembered
+   - Soft promises with vague timing ("soon", "this week", "by end of month")
+
+   Things that do NOT count and MUST be skipped:
+   - Specific deliverable tasks with a clear thing to do — those go in action_items, NOT commitments
+   - Things OTHER people committed to (incoming obligations) — outgoing only for now
+   - Speculative or aspirational ("we should follow up sometime")
+   - General statements of intent without a specific counterpart
+   - Things the user explicitly declined or pushed back on
+
+   The distinction from action_items: an action_item is a clean deliverable ("send the deck by Friday"). A commitment is a social/relational obligation that may not have a clean deliverable ("I'll follow up", "I owe him one"). When in doubt — if there's a clear thing to deliver, it's an action_item. If it's a fuzzy social promise, it's a commitment. Some statements may legitimately be both — that's fine, return both.
+
+   For each commitment, return:
+   - **title**: short summary of what was committed (5–12 words)
+   - **description**: longer context if helpful
+   - **counterpart**: the person ${userDisplayName} made the promise TO (free text — e.g. "Holly", "the procurement team"). null if unclear.
+   - **company**: the account/client this is about, same rules as action items
+   - **do_by**: YYYY-MM-DD if a date is mentioned or strongly implied. **This is the primary date.** If "next week" is said, infer a date. If only a vague timing is given ("soon", "this week"), still try — be best-effort. null only if there's truly no temporal signal at all.
+   - **promised_by**: usually the same as do_by; only set differently if the user said "I told them by X but I need it ready by Y"
+   - **needs_review_by**: only if explicitly mentioned ("I need someone to review it before X")
+   - **evidence_quote**: verbatim from the transcript, the line where the user made the commitment
+   - **ambiguity_flags**: array, any of: "social_language", "relative_date", "external_dependency", "ambiguous_actionability", "no_counterpart"
+
+6. **References**: Match against existing work items where applicable
+
+7. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
+
+8. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
 
 Current open items for cross-reference:
 ${itemsSummary}
@@ -192,6 +228,19 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   ],
   "open_questions": [
     {"question": "string", "owner": "user|name|unknown"}
+  ],
+  "commitments": [
+    {
+      "title": "string",
+      "description": "string",
+      "counterpart": "string or null",
+      "company": "string or null",
+      "do_by": "YYYY-MM-DD or null",
+      "promised_by": "YYYY-MM-DD or null",
+      "needs_review_by": "YYYY-MM-DD or null",
+      "evidence_quote": "string (verbatim, under 200 chars)",
+      "ambiguity_flags": ["string"]
+    }
   ]
 }`,
           },
@@ -437,10 +486,68 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       };
     });
 
-    if (proposalRows.length > 0) {
+    // ============================================================
+    // Commitment proposals (chunk 3)
+    // ============================================================
+    // The model already filters to outgoing-only (the prompt insists). We
+    // just shape the rows and add ambiguity flags.
+    const rawCommitments = (parsed.commitments ?? []) as Array<{
+      title?: string;
+      description?: string;
+      counterpart?: string | null;
+      company?: string | null;
+      do_by?: string | null;
+      promised_by?: string | null;
+      needs_review_by?: string | null;
+      evidence_quote?: string | null;
+      ambiguity_flags?: string[];
+    }>;
+
+    const commitmentRows: ProposalInsert[] = rawCommitments
+      .filter((c) => typeof c?.title === "string" && c.title.trim().length > 0)
+      .map((c) => {
+        const flags: string[] = Array.isArray(c.ambiguity_flags) ? [...c.ambiguity_flags] : [];
+        if (!c.do_by && !c.promised_by) {
+          if (!flags.includes("relative_date")) flags.push("relative_date");
+        }
+        if (!c.counterpart && !flags.includes("no_counterpart")) {
+          flags.push("no_counterpart");
+        }
+
+        const evidenceQuote =
+          typeof c.evidence_quote === "string" && c.evidence_quote.trim().length > 0
+            ? c.evidence_quote.trim()
+            : null;
+
+        const company = c.company ?? discussionCompany;
+
+        return {
+          user_id: user.id,
+          proposal_type: "commitment",
+          source_type: "meeting",
+          source_id: meeting_id,
+          evidence_text: evidenceQuote,
+          normalized_payload: {
+            title: c.title,
+            description: c.description ?? "",
+            counterpart: c.counterpart ?? null,
+            company,
+            do_by: c.do_by ?? null,
+            promised_by: c.promised_by ?? null,
+            needs_review_by: c.needs_review_by ?? null,
+            source_meeting_id: meeting_id,
+          },
+          confidence: 0.6,
+          ambiguity_flags: flags,
+        };
+      });
+
+    const allProposalRows = [...proposalRows, ...commitmentRows];
+
+    if (allProposalRows.length > 0) {
       const { error: proposalErr } = await adminClient
         .from("proposals")
-        .insert(proposalRows);
+        .insert(allProposalRows);
       if (proposalErr) {
         console.error("Failed to insert proposals:", proposalErr);
         // Don't fail the whole call — the parse result is still saved.
@@ -452,6 +559,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
         ...parsed,
         title: meetingUpdate.title ?? currentTitle,
         proposals_created: proposalRows.length,
+        commitments_created: commitmentRows.length,
         skipped_for_others: skippedForOthers,
         skipped_speculative: skippedSpeculative,
         import_mode: "active",

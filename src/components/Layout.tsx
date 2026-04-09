@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Layers, Calendar, Inbox, Settings, Search, LogOut, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Settings, Search, LogOut, MessageSquare } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -10,6 +10,7 @@ import ChatPanel from './ChatPanel'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/proposals', icon: Inbox, label: 'Proposals' },
+  { to: '/commitments', icon: Handshake, label: 'Commitments' },
   { to: '/streams', icon: Layers, label: 'Streams' },
   { to: '/meetings', icon: Calendar, label: 'Discussions' },
   { to: '/settings', icon: Settings, label: 'Settings' },

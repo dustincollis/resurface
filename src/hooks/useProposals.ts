@@ -8,8 +8,11 @@ import type {
   ProposalStatus,
   ProposalReviewAction,
   TaskProposalPayload,
+  CommitmentProposalPayload,
   Item,
+  Commitment,
   CreateItemPayload,
+  CreateCommitmentPayload,
 } from '../lib/types'
 
 interface ProposalFilters {
@@ -144,6 +147,32 @@ export function useAcceptProposal() {
           action: 'created',
           details: { title: item.title, source: 'proposal', proposal_id: proposal.id },
         })
+      } else if (proposal.proposal_type === 'commitment') {
+        const p = finalPayload as unknown as CommitmentProposalPayload
+        const insertPayload: CreateCommitmentPayload & { user_id: string } = {
+          user_id: user!.id,
+          title: p.title,
+          description: p.description ?? null,
+          counterpart: p.counterpart ?? null,
+          company: p.company ?? null,
+          do_by: p.do_by ?? null,
+          promised_by: p.promised_by ?? null,
+          needs_review_by: p.needs_review_by ?? null,
+          source_meeting_id: p.source_meeting_id ?? null,
+          source_item_id: p.source_item_id ?? null,
+          evidence_text: proposal.evidence_text ?? null,
+          confidence: proposal.confidence ?? null,
+          status: 'open',
+        }
+        const { data: commitmentRow, error: insertErr } = await supabase
+          .from('commitments')
+          .insert(insertPayload)
+          .select()
+          .single()
+        if (insertErr) throw insertErr
+        const commitment = commitmentRow as Commitment
+        resultingObjectType = 'commitment'
+        resultingObjectId = commitment.id
       } else {
         throw new Error(
           `Acceptance for proposal_type='${proposal.proposal_type}' is not yet implemented. ` +
@@ -169,6 +198,7 @@ export function useAcceptProposal() {
     onSuccess: () => {
       invalidateProposals()
       queryClient.invalidateQueries({ queryKey: ['items'] })
+      queryClient.invalidateQueries({ queryKey: ['commitments'] })
     },
   })
 }
