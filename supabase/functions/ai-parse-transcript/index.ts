@@ -159,6 +159,8 @@ Extract these elements:
 
 6. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
+7. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
+
 Current open items for cross-reference:
 ${itemsSummary}
 
@@ -170,6 +172,7 @@ ${transcript.substring(0, 15000)}
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
   "summary": "<the markdown synopsis as a single string>",
+  "title": "string (4-10 words, descriptive)",
   "company": "string or null",
   "action_items": [
     {
@@ -235,20 +238,68 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       );
     }
 
+    // Auto-rename the meeting if its current title is a placeholder. We
+    // consider any of these placeholders: empty/whitespace, starts with
+    // "Untitled", or matches a filename-ish pattern (looks like the file
+    // upload didn't get a real name).
+    const currentTitle = (meeting.title ?? "").trim();
+    const isPlaceholderTitle =
+      currentTitle.length === 0 ||
+      /^untitled/i.test(currentTitle) ||
+      /\.(txt|md|vtt|srt|hda|json)$/i.test(currentTitle) ||
+      /^\d{8}[-_]\d{6}/.test(currentTitle); // HDA-style filenames
+    const aiTitle =
+      typeof parsed.title === "string" && parsed.title.trim().length > 0
+        ? parsed.title.trim()
+        : null;
+
     // Update the meeting with parsed data.
     // Action items now flow to the proposals table instead of being stored
     // here as jsonb — `extracted_action_items` is no longer written.
+    const meetingUpdate: Record<string, unknown> = {
+      transcript,
+      transcript_summary: parsed.summary,
+      extracted_action_items: [],
+      extracted_decisions: parsed.decisions ?? [],
+      extracted_open_questions: parsed.open_questions ?? [],
+      processed_at: new Date().toISOString(),
+    };
+    if (isPlaceholderTitle && aiTitle) {
+      meetingUpdate.title = aiTitle;
+    }
     await adminClient
       .from("meetings")
-      .update({
-        transcript,
-        transcript_summary: parsed.summary,
-        extracted_action_items: [],
-        extracted_decisions: parsed.decisions ?? [],
-        extracted_open_questions: parsed.open_questions ?? [],
-        processed_at: new Date().toISOString(),
-      })
+      .update(meetingUpdate)
       .eq("id", meeting_id);
+
+    // Mode-aware proposal creation: archive meetings get all the summary
+    // metadata above but never produce live commitments. Skip the rest.
+    const importMode = (meeting.import_mode as string | undefined) ?? "active";
+    if (importMode === "archive") {
+      // Make sure no stale pending proposals from a prior active-mode parse
+      // are left behind on this meeting.
+      await adminClient
+        .from("proposals")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source_type", "meeting")
+        .eq("source_id", meeting_id)
+        .eq("status", "pending");
+
+      return new Response(
+        JSON.stringify({
+          ...parsed,
+          title: meetingUpdate.title ?? currentTitle,
+          proposals_created: 0,
+          skipped_for_others: 0,
+          skipped_speculative: 0,
+          import_mode: "archive",
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     // Re-parse safety: clear any pending proposals from this meeting before
     // regenerating. Reviewed proposals (accepted/rejected/merged/dismissed)
@@ -399,9 +450,11 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     return new Response(
       JSON.stringify({
         ...parsed,
+        title: meetingUpdate.title ?? currentTitle,
         proposals_created: proposalRows.length,
         skipped_for_others: skippedForOthers,
         skipped_speculative: skippedSpeculative,
+        import_mode: "active",
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

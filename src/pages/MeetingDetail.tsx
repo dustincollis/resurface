@@ -1,10 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus } from 'lucide-react'
-import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio } from 'lucide-react'
+import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, type MeetingImportMode } from '../hooks/useMeetings'
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
+import { queryClient } from '../lib/queryClient'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import StatusBadge from '../components/StatusBadge'
+import InlineEditable from '../components/InlineEditable'
 import type { Item } from '../lib/types'
 
 // Render inline markdown: **bold**, *italic*, `code`
@@ -38,17 +42,26 @@ function renderInline(text: string): ReactNode {
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const { data: meeting, isLoading } = useMeeting(id!)
   const { data: linkedTasks } = useItemsByDiscussion(id!)
   const { data: meetingProposals } = useProposalsBySource('meeting', id!)
   const uploadTranscript = useUploadTranscript()
+  const updateMeeting = useUpdateMeeting()
   const deleteMeeting = useDeleteMeeting()
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
   const [showTranscriptInput, setShowTranscriptInput] = useState(true)
+  const [pendingMode, setPendingMode] = useState<MeetingImportMode>('active')
   // Tracks which open-question / decision indices have been converted into items
   const [createdFromQuestion, setCreatedFromQuestion] = useState<Map<number, Item>>(new Map())
   const [createdFromDecision, setCreatedFromDecision] = useState<Map<number, Item>>(new Map())
+
+  // Default the upload picker to the meeting's current mode whenever the
+  // meeting loads/changes, so a fresh visit shows the right pre-selection.
+  useEffect(() => {
+    if (meeting) setPendingMode(meeting.import_mode)
+  }, [meeting?.id, meeting?.import_mode])
 
   if (isLoading || !meeting) {
     return <div className="text-gray-400">Loading...</div>
@@ -57,12 +70,42 @@ export default function MeetingDetail() {
   const pendingCount = meetingProposals?.filter((p) => p.status === 'pending').length ?? 0
   const reviewedCount = meetingProposals?.filter((p) => p.status !== 'pending').length ?? 0
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!transcriptText.trim()) return
+    // Apply the chosen mode to the meeting before parsing, so the edge
+    // function reads the right import_mode when it runs.
+    if (pendingMode !== meeting.import_mode) {
+      await updateMeeting.mutateAsync({ id: meeting.id, import_mode: pendingMode })
+    }
     uploadTranscript.mutate(
       { meetingId: meeting.id, transcript: transcriptText.trim() },
       { onSuccess: () => setShowTranscriptInput(false) }
     )
+  }
+
+  const handleSwitchMode = async (newMode: MeetingImportMode) => {
+    if (newMode === meeting.import_mode) return
+    await updateMeeting.mutateAsync({ id: meeting.id, import_mode: newMode })
+
+    if (newMode === 'archive') {
+      // Switching to archive: drop any pending proposals from this meeting,
+      // they're no longer considered live commitments.
+      await supabase
+        .from('proposals')
+        .delete()
+        .eq('user_id', user!.id)
+        .eq('source_type', 'meeting')
+        .eq('source_id', meeting.id)
+        .eq('status', 'pending')
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
+    } else if (newMode === 'active' && meeting.transcript) {
+      // Switching to active: re-parse the existing transcript so proposals
+      // get extracted. Reuses the upload pipeline.
+      uploadTranscript.mutate({
+        meetingId: meeting.id,
+        transcript: meeting.transcript,
+      })
+    }
   }
 
   const handleCreateFromQuestion = (
@@ -124,7 +167,47 @@ export default function MeetingDetail() {
       {/* Meeting info */}
       <div className="rounded-xl border border-gray-800 bg-gray-900">
         <div className="border-b border-gray-800 px-6 py-4">
-          <h1 className="text-xl font-semibold text-white">{meeting.title}</h1>
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <InlineEditable
+                as="h1"
+                value={meeting.title}
+                onSave={(newTitle) =>
+                  updateMeeting.mutate({ id: meeting.id, title: newTitle })
+                }
+                className="text-xl font-semibold text-white"
+                placeholder="Untitled discussion"
+              />
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 p-0.5 text-[11px]">
+              <button
+                onClick={() => handleSwitchMode('active')}
+                disabled={updateMeeting.isPending}
+                className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+                  meeting.import_mode === 'active'
+                    ? 'bg-green-700/40 text-green-200'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+                title="Active: a current discussion. Action items become live proposals."
+              >
+                <Radio size={11} />
+                Active
+              </button>
+              <button
+                onClick={() => handleSwitchMode('archive')}
+                disabled={updateMeeting.isPending}
+                className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+                  meeting.import_mode === 'archive'
+                    ? 'bg-gray-600/60 text-gray-200'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+                title="Archive: an older recording. Summarized but no proposals created."
+              >
+                <Archive size={11} />
+                Archive
+              </button>
+            </div>
+          </div>
           <div className="mt-2 flex flex-wrap gap-4 text-xs text-gray-400">
             {meeting.start_time && (
               <span>
@@ -394,27 +477,60 @@ export default function MeetingDetail() {
                 className="block w-full resize-y rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
                 autoFocus
               />
-              <div className="flex gap-2">
-                <button
-                  onClick={handleUpload}
-                  disabled={!transcriptText.trim() || uploadTranscript.isPending}
-                  className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-                >
-                  {uploadTranscript.isPending ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    'Analyze'
-                  )}
-                </button>
-                <button
-                  onClick={() => { setShowTranscriptInput(false); setTranscriptText('') }}
-                  className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-gray-200"
-                >
-                  Cancel
-                </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPendingMode('active')}
+                    className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+                      pendingMode === 'active'
+                        ? 'bg-green-700/40 text-green-200'
+                        : 'text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <Radio size={11} />
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingMode('archive')}
+                    className={`flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+                      pendingMode === 'archive'
+                        ? 'bg-gray-600/60 text-gray-200'
+                        : 'text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <Archive size={11} />
+                    Archive
+                  </button>
+                </div>
+                <span className="text-[11px] text-gray-500">
+                  {pendingMode === 'active'
+                    ? 'Action items become live proposals'
+                    : 'Summarized only, no proposals created'}
+                </span>
+                <div className="ml-auto flex gap-2">
+                  <button
+                    onClick={handleUpload}
+                    disabled={!transcriptText.trim() || uploadTranscript.isPending}
+                    className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+                  >
+                    {uploadTranscript.isPending ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowTranscriptInput(false); setTranscriptText('') }}
+                    className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-gray-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           )}
