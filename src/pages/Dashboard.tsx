@@ -46,10 +46,15 @@ function formatDueLabel(dateStr: string): { text: string; tone: 'red' | 'orange'
   return { text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), tone: 'gray' }
 }
 
+// All three suggested actions get the same visual weight — they're equally
+// "suggestions" from the AI. Only the label and icon differentiate them.
+const SUGGESTED_BUTTON_CLASS =
+  'bg-purple-900/30 text-purple-200 border border-purple-800/60 hover:bg-purple-900/50'
+
 const SUGGESTED_MOVE_STYLES: Record<SuggestedMove, { className: string; icon: typeof Play }> = {
-  'Do Now': { className: 'bg-purple-600 text-white hover:bg-purple-500', icon: Play },
-  'Break Down': { className: 'bg-purple-900/40 text-purple-200 border border-purple-800/50 hover:bg-purple-900/60', icon: Sparkles },
-  'Open': { className: 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700', icon: ChevronDown },
+  'Do Now': { className: SUGGESTED_BUTTON_CLASS, icon: Play },
+  'Break Down': { className: SUGGESTED_BUTTON_CLASS, icon: Sparkles },
+  'Open': { className: SUGGESTED_BUTTON_CLASS, icon: ChevronDown },
 }
 
 function FocusCard({ item, rank }: { item: Item; rank: number }) {
@@ -119,45 +124,47 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
           )}
 
           <div className="min-w-0 flex-1">
-            {/* Stream + company + due tag */}
+            {/* Stream + company + due tag — kept subtle so the title dominates */}
             <div className="flex items-center gap-2 text-[11px]">
               {item.streams ? (
-                <span
-                  className="rounded px-1.5 py-0.5 font-semibold uppercase tracking-wide"
-                  style={{
-                    backgroundColor: `${streamColor}20`,
-                    color: streamColor,
-                  }}
-                >
+                <span className="flex items-center gap-1 text-gray-500">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: streamColor }}
+                  />
                   {item.streams.name}
                 </span>
               ) : (
-                <span className="rounded bg-gray-800 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-gray-500">
-                  No stream
-                </span>
+                <span className="text-gray-600">No stream</span>
               )}
               {(item.custom_fields?.company as string | undefined) && (
-                <span className="rounded bg-blue-900/40 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-blue-300">
-                  {item.custom_fields.company as string}
-                </span>
+                <>
+                  <span className="text-gray-700">·</span>
+                  <span className="text-gray-500">
+                    {item.custom_fields.company as string}
+                  </span>
+                </>
               )}
               {dueLabel && (
-                <span
-                  className={`font-medium ${
-                    dueLabel.tone === 'red'
-                      ? 'text-red-400'
-                      : dueLabel.tone === 'orange'
-                      ? 'text-orange-400'
-                      : 'text-gray-500'
-                  }`}
-                >
-                  {dueLabel.text}
-                </span>
+                <>
+                  <span className="text-gray-700">·</span>
+                  <span
+                    className={
+                      dueLabel.tone === 'red'
+                        ? 'font-medium text-red-400'
+                        : dueLabel.tone === 'orange'
+                        ? 'font-medium text-orange-400'
+                        : 'text-gray-500'
+                    }
+                  >
+                    {dueLabel.text}
+                  </span>
+                </>
               )}
             </div>
 
-            {/* Title */}
-            <h3 className="mt-1 text-base font-semibold leading-snug text-white">
+            {/* Title — the most prominent element */}
+            <h3 className="mt-1 text-lg font-semibold leading-snug text-white">
               {item.title}
             </h3>
 
