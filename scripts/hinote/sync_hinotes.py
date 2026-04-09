@@ -104,19 +104,40 @@ def hinotes_get_transcription(note_id: str):
     if body.get("error") != 0:
         raise RuntimeError(f"HiNotes transcription error: {body}")
     data = body["data"]
-    # One-time debug: dump the first segment's raw structure so we can
-    # discover the actual field name HiNotes uses for speaker info.
+    # One-time debug: summarize the speaker field across ALL segments so
+    # we can see whether HiNotes is providing speaker IDs at all.
     if not _DEBUG_DUMPED["transcription"] and data:
         _DEBUG_DUMPED["transcription"] = True
-        first = data[0] if isinstance(data, list) else data
-        print(
-            f"\n[DEBUG] /v2/note/transcription/list — first segment keys: {list(first.keys()) if isinstance(first, dict) else type(first).__name__}",
-            file=sys.stderr,
-        )
-        print(
-            f"[DEBUG] first segment raw: {json.dumps(first, default=str)[:600]}\n",
-            file=sys.stderr,
-        )
+        if isinstance(data, list):
+            print(
+                f"\n[DEBUG] /v2/note/transcription/list — segment count: {len(data)}",
+                file=sys.stderr,
+            )
+            if data:
+                first = data[0]
+                if isinstance(first, dict):
+                    print(
+                        f"[DEBUG] first segment keys: {list(first.keys())}",
+                        file=sys.stderr,
+                    )
+                    # Print all non-sentence/token fields of the first segment
+                    quiet = {k: v for k, v in first.items() if k not in ("sentence", "tokens")}
+                    print(
+                        f"[DEBUG] first segment (excluding sentence/tokens): {json.dumps(quiet, default=str)}",
+                        file=sys.stderr,
+                    )
+                    # Distinct speaker values across all segments
+                    speaker_values = {}
+                    for seg in data:
+                        if isinstance(seg, dict):
+                            sp = seg.get("speaker")
+                            key = repr(sp)  # captures None vs "" vs "Speaker 1" distinctly
+                            speaker_values[key] = speaker_values.get(key, 0) + 1
+                    print(
+                        f"[DEBUG] distinct speaker values across {len(data)} segments: {speaker_values}",
+                        file=sys.stderr,
+                    )
+            print("", file=sys.stderr)
     return data
 
 
@@ -132,8 +153,9 @@ def hinotes_get_detail(note_id: str):
     if body.get("error") != 0:
         raise RuntimeError(f"HiNotes detail error: {body}")
     note = body["data"]["note"]
-    # One-time debug: dump the note's top-level keys + the first 800 chars
-    # of any field that looks summary-shaped, so we can find the markdown.
+    # One-time debug: dump the note's top-level keys + the first ~1200 chars
+    # of any field that looks summary-shaped, so we can find the markdown
+    # and see whether it contains "Speaker N" annotations.
     if not _DEBUG_DUMPED["detail"]:
         _DEBUG_DUMPED["detail"] = True
         if isinstance(note, dict):
@@ -141,13 +163,14 @@ def hinotes_get_detail(note_id: str):
                 f"\n[DEBUG] /v2/note/detail — note top-level keys: {list(note.keys())}",
                 file=sys.stderr,
             )
-            # Print any field whose name suggests summary/markdown content
-            for key in note.keys():
-                lk = key.lower()
-                if any(s in lk for s in ("markdown", "summary", "outline", "html", "content", "text")):
-                    val = note.get(key)
-                    if isinstance(val, str) and val:
-                        print(f"[DEBUG] note['{key}'] (first 600 chars): {val[:600]!r}", file=sys.stderr)
+            # Always dump these specific fields if present, regardless of content
+            for key in ("markdown", "summary", "html"):
+                val = note.get(key)
+                if isinstance(val, str) and val:
+                    print(
+                        f"[DEBUG] note['{key}'] (first 1200 chars):\n{val[:1200]}\n---",
+                        file=sys.stderr,
+                    )
             print("", file=sys.stderr)
     return note
 
