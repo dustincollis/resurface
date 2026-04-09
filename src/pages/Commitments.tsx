@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Handshake,
@@ -10,8 +10,15 @@ import {
   Pause,
   Trash2,
   ChevronRight,
+  Plus,
+  Loader2,
 } from 'lucide-react'
-import { useCommitments, useSetCommitmentStatus, useDeleteCommitment } from '../hooks/useCommitments'
+import {
+  useCommitments,
+  useSetCommitmentStatus,
+  useDeleteCommitment,
+  useCreateCommitment,
+} from '../hooks/useCommitments'
 import type { Commitment, CommitmentStatus } from '../lib/types'
 
 const STATUS_LABEL: Record<CommitmentStatus, string> = {
@@ -192,6 +199,8 @@ function CommitmentRow({ commitment }: { commitment: Commitment }) {
 
 export default function Commitments() {
   const { data: commitments, isLoading } = useCommitments()
+  const createCommitment = useCreateCommitment()
+  const [showForm, setShowForm] = useState(false)
 
   const grouped = useMemo(() => {
     const groups: Record<CommitmentStatus, Commitment[]> = {
@@ -218,12 +227,29 @@ export default function Commitments() {
             Soft obligations you've made — the things that don't fit as tasks but still need to land.
           </p>
         </div>
-        {totalLive > 0 && (
-          <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
-            {totalLive} open
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {totalLive > 0 && (
+            <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
+              {totalLive} open
+            </span>
+          )}
+          <button
+            onClick={() => setShowForm((s) => !s)}
+            className="flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+          >
+            <Plus size={14} />
+            Add
+          </button>
+        </div>
       </div>
+
+      {showForm && (
+        <NewCommitmentForm
+          onCancel={() => setShowForm(false)}
+          onSaved={() => setShowForm(false)}
+          createCommitment={createCommitment}
+        />
+      )}
 
       {isLoading ? (
         <div className="text-sm text-gray-500">Loading...</div>
@@ -232,7 +258,7 @@ export default function Commitments() {
           <Handshake size={32} className="mx-auto text-gray-700" />
           <h2 className="mt-3 text-sm font-medium text-gray-400">No commitments yet</h2>
           <p className="mt-1 text-xs text-gray-600">
-            When AI extracts soft promises from a transcript, they'll show up here for tracking.
+            Add one above, or AI will surface soft promises from transcripts.
           </p>
         </div>
       ) : (
@@ -270,5 +296,143 @@ function Section({ title, items, dim = false }: { title: string; items: Commitme
         ))}
       </div>
     </section>
+  )
+}
+
+interface NewCommitmentFormProps {
+  onCancel: () => void
+  onSaved: () => void
+  createCommitment: ReturnType<typeof useCreateCommitment>
+}
+
+function NewCommitmentForm({ onCancel, onSaved, createCommitment }: NewCommitmentFormProps) {
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [counterpart, setCounterpart] = useState('')
+  const [company, setCompany] = useState('')
+  const [doBy, setDoBy] = useState('')
+  const [promisedBy, setPromisedBy] = useState('')
+  const [needsReviewBy, setNeedsReviewBy] = useState('')
+  const [showExtraDates, setShowExtraDates] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      setError('Title is required.')
+      return
+    }
+    setError(null)
+    try {
+      await createCommitment.mutateAsync({
+        title: title.trim(),
+        description: description.trim() || null,
+        counterpart: counterpart.trim() || null,
+        company: company.trim() || null,
+        do_by: doBy || null,
+        promised_by: promisedBy || null,
+        needs_review_by: needsReviewBy || null,
+        status: 'open',
+      })
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <div className="mb-6 space-y-3 rounded-xl border border-gray-700 bg-gray-900 p-4">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="What did you commit to?"
+        autoFocus
+        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+      />
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Notes (optional)"
+        rows={2}
+        className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={counterpart}
+          onChange={(e) => setCounterpart(e.target.value)}
+          placeholder="For (counterpart)"
+          className="flex-1 min-w-[160px] rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+        <input
+          value={company}
+          onChange={(e) => setCompany(e.target.value)}
+          placeholder="Company"
+          className="flex-1 min-w-[160px] rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-[11px] uppercase tracking-wider text-gray-500">Do by</label>
+        <input
+          type="date"
+          value={doBy}
+          onChange={(e) => setDoBy(e.target.value)}
+          className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+        />
+        {!showExtraDates && (
+          <button
+            type="button"
+            onClick={() => setShowExtraDates(true)}
+            className="text-[11px] text-purple-400 hover:text-purple-300"
+          >
+            + add promised-by / review dates
+          </button>
+        )}
+      </div>
+      {showExtraDates && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-[11px] uppercase tracking-wider text-gray-500">Promised by</label>
+          <input
+            type="date"
+            value={promisedBy}
+            onChange={(e) => setPromisedBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+          />
+          <label className="text-[11px] uppercase tracking-wider text-gray-500">Review by</label>
+          <input
+            type="date"
+            value={needsReviewBy}
+            onChange={(e) => setNeedsReviewBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+          />
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={createCommitment.isPending || !title.trim()}
+          className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        >
+          {createCommitment.isPending ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              Saving...
+            </>
+          ) : (
+            'Add commitment'
+          )}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={createCommitment.isPending}
+          className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-gray-200 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && (
+        <div className="rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+          {error}
+        </div>
+      )}
+    </div>
   )
 }
