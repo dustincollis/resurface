@@ -14,9 +14,10 @@ interface ProposedSubTaskRowProps {
   proposal: ProposedSubTask
   parentId: string
   parentStreamId: string | null
+  parentCompany: string | null
 }
 
-function ProposedSubTaskRow({ proposal, parentId, parentStreamId }: ProposedSubTaskRowProps) {
+function ProposedSubTaskRow({ proposal, parentId, parentStreamId, parentCompany }: ProposedSubTaskRowProps) {
   const createItem = useCreateItem()
   const [created, setCreated] = useState(false)
 
@@ -29,6 +30,7 @@ function ProposedSubTaskRow({ proposal, parentId, parentStreamId }: ProposedSubT
         due_date: proposal.suggested_due_date,
         parent_id: parentId,
         stream_id: parentStreamId,
+        custom_fields: parentCompany ? { company: parentCompany } : undefined,
       },
       { onSuccess: () => setCreated(true) }
     )
@@ -196,6 +198,7 @@ export default function DecomposeSection({ item }: DecomposeSectionProps) {
                 proposal={proposal}
                 parentId={item.id}
                 parentStreamId={item.stream_id}
+                parentCompany={(item.custom_fields?.company as string | undefined) ?? null}
               />
             ))}
           </div>
