@@ -43,21 +43,65 @@ function extractShortId(input: string): string | null {
   return null;
 }
 
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 // Tiny tag extractor: pulls the inner text of the first occurrence of <tag>.
 // Defensive — returns null on missing or malformed tags. We avoid a full XML
 // parser dep because the response shape is fixed and shallow.
 function pickTag(xml: string, tag: string): string | null {
   const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
   if (!match) return null;
-  // Decode the handful of XML entities HiNotes actually uses.
-  return match[1]
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+  return decodeXmlEntities(match[1]).trim();
 }
+
+// Pull every occurrence of a tag (used for the per-utterance transcription list).
+function pickAllTags(xml: string, tag: string): string[] {
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "g");
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    out.push(decodeXmlEntities(m[1]));
+  }
+  return out;
+}
+
+// Format millis offset into [mm:ss] for the transcript header.
+function formatOffset(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+// Parse the /v1/share/transcription/list response into a single readable
+// transcript string. Each <data> block has speaker + sentence + beginTime.
+function parseTranscriptionXml(xml: string): string {
+  // Each utterance is wrapped in a <data> block at the top level of <Result>.
+  // We split on </data> to get the blocks (the regex approach in pickAllTags
+  // doesn't work because <data> contains nested tags).
+  const blocks = xml.split(/<\/data>/);
+  const lines: string[] = [];
+  for (const block of blocks) {
+    const speaker = pickTag(block, "speaker");
+    const sentence = pickTag(block, "sentence");
+    const beginTimeStr = pickTag(block, "beginTime");
+    if (!sentence) continue;
+    const beginTime = beginTimeStr ? Number(beginTimeStr) : null;
+    const stamp = beginTime != null && !isNaN(beginTime) ? `[${formatOffset(beginTime)}] ` : "";
+    const who = speaker ? `${speaker}: ` : "";
+    lines.push(`${stamp}${who}${sentence}`);
+  }
+  return lines.join("\n");
+}
+
+void pickAllTags; // currently unused; kept for future fields
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -110,22 +154,30 @@ Deno.serve(async (req) => {
       );
     }
 
-    const upstream = await fetch(
-      `${HINOTES_HOST}/v1/share/note?shortId=${encodeURIComponent(shortId)}`,
-      {
-        headers: {
-          "Accept": "*/*",
-          "User-Agent": "Resurface-HiNotes-Resolver/1.0",
-        },
-      }
-    );
+    const fetchHeaders = {
+      "Accept": "*/*",
+      "User-Agent": "Resurface-HiNotes-Resolver/1.0",
+    } as const;
 
-    if (!upstream.ok) {
-      const errText = await upstream.text();
+    // Fetch the note metadata (title, summary, markdown outline) and the
+    // verbatim transcription list (per-utterance dialogue) in parallel.
+    const [noteRes, transcriptionRes] = await Promise.all([
+      fetch(
+        `${HINOTES_HOST}/v1/share/note?shortId=${encodeURIComponent(shortId)}`,
+        { headers: fetchHeaders }
+      ),
+      fetch(
+        `${HINOTES_HOST}/v1/share/transcription/list?shortId=${encodeURIComponent(shortId)}`,
+        { headers: fetchHeaders }
+      ),
+    ]);
+
+    if (!noteRes.ok) {
+      const errText = await noteRes.text();
       return new Response(
         JSON.stringify({
           error: "HiNotes upstream returned an error",
-          status: upstream.status,
+          status: noteRes.status,
           detail: errText.substring(0, 500),
         }),
         {
@@ -135,7 +187,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    const xml = await upstream.text();
+    const xml = await noteRes.text();
+
+    // Verbatim transcription is best-effort: if it fails we still return the
+    // markdown so the user gets something rather than nothing.
+    let verbatimTranscript: string | null = null;
+    if (transcriptionRes.ok) {
+      const transcriptionXml = await transcriptionRes.text();
+      const tErr = pickTag(transcriptionXml, "error");
+      if (!tErr || tErr === "0") {
+        const formatted = parseTranscriptionXml(transcriptionXml);
+        if (formatted.length > 0) {
+          verbatimTranscript = formatted;
+        }
+      }
+    }
 
     // The XML envelope wraps the success/error code. Surface upstream errors.
     const upstreamError = pickTag(xml, "error");
@@ -167,10 +233,15 @@ Deno.serve(async (req) => {
     const startTimeISO =
       createTime && !isNaN(createTime) ? new Date(createTime).toISOString() : null;
 
-    if (!markdown) {
+    // Prefer the verbatim transcript as the content we feed downstream — it
+    // gives our parser the raw text needed to extract real evidence quotes
+    // and detect commitment strength. Fall back to the markdown outline if
+    // the transcription endpoint failed for some reason.
+    const content = verbatimTranscript ?? markdown;
+    if (!content) {
       return new Response(
         JSON.stringify({
-          error: "HiNotes response was missing the 'markdown' field — content cannot be ingested",
+          error: "HiNotes response had no transcript or markdown content to ingest",
         }),
         {
           status: 502,
@@ -183,6 +254,8 @@ Deno.serve(async (req) => {
       JSON.stringify({
         shortId,
         title: title ?? `HiNotes ${shortId}`,
+        content,
+        content_source: verbatimTranscript ? "verbatim_transcript" : "markdown_outline",
         markdown,
         concise_summary: conciseSummary,
         start_time: startTimeISO,

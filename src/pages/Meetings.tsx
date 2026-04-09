@@ -154,13 +154,14 @@ export default function Meetings() {
         }
         const fetched = data as {
           title?: string
-          markdown?: string
+          content?: string
+          content_source?: 'verbatim_transcript' | 'markdown_outline'
           start_time?: string | null
         }
-        if (!fetched.markdown) {
+        if (!fetched.content) {
           throw new Error('HiNotes returned no content for that share URL.')
         }
-        resolvedTranscript = fetched.markdown
+        resolvedTranscript = fetched.content
         // Only override the title with the HiNotes one if the user didn't
         // type their own. AI auto-title still runs on the parser side.
         if (!resolvedTitle && fetched.title) {
