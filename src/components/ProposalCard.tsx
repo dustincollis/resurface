@@ -1,0 +1,414 @@
+import { useState } from 'react'
+import {
+  CheckSquare,
+  Handshake,
+  Brain,
+  FileEdit,
+  CalendarClock,
+  Quote,
+  Check,
+  X,
+  Pencil,
+  GitMerge,
+  Trash2,
+  AlertTriangle,
+  Loader2,
+} from 'lucide-react'
+import { useStreams } from '../hooks/useStreams'
+import { useSearch } from '../hooks/useSearch'
+import {
+  useAcceptProposal,
+  useRejectProposal,
+  useMergeProposal,
+} from '../hooks/useProposals'
+import type { Proposal, ProposalType, TaskProposalPayload } from '../lib/types'
+
+interface ProposalCardProps {
+  proposal: Proposal
+}
+
+const TYPE_META: Record<
+  ProposalType,
+  { icon: typeof CheckSquare; label: string; supported: boolean }
+> = {
+  task: { icon: CheckSquare, label: 'Task', supported: true },
+  commitment: { icon: Handshake, label: 'Commitment', supported: false },
+  memory: { icon: Brain, label: 'Memory', supported: false },
+  draft: { icon: FileEdit, label: 'Draft', supported: false },
+  deadline_adjustment: { icon: CalendarClock, label: 'Deadline change', supported: false },
+}
+
+export default function ProposalCard({ proposal }: ProposalCardProps) {
+  const meta = TYPE_META[proposal.proposal_type]
+  const Icon = meta.icon
+  const [mode, setMode] = useState<'view' | 'edit' | 'merge'>('view')
+
+  const acceptMut = useAcceptProposal()
+  const rejectMut = useRejectProposal()
+  const mergeMut = useMergeProposal()
+  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending
+
+  const confidenceColor =
+    proposal.confidence == null
+      ? 'bg-gray-800 text-gray-400'
+      : proposal.confidence >= 0.8
+        ? 'bg-green-900/40 text-green-300'
+        : proposal.confidence >= 0.5
+          ? 'bg-yellow-900/40 text-yellow-300'
+          : 'bg-orange-900/40 text-orange-300'
+
+  // Pull account context from the payload for the prominent header
+  const taskPayload =
+    proposal.proposal_type === 'task'
+      ? (proposal.normalized_payload as unknown as TaskProposalPayload)
+      : null
+  const company = taskPayload?.company ?? null
+  const sourceTitle = proposal.source_title ?? null
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900">
+      {/* Header — account context is the first thing the eye lands on */}
+      <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {company && (
+              <span className="rounded bg-blue-600/20 px-2 py-0.5 text-xs font-semibold text-blue-300">
+                {company}
+              </span>
+            )}
+            {sourceTitle && (
+              <span className="truncate text-xs text-gray-400">
+                from "{sourceTitle}"
+              </span>
+            )}
+            {!company && !sourceTitle && (
+              <span className="text-xs text-gray-600">No source context</span>
+            )}
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Icon size={12} className="text-gray-500" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+              {meta.label}
+            </span>
+            {!meta.supported && (
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500">
+                not yet supported
+              </span>
+            )}
+          </div>
+        </div>
+        {proposal.confidence != null && (
+          <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${confidenceColor}`}>
+            {Math.round(proposal.confidence * 100)}%
+          </span>
+        )}
+      </div>
+
+      {/* Evidence quote — only when we have a real verbatim quote.
+          The AI's own paraphrase is not evidence and should not appear here. */}
+      {proposal.evidence_text && (
+        <div className="border-b border-gray-800 px-4 py-3">
+          <div className="flex gap-2 text-sm italic text-gray-400">
+            <Quote size={14} className="mt-0.5 flex-shrink-0 text-gray-600" />
+            <span className="leading-relaxed">{proposal.evidence_text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Structured interpretation */}
+      <div className="px-4 py-3">
+        {meta.supported ? (
+          mode === 'edit' ? (
+            <TaskEditor
+              proposal={proposal}
+              onCancel={() => setMode('view')}
+              onSave={(edited) => {
+                acceptMut.mutate(
+                  { proposal, editedPayload: edited as unknown as Record<string, unknown> },
+                  { onSuccess: () => setMode('view') }
+                )
+              }}
+              busy={busy}
+            />
+          ) : mode === 'merge' ? (
+            <MergePicker
+              onCancel={() => setMode('view')}
+              onPick={(itemId) => {
+                mergeMut.mutate(
+                  { proposal, targetItemId: itemId },
+                  { onSuccess: () => setMode('view') }
+                )
+              }}
+              busy={busy}
+            />
+          ) : (
+            <TaskInterpretation proposal={proposal} />
+          )
+        ) : (
+          <div className="text-xs text-gray-500">
+            Acceptance for this proposal type lands in a later chunk. You can still dismiss it.
+          </div>
+        )}
+      </div>
+
+      {/* Ambiguity flags */}
+      {proposal.ambiguity_flags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-t border-gray-800 px-4 py-2">
+          {proposal.ambiguity_flags.map((flag) => (
+            <span
+              key={flag}
+              className="flex items-center gap-1 rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] text-amber-300"
+            >
+              <AlertTriangle size={10} />
+              {flag.replace(/_/g, ' ')}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Action row */}
+      {mode === 'view' && (
+        <div className="flex flex-wrap gap-2 border-t border-gray-800 px-4 py-2.5">
+          {meta.supported && (
+            <>
+              <button
+                onClick={() => acceptMut.mutate({ proposal })}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded bg-green-600/20 px-2.5 py-1 text-xs font-medium text-green-300 hover:bg-green-600/30 disabled:opacity-50"
+              >
+                {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                Accept
+              </button>
+              <button
+                onClick={() => setMode('edit')}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+              <button
+                onClick={() => setMode('merge')}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+              >
+                <GitMerge size={12} />
+                Merge into existing
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => rejectMut.mutate({ proposalId: proposal.id, action: 'not_actionable' })}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-400 hover:bg-gray-700 disabled:opacity-50"
+          >
+            <X size={12} />
+            Not actionable
+          </button>
+          <button
+            onClick={() => rejectMut.mutate({ proposalId: proposal.id, action: 'dismiss_banter' })}
+            disabled={busy}
+            className="ml-auto flex items-center gap-1.5 rounded px-2.5 py-1 text-xs text-gray-500 hover:text-gray-300 disabled:opacity-50"
+          >
+            <Trash2 size={12} />
+            Dismiss as banter
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// Task interpretation (read-only)
+// ============================================================
+
+function TaskInterpretation({ proposal }: { proposal: Proposal }) {
+  const p = proposal.normalized_payload as unknown as TaskProposalPayload
+  return (
+    <div className="space-y-1.5">
+      <div className="text-base font-semibold text-white">{p.title}</div>
+      {p.description && (
+        <div className="text-xs leading-relaxed text-gray-400">{p.description}</div>
+      )}
+      <div className="flex flex-wrap gap-2 pt-1 text-xs">
+        {p.due_date && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-300">
+            due {new Date(p.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
+        )}
+        {p.assignee && p.assignee !== 'user' && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-400">
+            assignee: {p.assignee}
+          </span>
+        )}
+        {p.urgency && (
+          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-gray-400">
+            {p.urgency}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Task editor (used when user clicks Edit)
+// ============================================================
+
+interface TaskEditorProps {
+  proposal: Proposal
+  onSave: (payload: TaskProposalPayload) => void
+  onCancel: () => void
+  busy: boolean
+}
+
+function TaskEditor({ proposal, onSave, onCancel, busy }: TaskEditorProps) {
+  const initial = proposal.normalized_payload as unknown as TaskProposalPayload
+  const { data: streams } = useStreams()
+  const [title, setTitle] = useState(initial.title ?? '')
+  const [description, setDescription] = useState(initial.description ?? '')
+  const [nextAction, setNextAction] = useState(initial.next_action ?? '')
+  const [dueDate, setDueDate] = useState(initial.due_date ?? '')
+  const [streamId, setStreamId] = useState(initial.stream_id ?? '')
+  const [company, setCompany] = useState(initial.company ?? '')
+
+  const handleSave = () => {
+    if (!title.trim()) return
+    onSave({
+      ...initial,
+      title: title.trim(),
+      description: description.trim() || undefined,
+      next_action: nextAction.trim() || null,
+      due_date: dueDate || null,
+      stream_id: streamId || null,
+      company: company.trim() || null,
+    })
+  }
+
+  return (
+    <div className="space-y-2">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Title"
+        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        autoFocus
+      />
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Description"
+        rows={2}
+        className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+      />
+      <input
+        value={nextAction}
+        onChange={(e) => setNextAction(e.target.value)}
+        placeholder="Next action"
+        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="date"
+          value={dueDate ?? ''}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+        />
+        <select
+          value={streamId ?? ''}
+          onChange={(e) => setStreamId(e.target.value)}
+          className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+        >
+          <option value="">No stream</option>
+          {streams?.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={company}
+          onChange={(e) => setCompany(e.target.value)}
+          placeholder="Company"
+          className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={busy || !title.trim()}
+          className="flex items-center gap-1.5 rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+          Save & accept
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Merge picker (search existing items)
+// ============================================================
+
+interface MergePickerProps {
+  onPick: (itemId: string) => void
+  onCancel: () => void
+  busy: boolean
+}
+
+function MergePicker({ onPick, onCancel, busy }: MergePickerProps) {
+  const [query, setQuery] = useState('')
+  const { data: results, isLoading } = useSearch(query, query.length >= 2)
+  const itemResults = results?.filter((r) => r.result_type === 'item') ?? []
+
+  return (
+    <div className="space-y-2">
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search existing items..."
+        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        autoFocus
+      />
+      <div className="max-h-48 overflow-y-auto rounded border border-gray-800">
+        {query.length < 2 ? (
+          <div className="px-2 py-3 text-xs text-gray-500">Type to search...</div>
+        ) : isLoading ? (
+          <div className="px-2 py-3 text-xs text-gray-500">Searching...</div>
+        ) : itemResults.length === 0 ? (
+          <div className="px-2 py-3 text-xs text-gray-500">No matching items.</div>
+        ) : (
+          itemResults.map((r) => (
+            <button
+              key={r.result_id}
+              onClick={() => onPick(r.result_id)}
+              disabled={busy}
+              className="flex w-full flex-col items-start border-b border-gray-800 px-2 py-1.5 text-left text-xs hover:bg-gray-800 disabled:opacity-50"
+            >
+              <span className="text-gray-200">{r.title}</span>
+              {r.stream_name && (
+                <span className="text-[10px] text-gray-500">{r.stream_name}</span>
+              )}
+            </button>
+          ))
+        )}
+      </div>
+      <button
+        onClick={onCancel}
+        disabled={busy}
+        className="rounded px-2 py-1 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}

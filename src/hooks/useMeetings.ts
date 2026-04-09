@@ -121,6 +121,20 @@ export function useUploadTranscript() {
 
       if (error) {
         console.error('ai-parse-transcript error:', error)
+        // FunctionsHttpError exposes the underlying Response in `context`.
+        // Try to surface the function's actual error body so the UI can show it.
+        const ctx = (error as { context?: Response }).context
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json()
+            const detail = body?.detail ?? body?.error ?? JSON.stringify(body)
+            throw new Error(detail)
+          } catch (parseErr) {
+            if (parseErr instanceof Error && parseErr.message !== 'Failed to fetch') {
+              throw parseErr
+            }
+          }
+        }
         throw error
       }
       return data

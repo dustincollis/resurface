@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, AlertCircle, Trash2, Check, ChevronRight } from 'lucide-react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting } from '../hooks/useMeetings'
-import { useCreateItem, useItemsByDiscussion } from '../hooks/useItems'
+import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
+import { useProposalsBySource } from '../hooks/useProposals'
 import StatusBadge from '../components/StatusBadge'
 import type { Item } from '../lib/types'
 
@@ -39,16 +40,22 @@ export default function MeetingDetail() {
   const navigate = useNavigate()
   const { data: meeting, isLoading } = useMeeting(id!)
   const { data: linkedTasks } = useItemsByDiscussion(id!)
+  const { data: meetingProposals } = useProposalsBySource('meeting', id!)
   const uploadTranscript = useUploadTranscript()
   const deleteMeeting = useDeleteMeeting()
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
   const [showTranscriptInput, setShowTranscriptInput] = useState(true)
-  const [createdItems, setCreatedItems] = useState<Map<number, Item>>(new Map())
+  // Tracks which open-question / decision indices have been converted into items
+  const [createdFromQuestion, setCreatedFromQuestion] = useState<Map<number, Item>>(new Map())
+  const [createdFromDecision, setCreatedFromDecision] = useState<Map<number, Item>>(new Map())
 
   if (isLoading || !meeting) {
     return <div className="text-gray-400">Loading...</div>
   }
+
+  const pendingCount = meetingProposals?.filter((p) => p.status === 'pending').length ?? 0
+  const reviewedCount = meetingProposals?.filter((p) => p.status !== 'pending').length ?? 0
 
   const handleUpload = () => {
     if (!transcriptText.trim()) return
@@ -58,24 +65,39 @@ export default function MeetingDetail() {
     )
   }
 
-  const handleCreateItemFromAction = (
+  const handleCreateFromQuestion = (
     index: number,
-    action: { title: string; description?: string; company?: string | null; suggested_due_date?: string | null }
+    question: { question: string; owner?: string }
   ) => {
-    const desc = action.description
-      ? `${action.description}\n\nFrom discussion: ${meeting.title}`
-      : `From discussion: ${meeting.title}`
     createItem.mutate(
       {
-        title: action.title,
-        description: desc,
+        title: question.question,
+        description: `Open question raised in: ${meeting.title}`,
         source_meeting_id: meeting.id,
-        due_date: action.suggested_due_date ?? null,
-        custom_fields: action.company ? { company: action.company } : undefined,
       },
       {
         onSuccess: (item) => {
-          setCreatedItems((prev) => new Map(prev).set(index, item))
+          setCreatedFromQuestion((prev) => new Map(prev).set(index, item))
+        },
+      }
+    )
+  }
+
+  const handleCreateFromDecision = (
+    index: number,
+    decision: { decision: string; context?: string }
+  ) => {
+    const descParts = [`Decision made in: ${meeting.title}`]
+    if (decision.context) descParts.push(`Context: ${decision.context}`)
+    createItem.mutate(
+      {
+        title: decision.decision,
+        description: descParts.join('\n\n'),
+        source_meeting_id: meeting.id,
+      },
+      {
+        onSuccess: (item) => {
+          setCreatedFromDecision((prev) => new Map(prev).set(index, item))
         },
       }
     )
@@ -220,38 +242,54 @@ export default function MeetingDetail() {
           </div>
         )}
 
-        {/* Action items */}
-        {meeting.extracted_action_items && meeting.extracted_action_items.length > 0 && (
+        {/* Extracted action items → Proposals queue */}
+        {(pendingCount > 0 || reviewedCount > 0) && (
           <div className="border-b border-gray-800 px-6 py-4">
             <h3 className="mb-3 text-sm font-medium text-gray-300">Action Items</h3>
+            <Link
+              to={`/proposals?source_type=meeting&source_id=${meeting.id}`}
+              className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2.5 transition-colors hover:border-gray-700 hover:bg-gray-900"
+            >
+              <Inbox size={16} className="flex-shrink-0 text-purple-400" />
+              <div className="flex-1 text-sm">
+                {pendingCount > 0 ? (
+                  <span className="text-gray-200">
+                    {pendingCount} item{pendingCount !== 1 ? 's' : ''} extracted, awaiting review
+                  </span>
+                ) : (
+                  <span className="text-gray-400">
+                    {reviewedCount} item{reviewedCount !== 1 ? 's' : ''} reviewed
+                  </span>
+                )}
+                {pendingCount > 0 && reviewedCount > 0 && (
+                  <span className="ml-2 text-xs text-gray-500">
+                    ({reviewedCount} already reviewed)
+                  </span>
+                )}
+              </div>
+              <ChevronRight size={14} className="text-gray-600" />
+            </Link>
+          </div>
+        )}
+
+        {/* Decisions */}
+        {meeting.extracted_decisions && meeting.extracted_decisions.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 text-sm font-medium text-gray-300">Decisions</h3>
             <div className="space-y-2">
-              {meeting.extracted_action_items.map((action, i) => {
-                const created = createdItems.get(i)
+              {meeting.extracted_decisions.map((d, i) => {
+                const created = createdFromDecision.get(i)
                 return (
                   <div key={i} className="flex items-start gap-2">
-                    {created ? (
-                      <Check size={14} className="mt-0.5 flex-shrink-0 text-green-400" />
-                    ) : (
-                      <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-orange-400" />
-                    )}
-                    <div className="flex-1">
-                      <span className={`text-sm ${created ? 'text-gray-500' : 'text-gray-200'}`}>
-                        {action.title}
-                      </span>
-                      {action.assignee && (
-                        <span className="ml-2 text-xs text-gray-500">({action.assignee})</span>
-                      )}
-                      {action.suggested_due_date && !created && (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded bg-blue-900/40 px-1.5 py-0.5 text-xs text-blue-300">
-                          due {new Date(action.suggested_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </span>
-                      )}
-                      {action.description && (
-                        <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>
+                    <CheckCircle size={14} className="mt-0.5 flex-shrink-0 text-green-400" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-gray-200">{d.decision}</span>
+                      {d.context && (
+                        <p className="mt-0.5 text-xs text-gray-500">{d.context}</p>
                       )}
                       {created && (
                         <p className="mt-1 text-xs text-green-400">
-                          Created — {created.streams?.name ? `added to ${created.streams.name}` : 'no stream yet (AI classifying...)'}
+                          Task created
                           {' · '}
                           <button
                             onClick={() => navigate(`/items/${created.id}`)}
@@ -264,10 +302,13 @@ export default function MeetingDetail() {
                     </div>
                     {!created && (
                       <button
-                        onClick={() => handleCreateItemFromAction(i, action)}
-                        className="flex-shrink-0 rounded bg-purple-600/20 px-2 py-1 text-xs text-purple-300 hover:bg-purple-600/30"
+                        onClick={() => handleCreateFromDecision(i, d)}
+                        disabled={createItem.isPending}
+                        className="flex flex-shrink-0 items-center gap-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                        title="Create a follow-up task for this decision"
                       >
-                        Create Item
+                        <Plus size={11} />
+                        Create task
                       </button>
                     )}
                   </div>
@@ -277,42 +318,48 @@ export default function MeetingDetail() {
           </div>
         )}
 
-        {/* Decisions */}
-        {meeting.extracted_decisions && meeting.extracted_decisions.length > 0 && (
-          <div className="border-b border-gray-800 px-6 py-4">
-            <h3 className="mb-3 text-sm font-medium text-gray-300">Decisions</h3>
-            <div className="space-y-2">
-              {meeting.extracted_decisions.map((d, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <CheckCircle size={14} className="mt-0.5 flex-shrink-0 text-green-400" />
-                  <div>
-                    <span className="text-sm text-gray-200">{d.decision}</span>
-                    {d.context && (
-                      <p className="mt-0.5 text-xs text-gray-500">{d.context}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Open questions */}
         {meeting.extracted_open_questions && meeting.extracted_open_questions.length > 0 && (
           <div className="border-b border-gray-800 px-6 py-4">
             <h3 className="mb-3 text-sm font-medium text-gray-300">Open Questions</h3>
             <div className="space-y-2">
-              {meeting.extracted_open_questions.map((q, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <HelpCircle size={14} className="mt-0.5 flex-shrink-0 text-yellow-400" />
-                  <div>
-                    <span className="text-sm text-gray-200">{q.question}</span>
-                    {q.owner && (
-                      <span className="ml-2 text-xs text-gray-500">({q.owner})</span>
+              {meeting.extracted_open_questions.map((q, i) => {
+                const created = createdFromQuestion.get(i)
+                return (
+                  <div key={i} className="flex items-start gap-2">
+                    <HelpCircle size={14} className="mt-0.5 flex-shrink-0 text-yellow-400" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-gray-200">{q.question}</span>
+                      {q.owner && (
+                        <span className="ml-2 text-xs text-gray-500">({q.owner})</span>
+                      )}
+                      {created && (
+                        <p className="mt-1 text-xs text-green-400">
+                          Task created
+                          {' · '}
+                          <button
+                            onClick={() => navigate(`/items/${created.id}`)}
+                            className="text-purple-400 hover:text-purple-300"
+                          >
+                            View item
+                          </button>
+                        </p>
+                      )}
+                    </div>
+                    {!created && (
+                      <button
+                        onClick={() => handleCreateFromQuestion(i, q)}
+                        disabled={createItem.isPending}
+                        className="flex flex-shrink-0 items-center gap-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                        title="Create a task to address this question"
+                      >
+                        <Plus size={11} />
+                        Create task
+                      </button>
                     )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
@@ -373,10 +420,66 @@ export default function MeetingDetail() {
           )}
 
           {uploadTranscript.isError && (
-            <p className="mt-2 text-xs text-red-400">
-              Failed to process. Make sure the ai-parse-transcript edge function is deployed.
-            </p>
+            <div className="mt-2 rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+              <div className="font-medium">Failed to process.</div>
+              <div className="mt-1 break-words font-mono text-[11px] text-red-400/90">
+                {uploadTranscript.error instanceof Error
+                  ? uploadTranscript.error.message
+                  : String(uploadTranscript.error)}
+              </div>
+            </div>
           )}
+
+          {uploadTranscript.isSuccess && uploadTranscript.data && (() => {
+            const data = uploadTranscript.data as {
+              proposals_created?: number
+              skipped_for_others?: number
+              skipped_speculative?: number
+            }
+            const count = data.proposals_created ?? 0
+            const skippedOthers = data.skipped_for_others ?? 0
+            const skippedSpec = data.skipped_speculative ?? 0
+            const skipNotes: string[] = []
+            if (skippedOthers > 0) {
+              skipNotes.push(`${skippedOthers} for other people`)
+            }
+            if (skippedSpec > 0) {
+              skipNotes.push(`${skippedSpec} speculative`)
+            }
+            return (
+              <div className="mt-2 rounded border border-green-900/40 bg-green-950/30 px-3 py-2 text-xs">
+                {count === 0 && skippedOthers === 0 && skippedSpec === 0 ? (
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Check size={14} className="text-green-400" />
+                    <span>Processed. No action items extracted from this discussion.</span>
+                  </div>
+                ) : count === 0 ? (
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <Check size={14} className="text-green-400" />
+                    <span>
+                      Processed. No commitments for you — skipped {skipNotes.join(' and ')}.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-200">
+                    <Check size={14} className="text-green-400" />
+                    <span>
+                      {count} proposal{count !== 1 ? 's' : ''} created from this discussion.
+                    </span>
+                    {skipNotes.length > 0 && (
+                      <span className="text-gray-400">· skipped {skipNotes.join(', ')}</span>
+                    )}
+                    <Link
+                      to={`/proposals?source_type=meeting&source_id=${meeting.id}`}
+                      className="ml-auto font-medium text-green-100 underline hover:text-white"
+                    >
+                      Review →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
     </div>

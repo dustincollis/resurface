@@ -106,9 +106,17 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
       } ${level === 'critical' ? 'ring-1 ring-red-900/30' : ''}`}
     >
       {/* Always-visible row */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 text-left"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded(!expanded)
+          }
+        }}
+        className="w-full cursor-pointer px-4 py-3 text-left"
       >
         <div className="flex items-start gap-3">
           {item.pinned ? (
@@ -213,7 +221,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             </button>
           </div>
         </div>
-      </button>
+      </div>
 
       {/* Expanded section */}
       {expanded && (

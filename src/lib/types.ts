@@ -122,3 +122,75 @@ export interface UpdateStreamPayload extends Partial<CreateStreamPayload> {
   sort_order?: number
   is_archived?: boolean
 }
+
+// ============================================================
+// Proposals: AI extractions awaiting user review
+// ============================================================
+
+export type ProposalType =
+  | 'task'
+  | 'commitment'
+  | 'memory'
+  | 'draft'
+  | 'deadline_adjustment'
+
+export type ProposalSourceType =
+  | 'meeting'
+  | 'transcript'
+  | 'chat'
+  | 'manual'
+  | 'reconciliation'
+
+export type ProposalStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'merged'
+  | 'dismissed'
+
+export type ProposalReviewAction =
+  | 'accept'
+  | 'edit'
+  | 'merge'
+  | 'not_actionable'
+  | 'dismiss_banter'
+
+// Payload shape for proposal_type='task'. Mirrors CreateItemPayload but
+// adds the assignee/urgency hints the AI emits, and is the canonical
+// shape stored in proposals.normalized_payload / accepted_payload.
+export interface TaskProposalPayload {
+  title: string
+  description?: string
+  next_action?: string | null
+  due_date?: string | null
+  stream_id?: string | null
+  parent_id?: string | null
+  source_meeting_id?: string | null
+  // AI hints — not written to items directly
+  assignee?: string | null
+  urgency?: 'high' | 'medium' | 'low' | null
+  company?: string | null
+}
+
+export interface Proposal {
+  id: string
+  user_id: string
+  proposal_type: ProposalType
+  source_type: ProposalSourceType
+  source_id: string | null
+  evidence_text: string | null
+  normalized_payload: Record<string, unknown>
+  accepted_payload: Record<string, unknown> | null
+  confidence: number | null
+  ambiguity_flags: string[]
+  status: ProposalStatus
+  review_action: ProposalReviewAction | null
+  resulting_object_type: string | null
+  resulting_object_id: string | null
+  merge_target_id: string | null
+  created_at: string
+  reviewed_at: string | null
+  updated_at: string
+  // Client-side derived (set by useProposals via a join query, not a column)
+  source_title?: string | null
+}
