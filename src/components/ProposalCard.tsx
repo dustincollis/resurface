@@ -13,17 +13,20 @@ import {
   Trash2,
   AlertTriangle,
   Loader2,
-  Eye,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Target,
 } from 'lucide-react'
 import { useStreams } from '../hooks/useStreams'
 import { useSearch } from '../hooks/useSearch'
-import { useAuth } from '../hooks/useAuth'
 import {
   useAcceptProposal,
   useRejectProposal,
   useMergeProposal,
-  useTrackProposalAsCommitment,
+  defaultAcceptAs,
+  type AcceptAs,
 } from '../hooks/useProposals'
+import { usePursuits } from '../hooks/usePursuits'
 import type {
   Proposal,
   ProposalType,
@@ -47,16 +50,19 @@ const TYPE_META: Record<
 }
 
 export default function ProposalCard({ proposal }: ProposalCardProps) {
-  const meta = TYPE_META[proposal.proposal_type]
-  const Icon = meta.icon
+  const parserSuggestion = TYPE_META[proposal.proposal_type]
   const [mode, setMode] = useState<'view' | 'edit' | 'merge'>('view')
+  // The user picks the target type at acceptance time. Defaults to the
+  // parser's suggestion (task → 'task', commitment → 'commitment_outgoing'),
+  // but the user can override.
+  const [acceptAs, setAcceptAs] = useState<AcceptAs>(defaultAcceptAs(proposal))
+  const [pursuitId, setPursuitId] = useState<string | null>(null)
 
   const acceptMut = useAcceptProposal()
   const rejectMut = useRejectProposal()
   const mergeMut = useMergeProposal()
-  const trackMut = useTrackProposalAsCommitment()
-  const { user } = useAuth()
-  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending || trackMut.isPending
+  const { data: activePursuits } = usePursuits({ status: 'active' })
+  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending
 
   const confidenceColor =
     proposal.confidence == null
@@ -74,20 +80,14 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
     | undefined
   const company = payload?.company ?? null
   const sourceTitle = proposal.source_title ?? null
-  const isTask = proposal.proposal_type === 'task'
-  const isCommitment = proposal.proposal_type === 'commitment'
 
-  // Detect when a task proposal is attributed to someone other than the
-  // current user — that's when "Track as commitment" makes sense.
-  const taskAssignee = (payload as TaskProposalPayload | undefined)?.assignee
-  const userEmailLocal = user?.email?.split('@')[0]?.toLowerCase() ?? ''
-  const isAssignedToOther = Boolean(
-    isTask &&
-      taskAssignee &&
-      taskAssignee !== 'user' &&
-      taskAssignee !== 'unknown' &&
-      taskAssignee.toLowerCase() !== userEmailLocal
-  )
+  // Drive the rendering choice from the user's selection, not the parser's
+  // suggestion. The interpretation and editor switch when the chip changes.
+  const showAsCommitment = acceptAs !== 'task'
+
+  const handleAccept = () => {
+    acceptMut.mutate({ proposal, acceptAs, pursuitId })
+  }
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900">
@@ -110,11 +110,10 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
             )}
           </div>
           <div className="mt-1.5 flex items-center gap-2">
-            <Icon size={12} className="text-gray-500" />
             <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
-              {meta.label}
+              AI suggested: {parserSuggestion.label}
             </span>
-            {!meta.supported && (
+            {!parserSuggestion.supported && (
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500">
                 not yet supported
               </span>
@@ -141,15 +140,20 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
 
       {/* Structured interpretation */}
       <div className="px-4 py-3">
-        {meta.supported ? (
+        {parserSuggestion.supported ? (
           mode === 'edit' ? (
-            isCommitment ? (
+            showAsCommitment ? (
               <CommitmentEditor
                 proposal={proposal}
                 onCancel={() => setMode('view')}
                 onSave={(edited) => {
                   acceptMut.mutate(
-                    { proposal, editedPayload: edited as unknown as Record<string, unknown> },
+                    {
+                      proposal,
+                      acceptAs,
+                      pursuitId,
+                      editedPayload: edited as unknown as Record<string, unknown>,
+                    },
                     { onSuccess: () => setMode('view') }
                   )
                 }}
@@ -161,7 +165,12 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 onCancel={() => setMode('view')}
                 onSave={(edited) => {
                   acceptMut.mutate(
-                    { proposal, editedPayload: edited as unknown as Record<string, unknown> },
+                    {
+                      proposal,
+                      acceptAs,
+                      pursuitId,
+                      editedPayload: edited as unknown as Record<string, unknown>,
+                    },
                     { onSuccess: () => setMode('view') }
                   )
                 }}
@@ -179,7 +188,7 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
               }}
               busy={busy}
             />
-          ) : isCommitment ? (
+          ) : showAsCommitment ? (
             <CommitmentInterpretation proposal={proposal} />
           ) : (
             <TaskInterpretation proposal={proposal} />
@@ -190,6 +199,84 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
           </div>
         )}
       </div>
+
+      {/* Type + Pursuit selector — only shown in view mode (edit mode
+          embeds these decisions in its own form for clarity) */}
+      {parserSuggestion.supported && mode === 'view' && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-gray-800 px-4 py-2.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+            Save as
+          </span>
+          <div className="flex items-center gap-0.5 rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+            <button
+              type="button"
+              onClick={() => setAcceptAs('task')}
+              disabled={busy}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+                acceptAs === 'task'
+                  ? 'bg-purple-700/40 text-purple-200'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <CheckSquare size={10} />
+              Task
+            </button>
+            <button
+              type="button"
+              onClick={() => setAcceptAs('commitment_outgoing')}
+              disabled={busy}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+                acceptAs === 'commitment_outgoing'
+                  ? 'bg-amber-700/40 text-amber-200'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title="Outgoing commitment — you owe someone"
+            >
+              <ArrowUpRight size={10} />
+              I owe
+            </button>
+            <button
+              type="button"
+              onClick={() => setAcceptAs('commitment_incoming')}
+              disabled={busy}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+                acceptAs === 'commitment_incoming'
+                  ? 'bg-blue-700/40 text-blue-200'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title="Incoming commitment — owed to you"
+            >
+              <ArrowDownLeft size={10} />
+              Owed to me
+            </button>
+          </div>
+
+          {/* Pursuit selector — only show if user has at least one active pursuit */}
+          {(activePursuits ?? []).length > 0 && (
+            <>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                · Pursuit
+              </span>
+              <div className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 px-1.5 py-0.5">
+                <Target size={10} className="text-gray-500" />
+                <select
+                  value={pursuitId ?? ''}
+                  onChange={(e) => setPursuitId(e.target.value || null)}
+                  disabled={busy}
+                  className="border-none bg-transparent text-[11px] text-gray-300 focus:outline-none disabled:opacity-50"
+                >
+                  <option value="">none</option>
+                  {(activePursuits ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Ambiguity flags */}
       {proposal.ambiguity_flags.length > 0 && (
@@ -209,15 +296,19 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
       {/* Action row */}
       {mode === 'view' && (
         <div className="flex flex-wrap gap-2 border-t border-gray-800 px-4 py-2.5">
-          {meta.supported && (
+          {parserSuggestion.supported && (
             <>
               <button
-                onClick={() => acceptMut.mutate({ proposal })}
+                onClick={handleAccept}
                 disabled={busy}
                 className="flex items-center gap-1.5 rounded bg-green-600/20 px-2.5 py-1 text-xs font-medium text-green-300 hover:bg-green-600/30 disabled:opacity-50"
               >
                 {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                Accept
+                {acceptAs === 'task'
+                  ? 'Save as task'
+                  : acceptAs === 'commitment_outgoing'
+                    ? 'Save as outgoing commitment'
+                    : 'Save as incoming commitment'}
               </button>
               <button
                 onClick={() => setMode('edit')}
@@ -227,7 +318,7 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 <Pencil size={12} />
                 Edit
               </button>
-              {isTask && (
+              {acceptAs === 'task' && (
                 <button
                   onClick={() => setMode('merge')}
                   disabled={busy}
@@ -235,17 +326,6 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 >
                   <GitMerge size={12} />
                   Merge into existing
-                </button>
-              )}
-              {isAssignedToOther && (
-                <button
-                  onClick={() => trackMut.mutate({ proposal })}
-                  disabled={busy}
-                  className="flex items-center gap-1.5 rounded bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-300 hover:bg-blue-900/50 disabled:opacity-50"
-                  title={`Track as an incoming commitment from ${taskAssignee}`}
-                >
-                  {trackMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
-                  Track as commitment
                 </button>
               )}
             </>

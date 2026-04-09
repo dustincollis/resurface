@@ -98,9 +98,27 @@ function invalidateProposals() {
 }
 
 // ============================================================
-// Acceptance — polymorphic by proposal_type.
-// Chunk 0: only `task` is wired. Other types throw.
+// Acceptance — user picks the target type at acceptance time.
+//
+// `acceptAs` lets the user override the parser's suggested proposal_type.
+// A task proposal can be accepted as a commitment (outgoing or incoming),
+// and vice versa. The proposal's payload is mapped to the target type's
+// shape. If the user explicitly edited fields, those win over the
+// auto-mapping.
+//
+// `pursuitId` optionally adds the resulting object to a pursuit in the
+// same action, so users don't have to navigate to the new object's
+// detail page just to add it to a thread of work.
 // ============================================================
+
+export type AcceptAs = 'task' | 'commitment_outgoing' | 'commitment_incoming'
+
+interface AcceptProposalArgs {
+  proposal: Proposal
+  acceptAs: AcceptAs
+  editedPayload?: Record<string, unknown>
+  pursuitId?: string | null
+}
 
 export function useAcceptProposal() {
   const { user } = useAuth()
@@ -108,27 +126,40 @@ export function useAcceptProposal() {
   return useMutation({
     mutationFn: async ({
       proposal,
+      acceptAs,
       editedPayload,
-    }: {
-      proposal: Proposal
-      editedPayload?: Record<string, unknown>
-    }) => {
-      const finalPayload = (editedPayload ?? proposal.normalized_payload) as Record<string, unknown>
+      pursuitId,
+    }: AcceptProposalArgs) => {
+      // The parser's payload may be either task-shaped (title, due_date,
+      // assignee, ...) or commitment-shaped (title, counterpart, do_by, ...).
+      // We normalize to the target type below.
+      const sourcePayload = (editedPayload ?? proposal.normalized_payload) as Record<string, unknown>
+      const isSourceTask = proposal.proposal_type === 'task'
 
       let resultingObjectType: string | null = null
       let resultingObjectId: string | null = null
 
-      if (proposal.proposal_type === 'task') {
-        const p = finalPayload as unknown as TaskProposalPayload
+      if (acceptAs === 'task') {
+        // Map source → task shape
+        const taskFields = isSourceTask
+          ? (sourcePayload as unknown as TaskProposalPayload)
+          : ({
+              title: (sourcePayload.title as string) ?? '',
+              description: (sourcePayload.description as string) ?? '',
+              due_date: (sourcePayload.do_by as string | null) ?? null,
+              company: (sourcePayload.company as string | null) ?? null,
+              source_meeting_id: (sourcePayload.source_meeting_id as string | null) ?? null,
+            } as TaskProposalPayload)
+
         const insertPayload: CreateItemPayload & { user_id: string } = {
           user_id: user!.id,
-          title: p.title,
-          description: p.description ?? '',
-          next_action: p.next_action ?? undefined,
-          due_date: p.due_date ?? null,
-          stream_id: p.stream_id ?? null,
-          source_meeting_id: p.source_meeting_id ?? null,
-          custom_fields: p.company ? { company: p.company } : undefined,
+          title: taskFields.title,
+          description: taskFields.description ?? '',
+          next_action: taskFields.next_action ?? undefined,
+          due_date: taskFields.due_date ?? null,
+          stream_id: taskFields.stream_id ?? null,
+          source_meeting_id: taskFields.source_meeting_id ?? null,
+          custom_fields: taskFields.company ? { company: taskFields.company } : undefined,
         }
         const { data: itemRow, error: insertErr } = await supabase
           .from('items')
@@ -147,22 +178,46 @@ export function useAcceptProposal() {
           action: 'created',
           details: { title: item.title, source: 'proposal', proposal_id: proposal.id },
         })
-      } else if (proposal.proposal_type === 'commitment') {
-        const p = finalPayload as unknown as CommitmentProposalPayload
+      } else {
+        // commitment_outgoing or commitment_incoming
+        const direction = acceptAs === 'commitment_outgoing' ? 'outgoing' : 'incoming'
+
+        // Map source → commitment shape
+        const commitmentFields = isSourceTask
+          ? ({
+              title: (sourcePayload.title as string) ?? '',
+              description: (sourcePayload.description as string) ?? '',
+              do_by: (sourcePayload.due_date as string | null) ?? null,
+              company: (sourcePayload.company as string | null) ?? null,
+              source_meeting_id: (sourcePayload.source_meeting_id as string | null) ?? null,
+              // For incoming commitments, the assignee on the task IS the
+              // counterpart (the person who owes the user). For outgoing,
+              // we leave it blank — the user defines who they owe.
+              counterpart:
+                direction === 'incoming' &&
+                typeof sourcePayload.assignee === 'string' &&
+                sourcePayload.assignee !== 'user' &&
+                sourcePayload.assignee !== 'unknown'
+                  ? (sourcePayload.assignee as string)
+                  : null,
+            } as CommitmentProposalPayload)
+          : (sourcePayload as unknown as CommitmentProposalPayload)
+
         const insertPayload: CreateCommitmentPayload & { user_id: string } = {
           user_id: user!.id,
-          title: p.title,
-          description: p.description ?? null,
-          counterpart: p.counterpart ?? null,
-          company: p.company ?? null,
-          do_by: p.do_by ?? null,
-          promised_by: p.promised_by ?? null,
-          needs_review_by: p.needs_review_by ?? null,
-          source_meeting_id: p.source_meeting_id ?? null,
-          source_item_id: p.source_item_id ?? null,
+          title: commitmentFields.title,
+          description: commitmentFields.description ?? null,
+          counterpart: commitmentFields.counterpart ?? null,
+          company: commitmentFields.company ?? null,
+          do_by: commitmentFields.do_by ?? null,
+          promised_by: commitmentFields.promised_by ?? null,
+          needs_review_by: commitmentFields.needs_review_by ?? null,
+          source_meeting_id: commitmentFields.source_meeting_id ?? null,
+          source_item_id: commitmentFields.source_item_id ?? null,
           evidence_text: proposal.evidence_text ?? null,
           confidence: proposal.confidence ?? null,
           status: 'open',
+          direction,
         }
         const { data: commitmentRow, error: insertErr } = await supabase
           .from('commitments')
@@ -173,11 +228,16 @@ export function useAcceptProposal() {
         const commitment = commitmentRow as Commitment
         resultingObjectType = 'commitment'
         resultingObjectId = commitment.id
-      } else {
-        throw new Error(
-          `Acceptance for proposal_type='${proposal.proposal_type}' is not yet implemented. ` +
-            `It will land in a later chunk.`
-        )
+      }
+
+      // If the user picked a pursuit, attach the new object to it.
+      if (pursuitId && resultingObjectId && resultingObjectType) {
+        const memberType = resultingObjectType === 'item' ? 'item' : 'commitment'
+        await supabase.from('pursuit_members').insert({
+          pursuit_id: pursuitId,
+          member_type: memberType,
+          member_id: resultingObjectId,
+        })
       }
 
       const { error: updateErr } = await supabase
@@ -185,7 +245,7 @@ export function useAcceptProposal() {
         .update({
           status: 'accepted',
           review_action: editedPayload ? 'edit' : 'accept',
-          accepted_payload: finalPayload,
+          accepted_payload: sourcePayload,
           resulting_object_type: resultingObjectType,
           resulting_object_id: resultingObjectId,
           reviewed_at: new Date().toISOString(),
@@ -199,8 +259,15 @@ export function useAcceptProposal() {
       invalidateProposals()
       queryClient.invalidateQueries({ queryKey: ['items'] })
       queryClient.invalidateQueries({ queryKey: ['commitments'] })
+      queryClient.invalidateQueries({ queryKey: ['pursuit_members'] })
     },
   })
+}
+
+// Helper: derive the default acceptAs choice from a proposal's parser-
+// suggested type. Used to seed the type selector in the UI.
+export function defaultAcceptAs(proposal: Proposal): AcceptAs {
+  return proposal.proposal_type === 'commitment' ? 'commitment_outgoing' : 'task'
 }
 
 // ============================================================
@@ -230,69 +297,10 @@ export function useRejectProposal() {
   })
 }
 
-// ============================================================
-// Track a task proposal as an incoming commitment instead of accepting
-// it as a task. Used when an action item belongs to someone other than
-// the user — they're not doing it, they're tracking it.
-// ============================================================
-
-export function useTrackProposalAsCommitment() {
-  const { user } = useAuth()
-
-  return useMutation({
-    mutationFn: async ({ proposal }: { proposal: Proposal }) => {
-      if (proposal.proposal_type !== 'task') {
-        throw new Error(
-          `Track-as-commitment is only available for task proposals (got '${proposal.proposal_type}')`
-        )
-      }
-      const p = proposal.normalized_payload as unknown as TaskProposalPayload
-      const insertPayload: CreateCommitmentPayload & { user_id: string } = {
-        user_id: user!.id,
-        title: p.title,
-        description: p.description ?? null,
-        counterpart: p.assignee && p.assignee !== 'user' && p.assignee !== 'unknown'
-          ? p.assignee
-          : null,
-        company: p.company ?? null,
-        do_by: p.due_date ?? null,
-        promised_by: null,
-        needs_review_by: null,
-        status: 'open',
-        direction: 'incoming',
-        source_meeting_id: p.source_meeting_id ?? null,
-        evidence_text: proposal.evidence_text ?? null,
-        confidence: proposal.confidence ?? null,
-      }
-      const { data: commitmentRow, error: insertErr } = await supabase
-        .from('commitments')
-        .insert(insertPayload)
-        .select()
-        .single()
-      if (insertErr) throw insertErr
-      const commitment = commitmentRow as Commitment
-
-      const { error: updateErr } = await supabase
-        .from('proposals')
-        .update({
-          status: 'accepted',
-          review_action: 'accept',
-          accepted_payload: insertPayload as unknown as Record<string, unknown>,
-          resulting_object_type: 'commitment',
-          resulting_object_id: commitment.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq('id', proposal.id)
-      if (updateErr) throw updateErr
-
-      return commitment
-    },
-    onSuccess: () => {
-      invalidateProposals()
-      queryClient.invalidateQueries({ queryKey: ['commitments'] })
-    },
-  })
-}
+// Deprecated: superseded by useAcceptProposal with acceptAs='commitment_incoming'.
+// The ProposalCard's old "Track as commitment" button has been replaced by
+// the type chip group, so this hook is no longer used in the UI. Kept as
+// a no-op alias in case any other caller still imports it.
 
 // ============================================================
 // Merge into existing item (task proposals only for chunk 0)
