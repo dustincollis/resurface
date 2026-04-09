@@ -93,28 +93,32 @@ const NAME_BEFORE_SPEAKER = /([A-Z][a-zA-Z'\-.]*(?:\s+[A-Z][a-zA-Z'\-.]+)*)\s*\(
 const SPEAKER_BEFORE_NAME = /Speaker\s+(\d+)\s*\(([^)]+)\)/gi;
 
 // Extract a flat attendee list from the markdown's "Attendee:" line.
-// HiNotes' newer GPT-4.1 summaries write a simple comma-separated list of
-// names rather than Speaker N (Name) annotations, so this is the most
-// reliable place to find a known cast for a meeting.
-//
-// Returns e.g. ["Dustin", "Holly", "Tomas", "Vicky"]
+// Handles both:
+//   - GPT-4.1 newer format:  "Dustin, Holly, Tomas, Vicky"
+//   - Older legacy format:   "Speaker 1 (Jackie), Speaker 2 (EPM lead), ..."
+// Returns e.g. ["Dustin", "Holly", "Tomas", "Vicky"] or ["Jackie", "EPM lead", ...]
 function extractAttendees(markdown: string | null): string[] {
   if (!markdown) return [];
-  // Match "**Attendee**: ..." or "Attendee: ..." up to the end of the line
   const m = markdown.match(/(?:\*\*)?Attendee(?:\*\*)?\s*:\s*([^\n]+)/i);
   if (!m) return [];
-  const raw = m[1].trim();
-  // Split on commas, strip parenthesized annotations like "(mentioned)" or
-  // "(Speaker 1)", and drop generic catch-all phrases.
+  let raw = m[1].trim();
+  // Step 1: rewrite "Speaker N (Name)" → "Name" so the older format
+  // exposes its real name instead of leaking "Speaker 1" labels.
+  raw = raw.replace(/Speaker\s*\d+\s*\(([^)]+)\)/gi, (_m, name) => name.trim());
+  // Step 2: strip any remaining parenthesized annotations like "(mentioned)"
+  // or "(Head of Procurement, US)". Doing this BEFORE the comma split avoids
+  // splitting inside parens.
+  raw = raw.replace(/\([^)]*\)/g, "");
+  // Step 3: split, clean, filter noise
+  const seen = new Set<string>();
   const names: string[] = [];
-  for (const part of raw.split(/,| and /)) {
-    const cleaned = part
-      .replace(/\([^)]*\)/g, "") // strip parenthesized annotations
-      .replace(/\s+/g, " ")
-      .trim();
+  for (const part of raw.split(/,|\sand\s/)) {
+    let cleaned = part.replace(/\s+/g, " ").trim().replace(/[.;:]+$/, "");
     if (!cleaned) continue;
-    // Skip catch-all phrases
-    if (/^(other team members.*|adobe representatives|.*team|et al\.?)$/i.test(cleaned)) continue;
+    const lower = cleaned.toLowerCase();
+    if (seen.has(lower)) continue;
+    if (/^(other team members.*|.*representatives|.*team|et al\.?|and\s+others?|speaker\s*\d+)$/i.test(cleaned)) continue;
+    seen.add(lower);
     names.push(cleaned);
   }
   return names;

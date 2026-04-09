@@ -186,9 +186,12 @@ ATTENDEE_LINE = re.compile(
 )
 # Catch-all phrases we should NOT treat as attendees
 ATTENDEE_NOISE = re.compile(
-    r"^(other team members.*|.*representatives|.*team|et al\.?|and\s+others?)$",
+    r"^(other team members.*|.*representatives|.*team|et al\.?|and\s+others?|speaker\s*\d+)$",
     re.IGNORECASE,
 )
+# When the attendee line uses the older "Speaker N (Name)" format, we want
+# the inner name, not the outer "Speaker N" label.
+SPEAKER_N_NAME_INLINE = re.compile(r"Speaker\s*\d+\s*\(([^)]+)\)", re.IGNORECASE)
 
 
 def extract_attendees_from_summary(detail) -> list:
@@ -207,16 +210,25 @@ def extract_attendees_from_summary(detail) -> list:
         val = detail.get(field)
         if isinstance(val, str) and val:
             sources.append(val)
-    seen = set()
-    out = []
     for src in sources:
         m = ATTENDEE_LINE.search(src)
         if not m:
             continue
         raw = m.group(1).strip()
+        # Step 1: rewrite "Speaker N (Name)" → "Name" so the older format
+        # exposes its real name instead of leaking "Speaker 1" labels.
+        raw = SPEAKER_N_NAME_INLINE.sub(lambda mm: mm.group(1).strip(), raw)
+        # Step 2: strip any remaining parenthesized annotations like
+        # "(mentioned)" or "(Head of Procurement, US)". Doing this BEFORE
+        # the comma split avoids splitting inside parens.
+        raw = re.sub(r"\([^)]*\)", "", raw)
+        # Step 3: split on commas + " and ", clean up, filter noise
+        seen = set()
+        out = []
         for part in re.split(r",|\sand\s", raw):
-            cleaned = re.sub(r"\([^)]*\)", "", part)
-            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            cleaned = re.sub(r"\s+", " ", part).strip()
+            # Strip trailing punctuation
+            cleaned = cleaned.rstrip(".;:")
             if not cleaned or cleaned.lower() in seen:
                 continue
             if ATTENDEE_NOISE.match(cleaned):
@@ -224,8 +236,8 @@ def extract_attendees_from_summary(detail) -> list:
             seen.add(cleaned.lower())
             out.append(cleaned)
         if out:
-            break  # use the first source that yielded anything
-    return out
+            return out
+    return []
 
 
 # ---------------------------------------------------------------------------
