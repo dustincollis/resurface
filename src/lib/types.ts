@@ -275,6 +275,22 @@ export interface PursuitMember {
   added_at: string
 }
 
+// ============================================================
+// Item assists — persistent AI "Help me" responses per item
+// ============================================================
+
+export type ItemAssistType = 'approach' | 'context' | 'draft'
+
+export interface ItemAssist {
+  id: string
+  user_id: string
+  item_id: string
+  assist_type: ItemAssistType
+  content: string
+  model: string
+  generated_at: string
+}
+
 export interface Proposal {
   id: string
   user_id: string

@@ -8,6 +8,7 @@ import InlineEditable from '../components/InlineEditable'
 import ItemLinkSection from '../components/ItemLinkSection'
 import { useCommitmentsByItem } from '../hooks/useCommitments'
 import AddToPursuit from '../components/AddToPursuit'
+import ItemAssistsSection from '../components/ItemAssistsSection'
 import DecomposeSection from '../components/DecomposeSection'
 import { effectiveStalenessLevel, stalenessPillClass } from '../lib/priorityScore'
 import type { ItemStatus } from '../lib/types'
@@ -362,6 +363,9 @@ export default function ItemDetail() {
         <div className="border-b border-gray-800 px-6 py-4">
           <AddToPursuit memberType="item" memberId={item.id} />
         </div>
+
+        {/* AI assists — Help me with this */}
+        <ItemAssistsSection itemId={item.id} />
 
         {/* Linked items */}
         <ItemLinkSection itemId={item.id} />
