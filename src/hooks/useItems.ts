@@ -230,18 +230,29 @@ export function useDeleteItem() {
   })
 }
 
+// Next business day: skips weekends so Friday → Monday, Saturday → Monday,
+// Sunday → Monday. Weekdays → next day as before.
+function nextBusinessDay(from: Date): Date {
+  const result = new Date(from)
+  const day = result.getDay() // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+  if (day === 5) result.setDate(result.getDate() + 3)       // Fri → Mon
+  else if (day === 6) result.setDate(result.getDate() + 2)  // Sat → Mon
+  else result.setDate(result.getDate() + 1)                 // Sun-Thu → next day
+  return result
+}
+
 export function useTouchItem() {
   const { user } = useAuth()
 
   return useMutation({
     mutationFn: async (id: string) => {
       const now = new Date()
-      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+      const snoozeUntil = nextBusinessDay(now)
       const { data, error } = await supabase
         .from('items')
         .update({
           last_touched_at: now.toISOString(),
-          snoozed_until: tomorrow.toISOString(),
+          snoozed_until: snoozeUntil.toISOString(),
         })
         .eq('id', id)
         .select()
@@ -257,7 +268,7 @@ export function useTouchItem() {
         user_id: user!.id,
         item_id: itemId,
         action: 'touched',
-        details: { snoozed_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
+        details: { snoozed_until: nextBusinessDay(new Date()).toISOString() },
       })
     },
   })

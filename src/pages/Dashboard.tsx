@@ -251,7 +251,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
                 </>
               ) : (
                 <>
-                  <Clock size={12} /> Touch +1d
+                  <Clock size={12} /> {new Date().getDay() === 5 ? 'Touch → Mon' : 'Touch +1d'}
                 </>
               )}
             </button>
