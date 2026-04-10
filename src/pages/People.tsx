@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, Search, Building2, ChevronRight } from 'lucide-react'
+import { Users, Search, Building2, ChevronRight, Star } from 'lucide-react'
 import { usePeople } from '../hooks/usePeople'
 import { useCompanies } from '../hooks/useCompanies'
 import type { Person } from '../lib/types'
@@ -11,6 +11,7 @@ export default function People() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [companyFilter, setCompanyFilter] = useState<string>('')
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const filtered = useMemo(() => {
     let list = people ?? []
@@ -24,34 +25,59 @@ export default function People() {
           p.aliases.some((a) => a.toLowerCase().includes(q))
       )
     }
-    if (companyFilter) {
+    if (companyFilter === '__none') {
+      list = list.filter((p) => !p.company_id)
+    } else if (companyFilter) {
       list = list.filter((p) => p.company_id === companyFilter)
     }
     return list
   }, [people, search, companyFilter])
 
-  // Group by company for display
-  const grouped = useMemo(() => {
-    const byCompany = new Map<string | null, Person[]>()
+  // Frequent contacts: people with the most meeting appearances
+  // We approximate this by counting meeting_attendees (loaded via the people hook's join)
+  // Since we don't have that count directly, use a heuristic: people who are NOT
+  // just email-only (have aliases = were merged from voice) are more engaged
+  const frequentContacts = useMemo(() => {
+    if (search || companyFilter) return []
+    const all = people ?? []
+    // Rank by: has email + has aliases (merged) → more interactions
+    // Then by company affiliation (affiliated > not)
+    // This is a rough proxy until we have proper interaction counts
+    const scored = all.map((p) => ({
+      person: p,
+      score:
+        (p.email ? 2 : 0) +
+        (p.aliases.length > 0 ? 3 : 0) +
+        (p.company_id ? 1 : 0) +
+        (p.role ? 1 : 0),
+    }))
+    return scored
+      .filter((s) => s.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20)
+      .map((s) => s.person)
+  }, [people, search, companyFilter])
+
+  // Group by first letter
+  const alphabetGroups = useMemo(() => {
+    const groups = new Map<string, Person[]>()
     for (const p of filtered) {
-      const key = p.company_id
-      if (!byCompany.has(key)) byCompany.set(key, [])
-      byCompany.get(key)!.push(p)
+      const letter = p.name.charAt(0).toUpperCase()
+      if (!groups.has(letter)) groups.set(letter, [])
+      groups.get(letter)!.push(p)
     }
-    // Sort: companies with names first, then unaffiliated
-    const entries = [...byCompany.entries()].sort((a, b) => {
-      if (a[0] === null) return 1
-      if (b[0] === null) return -1
-      const aName = (companies ?? []).find((c) => c.id === a[0])?.name ?? ''
-      const bName = (companies ?? []).find((c) => c.id === b[0])?.name ?? ''
-      return aName.localeCompare(bName)
-    })
-    return entries
-  }, [filtered, companies])
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [filtered])
+
+  const activeLetters = new Set(alphabetGroups.map(([letter]) => letter))
+
+  const scrollToLetter = (letter: string) => {
+    sectionRefs.current[letter]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const companyName = (id: string | null) => {
-    if (!id) return 'Unaffiliated'
-    return (companies ?? []).find((c) => c.id === id)?.name ?? 'Unknown'
+    if (!id) return null
+    return (companies ?? []).find((c) => c.id === id)?.name ?? null
   }
 
   return (
@@ -94,49 +120,100 @@ export default function People() {
           <h2 className="mt-3 text-sm font-medium text-gray-400">
             {search || companyFilter ? 'No matches' : 'No people yet'}
           </h2>
-          <p className="mt-1 text-xs text-gray-600">
-            People are created automatically from meeting attendees and commitment counterparts.
-          </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {grouped.map(([companyId, persons]) => (
-            <section key={companyId ?? 'none'}>
-              <button
-                onClick={() => companyId ? navigate(`/companies/${companyId}`) : undefined}
-                className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-gray-500 hover:text-gray-300"
-              >
-                <Building2 size={11} />
-                {companyName(companyId)}
-                <span className="text-gray-600">({persons.length})</span>
-              </button>
-              <div className="space-y-1">
-                {persons.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => navigate(`/people/${p.id}`)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
-                  >
-                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-900/30 text-sm font-medium text-purple-300">
-                      {p.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-white">{p.name}</span>
-                        {p.role && (
-                          <span className="truncate text-xs text-gray-500">{p.role}</span>
+        <div className="flex gap-4">
+          {/* Main list */}
+          <div className="min-w-0 flex-1 space-y-4">
+            {/* Frequent contacts */}
+            {frequentContacts.length > 0 && (
+              <section>
+                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <Star size={11} /> Frequent contacts
+                </h2>
+                <div className="flex flex-wrap gap-1.5">
+                  {frequentContacts.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => navigate(`/people/${p.id}`)}
+                      className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-1.5 text-left transition-colors hover:border-gray-700"
+                    >
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-900/30 text-[10px] font-medium text-purple-300">
+                        {p.name.charAt(0)}
+                      </div>
+                      <div className="text-xs">
+                        <span className="text-gray-200">{p.name}</span>
+                        {p.companies && (
+                          <span className="ml-1 text-gray-500">{(p.companies as { name: string }).name}</span>
                         )}
                       </div>
-                      {p.email && (
-                        <div className="truncate text-xs text-gray-500">{p.email}</div>
-                      )}
-                    </div>
-                    <ChevronRight size={14} className="flex-shrink-0 text-gray-600" />
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Alphabetical sections */}
+            {alphabetGroups.map(([letter, persons]) => (
+              <section
+                key={letter}
+                ref={(el) => { sectionRefs.current[letter] = el }}
+              >
+                <h2 className="mb-1.5 text-lg font-bold text-gray-600">{letter}</h2>
+                <div className="space-y-1">
+                  {persons.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => navigate(`/people/${p.id}`)}
+                      className="flex w-full items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-left transition-colors hover:border-gray-700"
+                    >
+                      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-purple-900/30 text-xs font-medium text-purple-300">
+                        {p.name.charAt(0)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-200">{p.name}</span>
+                          {p.role && (
+                            <span className="truncate text-xs text-gray-600">{p.role}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          {companyName(p.company_id) && (
+                            <span className="flex items-center gap-1">
+                              <Building2 size={10} />
+                              {companyName(p.company_id)}
+                            </span>
+                          )}
+                          {p.email && (
+                            <span className="truncate">{p.email}</span>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight size={14} className="flex-shrink-0 text-gray-600" />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {/* Alphabet sidebar */}
+          <div className="sticky top-0 flex flex-col items-center gap-0.5 pt-8">
+            {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => (
+              <button
+                key={letter}
+                onClick={() => scrollToLetter(letter)}
+                disabled={!activeLetters.has(letter)}
+                className={`w-6 rounded py-0.5 text-center text-[10px] font-medium transition-colors ${
+                  activeLetters.has(letter)
+                    ? 'text-purple-400 hover:bg-purple-900/30'
+                    : 'text-gray-700 cursor-default'
+                }`}
+              >
+                {letter}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
