@@ -19,6 +19,7 @@ import {
 } from '../hooks/useGoals'
 import { usePursuits } from '../hooks/usePursuits'
 import InlineEditable from '../components/InlineEditable'
+import GoalChat from '../components/GoalChat'
 import type { GoalTask, GoalTaskStatus, MilestoneConditionType } from '../lib/types'
 
 const CONDITION_ICON: Record<MilestoneConditionType, typeof Circle> = {
@@ -412,6 +413,9 @@ export default function GoalDetail() {
             </button>
           )}
         </div>
+
+        {/* AI Goal Planner */}
+        <GoalChat goalId={goal.id} />
       </div>
     </div>
   )

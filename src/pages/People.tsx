@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Users, Search, Building2, ChevronRight, Star } from 'lucide-react'
 import { usePeople } from '../hooks/usePeople'
 import { useCompanies } from '../hooks/useCompanies'
+import SuggestedMerges from '../components/SuggestedMerges'
 import type { Person } from '../lib/types'
 
 export default function People() {
@@ -111,6 +112,8 @@ export default function People() {
           <option value="__none">Unaffiliated</option>
         </select>
       </div>
+
+      <SuggestedMerges />
 
       {isLoading ? (
         <div className="text-sm text-gray-500">Loading...</div>
