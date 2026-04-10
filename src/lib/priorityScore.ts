@@ -46,12 +46,11 @@ export function computePriority(item: Item): number {
 export type StalenessLevel = 'fresh' | 'aging' | 'stale' | 'critical'
 
 export function effectiveStalenessLevel(item: Item): StalenessLevel {
-  if (item.due_date) {
-    const days = daysUntilDue(item.due_date)
-    if (days < 0) return 'critical'
-    if (days === 0) return 'critical'
-    if (days <= 3) return 'stale'
-  }
+  // Pure staleness based on time since last touch — NOT conflated with
+  // due-date urgency. Due-date signals are shown separately via
+  // getSurfaceReasons ("Due today", "Due soon", "Nd overdue") and the
+  // priority score. Mixing them here caused new items with upcoming
+  // deadlines to show "Getting stale" immediately after creation.
   const score = item.staleness_score ?? 0
   if (score < 20) return 'fresh'
   if (score < 40) return 'aging'
