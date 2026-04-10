@@ -10,6 +10,8 @@ import type {
   PursuitMemberType,
   CreatePursuitPayload,
   UpdatePursuitPayload,
+  PlaybookStep,
+  PlaybookEvidenceType,
 } from '../lib/types'
 
 interface PursuitFilters {
@@ -227,6 +229,64 @@ export function useRemovePursuitMember() {
       queryClient.invalidateQueries({
         queryKey: ['pursuit_members', 'for', vars.memberType, vars.memberId],
       })
+    },
+  })
+}
+
+// ============================================================
+// Playbook steps — evidence-based template tracking
+// ============================================================
+
+export function usePlaybookSteps(pursuitId: string) {
+  useRealtimeSubscription({
+    table: 'pursuit_playbook_steps',
+    queryKey: ['playbook_steps', pursuitId],
+  })
+
+  return useQuery({
+    queryKey: ['playbook_steps', pursuitId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('pursuit_playbook_steps')
+        .select('*')
+        .eq('pursuit_id', pursuitId)
+        .order('sort_order')
+      if (error) throw error
+      return data as PlaybookStep[]
+    },
+    enabled: !!pursuitId,
+  })
+}
+
+export function useMarkPlaybookStep() {
+  return useMutation({
+    mutationFn: async ({
+      stepId,
+      evidenced,
+      evidence_type,
+      evidence_entity_id,
+      evidence_note,
+    }: {
+      stepId: string
+      evidenced: boolean
+      evidence_type?: PlaybookEvidenceType | null
+      evidence_entity_id?: string | null
+      evidence_note?: string | null
+    }) => {
+      const { error } = await supabase
+        .from('pursuit_playbook_steps')
+        .update({
+          evidenced,
+          evidenced_at: evidenced ? new Date().toISOString() : null,
+          evidence_type: evidenced ? (evidence_type ?? 'manual') : null,
+          evidence_entity_id: evidenced ? (evidence_entity_id ?? null) : null,
+          evidence_note: evidenced ? (evidence_note ?? null) : null,
+        })
+        .eq('id', stepId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playbook_steps'] })
     },
   })
 }

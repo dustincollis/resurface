@@ -26,6 +26,7 @@ import { useCommitments } from '../hooks/useCommitments'
 import { useMeetings } from '../hooks/useMeetings'
 import InlineEditable from '../components/InlineEditable'
 import StatusBadge from '../components/StatusBadge'
+import PlaybookHealth from '../components/PlaybookHealth'
 import type { Item, Commitment } from '../lib/types'
 import type { Meeting } from '../hooks/useMeetings'
 
@@ -173,6 +174,13 @@ export default function PursuitDetail() {
             </button>
           )}
         </div>
+
+        {/* Playbook (if pursuit has a template) */}
+        {pursuit.template_id && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <PlaybookHealth pursuitId={pursuit.id} />
+          </div>
+        )}
 
         {/* Tasks */}
         <MemberSection

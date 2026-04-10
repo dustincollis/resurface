@@ -60,13 +60,20 @@ export default function Pursuits() {
         description: newDescription.trim() || null,
       })
 
-      // Apply template: create items from template steps and link to pursuit
+      // Apply template: create items from template steps, link to pursuit,
+      // record template_id, and create playbook steps for evidence tracking
       if (selectedTemplate && user) {
+        // Record which template was used
+        await supabase.from('pursuits').update({ template_id: selectedTemplate }).eq('id', pursuit.id)
+
         const { data: steps } = await supabase
           .from('template_steps')
           .select('*')
           .eq('template_id', selectedTemplate)
           .order('sort_order')
+
+        const playbookSteps: { pursuit_id: string; template_step_id: string; title: string; sort_order: number }[] = []
+
         for (const step of steps ?? []) {
           const item = await createItem.mutateAsync({
             title: step.title,
@@ -77,6 +84,17 @@ export default function Pursuits() {
             memberType: 'item',
             memberId: item.id,
           })
+          playbookSteps.push({
+            pursuit_id: pursuit.id,
+            template_step_id: step.id,
+            title: step.title,
+            sort_order: step.sort_order,
+          })
+        }
+
+        // Create playbook steps for evidence tracking
+        if (playbookSteps.length > 0) {
+          await supabase.from('pursuit_playbook_steps').insert(playbookSteps)
         }
       }
 

@@ -251,9 +251,26 @@ export interface Pursuit {
   status: PursuitStatus
   color: string
   sort_order: number
+  template_id: string | null
   created_at: string
   updated_at: string
   completed_at: string | null
+}
+
+export type PlaybookEvidenceType = 'item' | 'commitment' | 'meeting' | 'manual'
+
+export interface PlaybookStep {
+  id: string
+  pursuit_id: string
+  template_step_id: string
+  title: string
+  sort_order: number
+  evidenced: boolean
+  evidenced_at: string | null
+  evidence_type: PlaybookEvidenceType | null
+  evidence_entity_id: string | null
+  evidence_note: string | null
+  created_at: string
 }
 
 export interface CreatePursuitPayload {

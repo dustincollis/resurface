@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
-import { Inbox, X } from 'lucide-react'
+import { Inbox, X, BarChart3 } from 'lucide-react'
 import { useProposals } from '../hooks/useProposals'
 import ProposalCard from '../components/ProposalCard'
 import type { ProposalSourceType } from '../lib/types'
@@ -36,11 +36,20 @@ export default function Proposals() {
             AI-extracted items waiting for your review. Accept, edit, merge into existing work, or dismiss.
           </p>
         </div>
-        {!isLoading && proposals && (
-          <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
-            {proposals.length} pending
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {!isLoading && proposals && (
+            <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
+              {proposals.length} pending
+            </span>
+          )}
+          <Link
+            to="/proposals/analytics"
+            className="flex items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+          >
+            <BarChart3 size={12} />
+            Analytics
+          </Link>
+        </div>
       </div>
 
       {(sourceType || sourceId) && (
