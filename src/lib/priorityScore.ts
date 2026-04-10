@@ -110,16 +110,29 @@ export function getSurfaceReasons(item: Item): SurfaceReason[] {
     }
   }
 
-  // Staleness
+  // Staleness — the score is a composite of time + stakes + deadline urgency.
+  // To show "Nd stale" we need to isolate the TIME component before inverse-
+  // mapping, otherwise non-time factors inflate the day count absurdly (e.g.
+  // a brand-new overdue item would show 241 days stale).
   const score = item.staleness_score ?? 0
-  if (score >= 60) {
-    // Convert score to approximate days using inverse of base_decay = log2(hours+1)*10
-    const hours = Math.pow(2, score / 10) - 1
-    const days = Math.round(hours / 24)
-    if (days >= 1) reasons.push({ label: `${days}d stale`, tone: 'orange' })
-    else reasons.push({ label: 'Stale', tone: 'orange' })
-  } else if (score >= 40) {
-    reasons.push({ label: 'Getting stale', tone: 'yellow' })
+  if (score >= 40) {
+    const stakesContribution = (item.stakes ?? 3) * 5
+    let deadlineContribution = 0
+    if (item.due_date) {
+      const hoursUntilDue = (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60)
+      if (hoursUntilDue < 0) deadlineContribution = 100
+      else if (hoursUntilDue < 24) deadlineContribution = 50
+      else if (hoursUntilDue < 72) deadlineContribution = 25
+    }
+    const timeOnlyScore = Math.max(0, score - stakesContribution - deadlineContribution)
+    if (timeOnlyScore >= 40) {
+      const hours = Math.pow(2, timeOnlyScore / 10) - 1
+      const days = Math.round(hours / 24)
+      if (days >= 1) reasons.push({ label: `${days}d stale`, tone: 'orange' })
+      else reasons.push({ label: 'Stale', tone: 'orange' })
+    } else if (timeOnlyScore >= 25) {
+      reasons.push({ label: 'Getting stale', tone: 'yellow' })
+    }
   }
 
   // Stakes
