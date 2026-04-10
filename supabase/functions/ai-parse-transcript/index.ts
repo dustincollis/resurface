@@ -294,7 +294,7 @@ ${itemsSummary}
 Discussion title: "${meeting.title}"
 
 Content:
-${transcript.substring(0, 15000)}
+${transcript}
 
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
