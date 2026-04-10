@@ -1,5 +1,16 @@
 import type { Item } from './types'
 
+// Compare dates at noon local time so "due today" stays correct all day
+// regardless of when the user looks. Avoids the off-by-one from
+// new Date("2026-04-10") being midnight UTC while Date.now() is local.
+function daysUntilDue(dueDateStr: string): number {
+  const parts = dueDateStr.split('-').map(Number)
+  const dueNoon = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0, 0).getTime()
+  const now = new Date()
+  const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0).getTime()
+  return Math.round((dueNoon - todayNoon) / (1000 * 60 * 60 * 24))
+}
+
 export function computePriority(item: Item): number {
   const stalenessWeight = 0.4
   const stakesWeight = 0.3
@@ -18,11 +29,11 @@ export function computePriority(item: Item): number {
   // Due date urgency
   let dueComponent = 0
   if (item.due_date) {
-    const daysUntilDue = (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    if (daysUntilDue < 0) dueComponent = 100
-    else if (daysUntilDue < 1) dueComponent = 90
-    else if (daysUntilDue < 3) dueComponent = 60
-    else if (daysUntilDue < 7) dueComponent = 30
+    const days = daysUntilDue(item.due_date)
+    if (days < 0) dueComponent = 100
+    else if (days === 0) dueComponent = 90
+    else if (days <= 3) dueComponent = 60
+    else if (days <= 7) dueComponent = 30
   }
   dueComponent *= dueWeight
 
@@ -36,11 +47,10 @@ export type StalenessLevel = 'fresh' | 'aging' | 'stale' | 'critical'
 
 export function effectiveStalenessLevel(item: Item): StalenessLevel {
   if (item.due_date) {
-    const ms = new Date(item.due_date).getTime() - Date.now()
-    const hoursUntil = ms / (1000 * 60 * 60)
-    if (hoursUntil < 0) return 'critical'
-    if (hoursUntil < 24) return 'critical'
-    if (hoursUntil < 72) return 'stale'
+    const days = daysUntilDue(item.due_date)
+    if (days < 0) return 'critical'
+    if (days === 0) return 'critical'
+    if (days <= 3) return 'stale'
   }
   const score = item.staleness_score ?? 0
   if (score < 20) return 'fresh'
@@ -98,14 +108,12 @@ export function getSurfaceReasons(item: Item): SurfaceReason[] {
 
   // Due date signals (highest priority)
   if (item.due_date) {
-    const daysUntilDue = Math.floor(
-      (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    )
-    if (daysUntilDue < 0) {
-      reasons.push({ label: `${Math.abs(daysUntilDue)}d overdue`, tone: 'red' })
-    } else if (daysUntilDue === 0) {
+    const days = daysUntilDue(item.due_date)
+    if (days < 0) {
+      reasons.push({ label: `${Math.abs(days)}d overdue`, tone: 'red' })
+    } else if (days === 0) {
       reasons.push({ label: 'Due today', tone: 'orange' })
-    } else if (daysUntilDue <= 3) {
+    } else if (days <= 3) {
       reasons.push({ label: 'Due soon', tone: 'orange' })
     }
   }
@@ -160,7 +168,7 @@ export type SuggestedMove = 'Do Now' | 'Break Down' | 'Open'
 export function getSuggestedMove(item: Item): SuggestedMove {
   const stakes = item.stakes ?? 0
   const resistance = item.resistance ?? 0
-  const isOverdue = item.due_date && new Date(item.due_date) < new Date()
+  const isOverdue = item.due_date && daysUntilDue(item.due_date) < 0
 
   // High resistance + high stakes → break it down so it's actionable
   if (resistance >= 4 && stakes >= 3) return 'Break Down'
@@ -191,12 +199,12 @@ export function getScoreBreakdown(item: Item): ScoreBreakdown {
 
   let dueRisk = 0
   if (item.due_date) {
-    const daysUntilDue = (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    if (daysUntilDue < 0) dueRisk = 100
-    else if (daysUntilDue < 1) dueRisk = 90
-    else if (daysUntilDue < 3) dueRisk = 70
-    else if (daysUntilDue < 7) dueRisk = 40
-    else if (daysUntilDue < 14) dueRisk = 20
+    const days = daysUntilDue(item.due_date)
+    if (days < 0) dueRisk = 100
+    else if (days === 0) dueRisk = 90
+    else if (days <= 3) dueRisk = 70
+    else if (days <= 7) dueRisk = 40
+    else if (days <= 14) dueRisk = 20
   }
 
   return { staleness, stakes, resistance, due_risk: dueRisk }
@@ -219,9 +227,9 @@ export function getClusterFactors(items: Item[]): ClusterFactor[] {
 
   for (const item of items) {
     if (item.due_date) {
-      const days = (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-      if (days < 0) counts.overdue++
-      else if (days <= 3) counts.dueSoon++
+      const d = daysUntilDue(item.due_date)
+      if (d < 0) counts.overdue++
+      else if (d <= 3) counts.dueSoon++
     }
     if ((item.staleness_score ?? 0) >= 60) counts.stale++
     if ((item.stakes ?? 0) >= 4) counts.highStakes++

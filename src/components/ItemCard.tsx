@@ -21,7 +21,13 @@ function formatDate(dateStr: string): string {
 export default function ItemCard({ item }: { item: Item }) {
   const navigate = useNavigate()
   const streamColor = item.streams?.color ?? '#6B7280'
-  const isDue = item.due_date && new Date(item.due_date) <= new Date()
+  const isDue = item.due_date && (() => {
+    const parts = item.due_date!.split('-').map(Number)
+    const dueNoon = new Date(parts[0], parts[1] - 1, parts[2], 12).getTime()
+    const now = new Date()
+    const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
+    return dueNoon < todayNoon
+  })()
   const level = effectiveStalenessLevel(item)
   const fillWidth = Math.min(Math.max(item.staleness_score ?? 0, level === 'critical' ? 90 : level === 'stale' ? 60 : 0), 100)
 
