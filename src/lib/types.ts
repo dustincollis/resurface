@@ -351,6 +351,7 @@ export interface TemplateStep {
 
 export type GoalStatus = 'active' | 'completed' | 'archived'
 export type GoalTaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
+export type MilestoneConditionType = 'manual' | 'pursuit' | 'item' | 'commitment' | 'meeting' | 'count'
 
 export interface Goal {
   id: string
@@ -374,6 +375,14 @@ export interface GoalTask {
   due_date: string | null
   created_at: string
   completed_at: string | null
+  // Computed milestone fields
+  condition_type: MilestoneConditionType
+  linked_entity_id: string | null
+  target_status: string | null
+  condition_config: Record<string, unknown>
+  condition_met: boolean
+  last_evaluated_at: string | null
+  evidence_text: string | null
 }
 
 export type ItemAssistType = 'approach' | 'context' | 'draft'

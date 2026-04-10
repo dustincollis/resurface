@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from './useAuth'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
-import type { Goal, GoalStatus, GoalTask, GoalTaskStatus } from '../lib/types'
+import type { Goal, GoalStatus, GoalTask, GoalTaskStatus, MilestoneConditionType } from '../lib/types'
 
 export function useGoals(status?: GoalStatus | GoalStatus[]) {
   const { user } = useAuth()
@@ -145,6 +145,10 @@ export function useCreateGoalTask() {
       description?: string | null
       sort_order?: number
       due_date?: string | null
+      condition_type?: MilestoneConditionType
+      linked_entity_id?: string | null
+      target_status?: string | null
+      condition_config?: Record<string, unknown>
     }) => {
       const { data, error } = await supabase
         .from('goal_tasks')
@@ -200,6 +204,30 @@ export function useSetGoalTaskStatus() {
       status,
       completed_at: status === 'done' ? new Date().toISOString() : null,
     })
+}
+
+// Evaluate computed milestones for a goal
+export function useEvaluateGoal() {
+  return useMutation({
+    mutationFn: async (goalId: string) => {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/evaluate-goals`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ goal_id: goalId }),
+        }
+      )
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Evaluation failed')
+      return json
+    },
+    onSuccess: invalidateGoals,
+  })
 }
 
 // Apply a template to a goal: reads template steps, creates goal_tasks
