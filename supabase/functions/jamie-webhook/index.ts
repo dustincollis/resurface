@@ -322,8 +322,16 @@ Deno.serve(async (req) => {
 
     const meetingId = (inserted as { id: string }).id;
 
-    // ----- Invoke parser via service role -----
-    const parseRes = await fetch(`${supabaseUrl}/functions/v1/ai-parse-transcript`, {
+    // ----- Invoke parser — fire and forget -----
+    // The previous approach awaited the parser response, which was failing
+    // silently (timeout, network flakiness between edge functions, Claude
+    // overload). The webhook doesn't need the parse result — the meeting
+    // row is already created. So we fire the fetch and return immediately.
+    //
+    // If the parse fails, the compute-staleness cron job will pick up
+    // meetings with processed_at IS NULL and re-trigger parsing as a
+    // safety net.
+    fetch(`${supabaseUrl}/functions/v1/ai-parse-transcript`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -333,27 +341,17 @@ Deno.serve(async (req) => {
         meeting_id: meetingId,
         transcript: formattedTranscript,
       }),
+    }).then((res) => {
+      if (!res.ok) {
+        res.text().then((detail) => {
+          console.error("[jamie-webhook] parser invocation failed:", res.status, detail.substring(0, 500));
+        });
+      } else {
+        console.log("[jamie-webhook] parser invocation succeeded for", meetingId);
+      }
+    }).catch((err) => {
+      console.error("[jamie-webhook] parser fetch error:", err);
     });
-
-    if (!parseRes.ok) {
-      const detail = await parseRes.text();
-      console.error("[jamie-webhook] parser invocation failed:", parseRes.status, detail);
-      // Meeting is still inserted; the user can re-trigger parse manually.
-      // Return success to Jamie so it doesn't retry — re-running the
-      // webhook would just fail the dedup check anyway.
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          meeting_id: meetingId,
-          warning: "meeting created but parser failed; can be retried",
-          parser_status: parseRes.status,
-          parser_detail: detail.substring(0, 500),
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const parseResult = await parseRes.json().catch(() => ({}));
 
     return new Response(
       JSON.stringify({
@@ -363,8 +361,7 @@ Deno.serve(async (req) => {
         title,
         attendees,
         segments_count: segments.length,
-        proposals_created: parseResult.proposals_created ?? 0,
-        commitments_created: parseResult.commitments_created ?? 0,
+        parse_status: "triggered_async",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
