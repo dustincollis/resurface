@@ -42,6 +42,7 @@ export interface Item {
   source_meeting_id: string | null
   snoozed_until: string | null
   pinned: boolean
+  tracking: boolean
   // Joined fields
   streams?: Stream | null
 }
@@ -77,6 +78,7 @@ export interface CreateItemPayload {
   custom_fields?: Record<string, unknown>
   parent_id?: string | null
   source_meeting_id?: string | null
+  tracking?: boolean
 }
 
 export interface UpdateItemPayload extends Partial<CreateItemPayload> {

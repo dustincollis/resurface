@@ -11,11 +11,12 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Fetch all active items (not done or dropped)
+    // Fetch all active items (not done, dropped, or tracking-only)
     const { data: items, error } = await adminClient
       .from("items")
-      .select("id, last_touched_at, stakes, due_date, status")
-      .not("status", "in", '("done","dropped")');
+      .select("id, last_touched_at, stakes, due_date, status, tracking")
+      .not("status", "in", '("done","dropped")')
+      .or("tracking.is.null,tracking.eq.false");
 
     if (error) {
       console.error("Error fetching items:", error);

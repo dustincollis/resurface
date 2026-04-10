@@ -292,7 +292,9 @@ function ItemRow({ item, onRemove }: { item: Item; onRemove: () => void }) {
   const navigate = useNavigate()
   const streamColor = item.streams?.color ?? '#6B7280'
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2 hover:border-gray-700">
+    <div className={`flex items-center gap-2 rounded-lg border border-gray-800 px-3 py-2 hover:border-gray-700 ${
+      item.tracking ? 'bg-gray-950/20 opacity-70' : 'bg-gray-950/50'
+    }`}>
       <div className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: streamColor }} />
       <button
         onClick={() => navigate(`/items/${item.id}`)}
@@ -300,6 +302,11 @@ function ItemRow({ item, onRemove }: { item: Item; onRemove: () => void }) {
       >
         {item.title}
       </button>
+      {item.tracking && (
+        <span className="flex-shrink-0 rounded bg-blue-900/30 px-1.5 py-0.5 text-[10px] text-blue-300">
+          tracking
+        </span>
+      )}
       <StatusBadge status={item.status} />
       <button
         onClick={onRemove}

@@ -105,6 +105,19 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
     acceptMut.mutate({ proposal, acceptAs, pursuitId })
   }
 
+  const handleTrack = () => {
+    if (!pursuitId) {
+      alert('Select a pursuit first — tracking without a pursuit has no home to show the item.')
+      return
+    }
+    acceptMut.mutate({
+      proposal,
+      acceptAs: 'task',
+      pursuitId,
+      tracking: true,
+    })
+  }
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900">
       {/* Header — account context is the first thing the eye lands on */}
@@ -368,6 +381,15 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                   : acceptAs === 'commitment_outgoing'
                     ? 'Save as outgoing commitment'
                     : 'Save as incoming commitment'}
+              </button>
+              <button
+                onClick={handleTrack}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-blue-300 hover:bg-gray-700 disabled:opacity-50"
+                title="Create as a tracked item on a pursuit — not your work, just watching"
+              >
+                <Target size={12} />
+                Track
               </button>
               <button
                 onClick={() => setMode('edit')}

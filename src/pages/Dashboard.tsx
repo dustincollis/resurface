@@ -313,15 +313,17 @@ export default function Dashboard() {
   })
 
   const FOCUS_LIMIT = 10
-  // Filter out snoozed items (Touch +1d snoozes for 24h)
-  // Pinned items always show, regardless of snooze
+  // Filter out snoozed and tracking-only items.
+  // Tracked items live on pursuit pages, not the dashboard.
+  // Pinned items always show, regardless of snooze.
   const visibleActiveItems = useMemo(() => {
     if (!activeItems) return []
     return activeItems.filter(
       (item) =>
-        item.pinned ||
-        !item.snoozed_until ||
-        new Date(item.snoozed_until) <= new Date(now)
+        !item.tracking &&
+        (item.pinned ||
+          !item.snoozed_until ||
+          new Date(item.snoozed_until) <= new Date(now))
     )
   }, [activeItems, now])
   const sortedActiveItems = useMemo(

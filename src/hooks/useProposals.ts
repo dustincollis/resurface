@@ -118,6 +118,7 @@ interface AcceptProposalArgs {
   acceptAs: AcceptAs
   editedPayload?: Record<string, unknown>
   pursuitId?: string | null
+  tracking?: boolean
 }
 
 export function useAcceptProposal() {
@@ -129,6 +130,7 @@ export function useAcceptProposal() {
       acceptAs,
       editedPayload,
       pursuitId,
+      tracking = false,
     }: AcceptProposalArgs) => {
       // The parser's payload may be either task-shaped (title, due_date,
       // assignee, ...) or commitment-shaped (title, counterpart, do_by, ...).
@@ -160,6 +162,7 @@ export function useAcceptProposal() {
           stream_id: taskFields.stream_id ?? null,
           source_meeting_id: taskFields.source_meeting_id ?? null,
           custom_fields: taskFields.company ? { company: taskFields.company } : undefined,
+          tracking,
         }
         const { data: itemRow, error: insertErr } = await supabase
           .from('items')
