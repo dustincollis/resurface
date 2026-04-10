@@ -22,6 +22,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
+import { resolveAttendees } from "../_shared/resolve-identity.ts";
 
 const JAMIE_API_KEY_HEADERS = ["x-jamie-api-key", "x-api-key"];
 
@@ -321,6 +322,23 @@ Deno.serve(async (req) => {
     }
 
     const meetingId = (inserted as { id: string }).id;
+
+    // ----- Resolve attendees → people + meeting_attendees -----
+    try {
+      const personIds = await resolveAttendees(adminClient, userId, attendees);
+      if (personIds.length > 0) {
+        const junctionRows = personIds.map((pid: string) => ({
+          meeting_id: meetingId,
+          person_id: pid,
+        }));
+        await adminClient.from("meeting_attendees").upsert(junctionRows, {
+          onConflict: "meeting_id,person_id",
+          ignoreDuplicates: true,
+        });
+      }
+    } catch (linkErr) {
+      console.warn("[jamie-webhook] identity resolution warning:", linkErr);
+    }
 
     // ----- Invoke parser — fire and forget -----
     // The previous approach awaited the parser response, which was failing

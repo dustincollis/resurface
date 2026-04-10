@@ -14,6 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
+import { resolveAttendees } from "../_shared/resolve-identity.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -90,143 +91,175 @@ Deno.serve(async (req) => {
     let updated = 0;
     let skipped = 0;
 
+    // Helper: parse semicolon-separated email strings (Power Automate format)
+    // e.g. "Holly_Quinones@epam.com;Tomasz_Balcerek@epam.com;Dustin_Collis@epam.com;"
+    const parseSemicolonEmails = (raw: unknown): string[] => {
+      if (typeof raw !== "string" || !raw.trim()) return [];
+      return raw.split(";").map((s) => s.trim()).filter(Boolean);
+    };
+
+    // Helper: parse a start/end time value
+    const parseTime = (raw: unknown): string | null => {
+      if (typeof raw === "string" && raw.trim()) {
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      }
+      if (raw && typeof raw === "object") {
+        const obj = raw as { dateTime?: string; timeZone?: string };
+        if (obj.dateTime) {
+          const suffix = obj.timeZone === "UTC" ? "Z" : "";
+          const d = new Date(obj.dateTime + suffix);
+          return isNaN(d.getTime()) ? null : d.toISOString();
+        }
+      }
+      return null;
+    };
+
+    // Pre-process: build upsert rows, skipping cancelled/all-day/empty
+    const rows: { externalId: string | null; data: Record<string, unknown> }[] = [];
+
     for (const event of events) {
-      // Extract fields — Power Automate uses Microsoft Graph field names
       const eventId = (event.id ?? event.eventId ?? event.event_id) as string | undefined;
       const subject = (event.subject ?? event.title ?? event.name ?? "") as string;
-      const startRaw = event.start as
-        | string
-        | { dateTime?: string; timeZone?: string }
-        | undefined;
-      const endRaw = event.end as
-        | string
-        | { dateTime?: string; timeZone?: string }
-        | undefined;
-      const location = (
-        event.location ??
-        (event.location as { displayName?: string })?.displayName ??
-        ""
-      ) as string;
-      const attendeesRaw = event.attendees as
-        | Array<{ emailAddress?: { name?: string; address?: string } } | string>
-        | undefined;
       const isAllDay = event.isAllDay as boolean | undefined;
       const isCancelled =
         (event.isCancelled as boolean) ??
         ((event.showAs as string) === "free" && !subject);
 
-      if (!subject && !eventId) {
-        skipped++;
-        continue;
-      }
+      if (!subject && !eventId) { skipped++; continue; }
+      if (isCancelled) { skipped++; continue; }
+      if (isAllDay) { skipped++; continue; }
 
-      // Parse start/end times
-      let startTime: string | null = null;
-      let endTime: string | null = null;
-      if (typeof startRaw === "string") {
-        startTime = new Date(startRaw).toISOString();
-      } else if (startRaw?.dateTime) {
-        // Microsoft Graph returns { dateTime: "2026-04-11T09:00:00.0000000", timeZone: "UTC" }
-        startTime = new Date(startRaw.dateTime + (startRaw.timeZone === "UTC" ? "Z" : "")).toISOString();
-      }
-      if (typeof endRaw === "string") {
-        endTime = new Date(endRaw).toISOString();
-      } else if (endRaw?.dateTime) {
-        endTime = new Date(endRaw.dateTime + (endRaw.timeZone === "UTC" ? "Z" : "")).toISOString();
-      }
-
-      // Parse attendees
+      // Parse attendees — handle both Graph array-of-objects and
+      // Power Automate's semicolon-separated email strings
       const attendees: string[] = [];
+      const attendeesRaw = event.attendees;
       if (Array.isArray(attendeesRaw)) {
         for (const a of attendeesRaw) {
-          if (typeof a === "string") {
-            attendees.push(a);
-          } else if (a?.emailAddress?.name) {
-            attendees.push(a.emailAddress.name);
-          } else if (a?.emailAddress?.address) {
-            attendees.push(a.emailAddress.address);
-          }
+          if (typeof a === "string") attendees.push(a);
+          else if (a?.emailAddress?.name) attendees.push(a.emailAddress.name);
+          else if (a?.emailAddress?.address) attendees.push(a.emailAddress.address);
         }
       }
+      // Power Automate Outlook connector uses requiredAttendees / optionalAttendees
+      attendees.push(...parseSemicolonEmails(event.requiredAttendees));
+      attendees.push(...parseSemicolonEmails(event.optionalAttendees));
+      // Deduplicate
+      const uniqueAttendees = [...new Set(attendees)];
 
       // Parse location
+      const locRaw = event.location;
       let locationStr: string | null = null;
-      if (typeof location === "string" && location.trim()) {
-        locationStr = location.trim();
-      } else if (typeof location === "object" && (location as { displayName?: string })?.displayName) {
-        locationStr = (location as { displayName: string }).displayName;
+      if (typeof locRaw === "string" && locRaw.trim()) {
+        locationStr = locRaw.trim();
+      } else if (locRaw && typeof locRaw === "object" && (locRaw as { displayName?: string }).displayName) {
+        locationStr = (locRaw as { displayName: string }).displayName;
       }
 
       const externalId = eventId ? `outlook:event:${eventId}` : null;
 
-      // Skip cancelled events
-      if (isCancelled) {
-        skipped++;
-        continue;
+      rows.push({
+        externalId,
+        data: {
+          user_id: userId,
+          title: subject || "Untitled meeting",
+          start_time: parseTime(event.start),
+          end_time: parseTime(event.end),
+          location: locationStr,
+          attendees: uniqueAttendees,
+          source: "calendar_sync",
+          import_mode: "active",
+          external_source_id: externalId,
+        },
+      });
+    }
+
+    // Batch-check which external IDs already exist
+    const externalIds = rows
+      .map((r) => r.externalId)
+      .filter((id): id is string => id !== null);
+
+    const existingMap = new Map<string, string>();
+    if (externalIds.length > 0) {
+      const { data: existingRows } = await adminClient
+        .from("meetings")
+        .select("id, external_source_id")
+        .eq("user_id", userId)
+        .in("external_source_id", externalIds);
+      for (const row of existingRows ?? []) {
+        existingMap.set(row.external_source_id, row.id);
       }
+    }
 
-      // Skip all-day events (typically out-of-office, holidays — not meetings)
-      if (isAllDay) {
-        skipped++;
-        continue;
-      }
+    // Process rows — updates and inserts
+    for (const row of rows) {
+      const existingId = row.externalId ? existingMap.get(row.externalId) : undefined;
 
-      const meetingData: Record<string, unknown> = {
-        user_id: userId,
-        title: subject || "Untitled meeting",
-        start_time: startTime,
-        end_time: endTime,
-        location: locationStr,
-        attendees,
-        source: "calendar_sync",
-        import_mode: "active",
-        external_source_id: externalId,
-      };
-
-      if (externalId) {
-        // Check if this event already exists
-        const { data: existing } = await adminClient
+      if (existingId) {
+        await adminClient
           .from("meetings")
-          .select("id")
-          .eq("external_source_id", externalId)
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (existing) {
-          // Update title/time/attendees (event may have been rescheduled)
-          await adminClient
-            .from("meetings")
-            .update({
-              title: meetingData.title,
-              start_time: meetingData.start_time,
-              end_time: meetingData.end_time,
-              location: meetingData.location,
-              attendees: meetingData.attendees,
-            })
-            .eq("id", (existing as { id: string }).id);
-          updated++;
-          continue;
-        }
+          .update({
+            title: row.data.title,
+            start_time: row.data.start_time,
+            end_time: row.data.end_time,
+            location: row.data.location,
+            attendees: row.data.attendees,
+          })
+          .eq("id", existingId);
+        updated++;
+        continue;
       }
 
-      // Insert new meeting
       const { error: insertErr } = await adminClient
         .from("meetings")
-        .insert(meetingData);
+        .insert(row.data);
 
       if (insertErr) {
         const code = (insertErr as { code?: string }).code;
-        if (code === "23505") {
-          // Duplicate — already synced
-          skipped++;
-          continue;
-        }
+        if (code === "23505") { skipped++; continue; }
         console.error("[calendar-sync] insert error:", insertErr);
         skipped++;
         continue;
       }
 
       synced++;
+    }
+
+    // Resolve attendees → people and link via meeting_attendees junction.
+    // Run async after the main sync to avoid slowing down the response.
+    // We process all meetings that were synced or updated this run.
+    try {
+      const allMeetingIds: string[] = [];
+
+      // Collect meeting IDs for newly inserted rows
+      if (synced > 0 || updated > 0) {
+        const { data: syncedMeetings } = await adminClient
+          .from("meetings")
+          .select("id, attendees")
+          .eq("user_id", userId)
+          .eq("source", "calendar_sync")
+          .not("attendees", "is", null);
+
+        for (const m of syncedMeetings ?? []) {
+          const attendees: string[] = m.attendees ?? [];
+          if (attendees.length === 0) continue;
+
+          const personIds = await resolveAttendees(adminClient, userId, attendees);
+          if (personIds.length > 0) {
+            const junctionRows = personIds.map((pid: string) => ({
+              meeting_id: m.id,
+              person_id: pid,
+            }));
+            await adminClient.from("meeting_attendees").upsert(junctionRows, {
+              onConflict: "meeting_id,person_id",
+              ignoreDuplicates: true,
+            });
+          }
+        }
+      }
+    } catch (linkErr) {
+      // Don't fail the whole sync if identity resolution has issues
+      console.warn("[calendar-sync] identity resolution warning:", linkErr);
     }
 
     return new Response(

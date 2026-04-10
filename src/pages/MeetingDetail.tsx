@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import StatusBadge from '../components/StatusBadge'
 import InlineEditable from '../components/InlineEditable'
+import MeetingBriefing from '../components/MeetingBriefing'
 import type { Item } from '../lib/types'
 
 // Render inline markdown: **bold**, *italic*, `code`
@@ -239,6 +240,13 @@ export default function MeetingDetail() {
             <AddToPursuit memberType="meeting" memberId={meeting.id} />
           </div>
         </div>
+
+        {/* Pre-meeting briefing */}
+        {meeting.attendees && meeting.attendees.length > 0 && !meeting.transcript && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <MeetingBriefing meetingId={meeting.id} />
+          </div>
+        )}
 
         {/* Processing indicator */}
         {uploadTranscript.isPending && (

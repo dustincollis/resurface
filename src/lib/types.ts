@@ -278,6 +278,45 @@ export interface PursuitMember {
 }
 
 // ============================================================
+// People & Companies — canonical identity layer
+// ============================================================
+
+export interface Company {
+  id: string
+  user_id: string
+  name: string
+  aliases: string[]
+  domain: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Person {
+  id: string
+  user_id: string
+  name: string
+  email: string | null
+  aliases: string[]
+  company_id: string | null
+  role: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  // Joined
+  companies?: Company | null
+}
+
+export interface MeetingAttendee {
+  id: string
+  meeting_id: string
+  person_id: string
+  added_at: string
+  // Joined
+  people?: Person | null
+}
+
+// ============================================================
 // Item assists — persistent AI "Help me" responses per item
 // ============================================================
 

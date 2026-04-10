@@ -17,6 +17,10 @@ import Pursuits from './pages/Pursuits'
 import PursuitDetail from './pages/PursuitDetail'
 import Goals from './pages/Goals'
 import GoalDetail from './pages/GoalDetail'
+import People from './pages/People'
+import PersonDetail from './pages/PersonDetail'
+import Companies from './pages/Companies'
+import CompanyDetail from './pages/CompanyDetail'
 import Settings from './pages/Settings'
 import MicrosoftCallback from './pages/MicrosoftCallback'
 
@@ -40,6 +44,10 @@ export default function App() {
               <Route path="pursuits/:id" element={<PursuitDetail />} />
               <Route path="goals" element={<Goals />} />
               <Route path="goals/:id" element={<GoalDetail />} />
+              <Route path="people" element={<People />} />
+              <Route path="people/:id" element={<PersonDetail />} />
+              <Route path="companies" element={<Companies />} />
+              <Route path="companies/:id" element={<CompanyDetail />} />
               <Route path="settings" element={<Settings />} />
               <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
             </Route>
