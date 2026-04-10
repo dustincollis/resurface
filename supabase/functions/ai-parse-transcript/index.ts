@@ -15,16 +15,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { meeting_id, transcript, user_context } = await req.json();
-    if (!meeting_id || !transcript) {
+    const { meeting_id, transcript: bodyTranscript, user_context } = await req.json();
+    if (!meeting_id) {
       return new Response(
-        JSON.stringify({ error: "meeting_id and transcript required" }),
+        JSON.stringify({ error: "meeting_id required" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
+    // The transcript can come from the request body (normal flow) OR be read
+    // from the meeting record (re-trigger flow, where the body may be empty
+    // or a stub). We resolve this AFTER loading the meeting below.
+    let transcript: string = typeof bodyTranscript === "string" ? bodyTranscript : "";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
@@ -64,6 +68,25 @@ Deno.serve(async (req) => {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // If the body's transcript is empty or very short (e.g. a re-trigger
+    // stub), fall back to the meeting record's existing transcript. This
+    // makes it safe to re-trigger parsing by just sending the meeting_id
+    // without needing to also supply the full transcript content.
+    if (transcript.length < 100) {
+      const existingTranscript = meeting.transcript as string | null;
+      if (existingTranscript && existingTranscript.length >= 100) {
+        transcript = existingTranscript;
+      } else if (!transcript && !existingTranscript) {
+        return new Response(
+          JSON.stringify({ error: "No transcript in request body or on the meeting record" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
     }
 
     let userId: string;
@@ -373,8 +396,12 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     // Update the meeting with parsed data.
     // Action items now flow to the proposals table instead of being stored
     // here as jsonb — `extracted_action_items` is no longer written.
+    // Only overwrite the transcript field if the body carried one (i.e. this
+    // is a fresh upload, not a re-trigger reading from the existing record).
     const meetingUpdate: Record<string, unknown> = {
-      transcript,
+      ...(typeof bodyTranscript === "string" && bodyTranscript.length >= 100
+        ? { transcript: bodyTranscript }
+        : {}),
       transcript_summary: parsed.summary,
       extracted_action_items: [],
       extracted_decisions: parsed.decisions ?? [],
