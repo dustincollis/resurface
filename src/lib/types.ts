@@ -281,6 +281,62 @@ export interface PursuitMember {
 // Item assists — persistent AI "Help me" responses per item
 // ============================================================
 
+// ============================================================
+// Templates — reusable process maps for pursuits and goals
+// ============================================================
+
+export type TemplateType = 'pursuit' | 'goal'
+
+export interface Template {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  template_type: TemplateType
+  created_at: string
+  updated_at: string
+}
+
+export interface TemplateStep {
+  id: string
+  template_id: string
+  title: string
+  description: string | null
+  sort_order: number
+  created_at: string
+}
+
+// ============================================================
+// Goals — strategic objectives above pursuits
+// ============================================================
+
+export type GoalStatus = 'active' | 'completed' | 'archived'
+export type GoalTaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
+
+export interface Goal {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  status: GoalStatus
+  template_id: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface GoalTask {
+  id: string
+  goal_id: string
+  title: string
+  description: string | null
+  sort_order: number
+  status: GoalTaskStatus
+  due_date: string | null
+  created_at: string
+  completed_at: string | null
+}
+
 export type ItemAssistType = 'approach' | 'context' | 'draft'
 
 export interface ItemAssist {

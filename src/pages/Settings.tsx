@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Save, RefreshCw, Download, CheckCircle, LogOut, Trash2, Brain } from 'lucide-react'
+import TemplateEditor from '../components/TemplateEditor'
 import { useProfile, useUpdateProfile, useDistillProfile } from '../hooks/useProfile'
 import { useSyncCalendar } from '../hooks/useMeetings'
 import { useMemories, useDeleteMemory } from '../hooks/useMemories'
@@ -457,6 +458,11 @@ export default function Settings() {
             </span>
           )}
         </div>
+      </div>
+
+      {/* Templates */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+        <TemplateEditor />
       </div>
     </div>
   )

@@ -1,7 +1,11 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Target, Plus, ChevronRight, Check, X, Trophy, Frown, Archive, Loader2 } from 'lucide-react'
-import { usePursuits, useCreatePursuit } from '../hooks/usePursuits'
+import { usePursuits, useCreatePursuit, useAddPursuitMember } from '../hooks/usePursuits'
+import { useTemplates } from '../hooks/useTemplates'
+import { useCreateItem } from '../hooks/useItems'
+import { useAuth } from '../hooks/useAuth'
+import { supabase } from '../lib/supabase'
 import type { Pursuit, PursuitStatus } from '../lib/types'
 
 const STATUS_LABEL: Record<PursuitStatus, string> = {
@@ -20,12 +24,17 @@ const STATUS_STYLE: Record<PursuitStatus, string> = {
 
 export default function Pursuits() {
   const { data: pursuits, isLoading } = usePursuits()
+  const { data: pursuitTemplates } = useTemplates('pursuit')
   const createPursuit = useCreatePursuit()
+  const createItem = useCreateItem()
+  const addMember = useAddPursuitMember()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [newName, setNewName] = useState('')
   const [newCompany, setNewCompany] = useState('')
   const [newDescription, setNewDescription] = useState('')
+  const [selectedTemplate, setSelectedTemplate] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const grouped = useMemo(() => {
@@ -50,9 +59,31 @@ export default function Pursuits() {
         company: newCompany.trim() || null,
         description: newDescription.trim() || null,
       })
+
+      // Apply template: create items from template steps and link to pursuit
+      if (selectedTemplate && user) {
+        const { data: steps } = await supabase
+          .from('template_steps')
+          .select('*')
+          .eq('template_id', selectedTemplate)
+          .order('sort_order')
+        for (const step of steps ?? []) {
+          const item = await createItem.mutateAsync({
+            title: step.title,
+            description: step.description ?? undefined,
+          })
+          await addMember.mutateAsync({
+            pursuitId: pursuit.id,
+            memberType: 'item',
+            memberId: item.id,
+          })
+        }
+      }
+
       setNewName('')
       setNewCompany('')
       setNewDescription('')
+      setSelectedTemplate('')
       setShowForm(false)
       navigate(`/pursuits/${pursuit.id}`)
     } catch (err) {
@@ -101,6 +132,21 @@ export default function Pursuits() {
             rows={2}
             className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
           />
+          {(pursuitTemplates ?? []).length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-gray-500">From template</span>
+              <select
+                value={selectedTemplate}
+                onChange={(e) => setSelectedTemplate(e.target.value)}
+                className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+              >
+                <option value="">None — start empty</option>
+                {(pursuitTemplates ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {error && (
             <div className="rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
               {error}
