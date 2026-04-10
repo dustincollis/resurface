@@ -168,8 +168,6 @@ export default function ItemDetail() {
     navigate(-1)
   }
 
-  const fieldTemplates = item.streams?.field_templates ?? []
-
   return (
     <div className="mx-auto max-w-3xl">
       <button
@@ -326,35 +324,6 @@ export default function ItemDetail() {
             placeholder="What's the next step?"
           />
         </div>
-
-        {/* Custom fields */}
-        {fieldTemplates.length > 0 && (
-          <div className="border-b border-gray-800 px-6 py-4">
-            <h3 className="mb-3 text-sm font-medium text-gray-300">Fields</h3>
-            <div className="grid grid-cols-2 gap-3">
-              {fieldTemplates.map((tpl) => {
-                const val = (item.custom_fields?.[tpl.key] as string) ?? ''
-                return (
-                  <div key={tpl.key}>
-                    <label className="text-xs text-gray-500">{tpl.label}</label>
-                    <input
-                      type={tpl.type === 'number' ? 'number' : tpl.type === 'date' ? 'date' : 'text'}
-                      value={val}
-                      onChange={(e) => {
-                        updateItem.mutate({
-                          id: item.id,
-                          custom_fields: { ...item.custom_fields, [tpl.key]: e.target.value },
-                        })
-                      }}
-                      className="mt-0.5 block w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
-                      placeholder={tpl.label}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
 
         {/* Sub-items / decompose */}
         <DecomposeSection item={item} />

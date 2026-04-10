@@ -50,9 +50,7 @@ function SortableStreamRow({ stream, onArchive }: { stream: Stream; onArchive: (
       >
         {stream.name}
       </button>
-      <span className="text-xs text-gray-500">
-        {stream.field_templates.length} field{stream.field_templates.length !== 1 ? 's' : ''}
-      </span>
+      <span className="flex-1" />
       <button
         onClick={() => onArchive(stream.id)}
         className="text-gray-600 hover:text-red-400"

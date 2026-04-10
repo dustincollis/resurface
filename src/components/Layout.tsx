@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Settings, Search, LogOut, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Settings, Search, LogOut } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
 import SearchModal from './SearchModal'
-import ChatPanel from './ChatPanel'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -25,7 +24,6 @@ export default function Layout() {
   const { data: streams } = useStreams()
   const { data: uncategorized } = useUncategorizedItems()
   const [searchOpen, setSearchOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(true)
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -150,17 +148,6 @@ export default function Layout() {
             <Search size={16} className="text-gray-500" />
             <span className="text-sm text-gray-500">Search... (Cmd+K)</span>
           </button>
-          <button
-            onClick={() => setChatOpen(!chatOpen)}
-            className={`rounded-lg p-2 transition-colors ${
-              chatOpen
-                ? 'bg-purple-900/40 text-purple-300 border border-purple-800/50'
-                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-            }`}
-            title="AI Chat"
-          >
-            <MessageSquare size={18} />
-          </button>
         </header>
 
         {/* Page content */}
@@ -168,9 +155,6 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
-
-      {/* Chat panel — flex sibling, pushes content when open */}
-      <ChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
 
       <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>

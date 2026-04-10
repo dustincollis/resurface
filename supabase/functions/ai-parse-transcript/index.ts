@@ -633,13 +633,38 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 
     const allProposalRows = [...proposalRows, ...commitmentRows];
 
-    if (allProposalRows.length > 0) {
+    // C5: Validate proposal shape before writing — catch prompt drift
+    const VALID_PROPOSAL_TYPES = ["task", "commitment", "memory", "draft", "deadline_adjustment"];
+    const VALID_SOURCE_TYPES = ["meeting", "transcript", "chat", "manual", "reconciliation"];
+
+    const validatedRows = allProposalRows.filter((row) => {
+      const payload = row.normalized_payload as Record<string, unknown>;
+      if (typeof payload?.title !== "string" || !payload.title.trim()) {
+        console.warn("[parser-validation] skipping proposal: missing title", JSON.stringify(row).substring(0, 200));
+        return false;
+      }
+      if (!VALID_PROPOSAL_TYPES.includes(row.proposal_type as string)) {
+        console.warn("[parser-validation] skipping proposal: invalid type", row.proposal_type);
+        return false;
+      }
+      if (!VALID_SOURCE_TYPES.includes(row.source_type as string)) {
+        console.warn("[parser-validation] skipping proposal: invalid source_type", row.source_type);
+        return false;
+      }
+      return true;
+    });
+
+    const skippedCount = allProposalRows.length - validatedRows.length;
+    if (skippedCount > 0) {
+      console.warn(`[parser-validation] dropped ${skippedCount} invalid proposals`);
+    }
+
+    if (validatedRows.length > 0) {
       const { error: proposalErr } = await adminClient
         .from("proposals")
-        .insert(allProposalRows);
+        .insert(validatedRows);
       if (proposalErr) {
         console.error("Failed to insert proposals:", proposalErr);
-        // Don't fail the whole call — the parse result is still saved.
       }
     }
 

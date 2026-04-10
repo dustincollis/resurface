@@ -43,7 +43,9 @@ Deno.serve(async (req) => {
 
       let deadlineUrgency = 0;
       if (item.due_date) {
-        const dueDate = new Date(item.due_date);
+        // Use noon local-time to avoid UTC midnight boundary issues
+        // (matches the frontend's daysUntilDue helper)
+        const dueDate = new Date(item.due_date + "T12:00:00");
         const hoursUntilDue = (dueDate.getTime() - now) / (1000 * 60 * 60);
         if (hoursUntilDue < 0) {
           deadlineUrgency = 100;
@@ -72,47 +74,8 @@ Deno.serve(async (req) => {
       .update({ staleness_score: 0 })
       .in("status", ["done", "dropped"]);
 
-    // Safety net: re-trigger parsing for meetings that have a transcript
-    // but were never processed (processed_at IS NULL). This catches cases
-    // where the Jamie webhook's fire-and-forget parser call failed.
-    const { data: unprocessed } = await adminClient
-      .from("meetings")
-      .select("id, transcript")
-      .is("processed_at", null)
-      .not("transcript", "is", null)
-      .limit(5);
-
-    let parsedCount = 0;
-    for (const meeting of unprocessed ?? []) {
-      const transcript = meeting.transcript as string | null;
-      if (!transcript || transcript.length < 100) continue;
-      console.log(`[compute-staleness] re-triggering parse for meeting ${meeting.id}`);
-      try {
-        const parseRes = await fetch(
-          `${supabaseUrl}/functions/v1/ai-parse-transcript`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${serviceRoleKey}`,
-            },
-            body: JSON.stringify({ meeting_id: meeting.id }),
-          }
-        );
-        if (parseRes.ok) {
-          parsedCount++;
-          console.log(`[compute-staleness] parse succeeded for meeting ${meeting.id}`);
-        } else {
-          const detail = await parseRes.text();
-          console.error(`[compute-staleness] parse failed for meeting ${meeting.id}:`, parseRes.status, detail.substring(0, 200));
-        }
-      } catch (err) {
-        console.error(`[compute-staleness] parse error for meeting ${meeting.id}:`, err);
-      }
-    }
-
     return new Response(
-      JSON.stringify({ updated: updatedCount, unprocessed_parsed: parsedCount }),
+      JSON.stringify({ updated: updatedCount }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
