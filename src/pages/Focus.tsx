@@ -115,28 +115,28 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             setExpanded(!expanded)
           }
         }}
-        className="w-full cursor-pointer px-3 py-2 text-left"
+        className="w-full cursor-pointer px-4 py-3 text-left"
       >
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2.5">
           {item.pinned ? (
-            <Pin size={11} className="mt-0.5 flex-shrink-0 text-yellow-400" />
+            <Pin size={12} className="mt-1 flex-shrink-0 text-yellow-400" />
           ) : (
-            <span className="mt-0.5 flex-shrink-0 text-[10px] font-medium text-gray-600">
+            <span className="mt-1 flex-shrink-0 text-xs font-medium text-gray-600">
               {rank}
             </span>
           )}
 
           <div className="min-w-0 flex-1">
             {/* Title */}
-            <h3 className="text-sm font-semibold leading-tight text-white line-clamp-2">
+            <h3 className="text-base font-semibold leading-snug text-white line-clamp-2">
               {item.title}
             </h3>
 
             {/* Meta row: stream + company + due */}
-            <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
               {item.streams && (
                 <span className="flex items-center gap-1 text-gray-500">
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: streamColor }} />
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: streamColor }} />
                   {item.streams.name}
                 </span>
               )}
@@ -154,20 +154,20 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               )}
             </div>
 
-            {/* Next step — compact */}
+            {/* Next step */}
             {item.next_action && !expanded && (
-              <p className="mt-0.5 line-clamp-1 text-[10px] text-gray-400">
+              <p className="mt-1 line-clamp-1 text-xs text-gray-400">
                 <span className="text-gray-600">Next:</span> {item.next_action}
               </p>
             )}
           </div>
 
-          {/* Suggested action — icon only in compact mode */}
+          {/* Suggested action */}
           <button
             onClick={handleSuggestedAction}
-            className={`flex-shrink-0 rounded px-2 py-1 text-[10px] font-semibold ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
+            className={`flex-shrink-0 rounded px-2.5 py-1.5 text-xs font-semibold ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
           >
-            <SuggestedIcon size={11} />
+            <SuggestedIcon size={12} />
           </button>
         </div>
       </div>
@@ -303,7 +303,7 @@ export default function Focus() {
         <div className="text-sm text-gray-500">Loading...</div>
       ) : focusItems.length > 0 ? (
         <>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {focusItems.map((item, i) => (
               <FocusCard key={item.id} item={item} rank={i + 1} />
             ))}
