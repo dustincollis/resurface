@@ -67,20 +67,36 @@ export default function SuggestedMerges() {
       }
     }
 
-    // Also check for exact name duplicates (both have names, no email)
-    for (let i = 0; i < noEmailPeople.length; i++) {
-      for (let j = i + 1; j < noEmailPeople.length; j++) {
-        const a = noEmailPeople[i]
-        const b = noEmailPeople[j]
-        if (a.name.toLowerCase() === b.name.toLowerCase()) {
-          const key = `${a.id}:${b.id}`
-          if (dismissed.has(key)) continue
-          result.push({
-            keep: a,
-            merge: b,
-            reason: 'Exact name match',
-          })
-        }
+    // Also check for name-subset duplicates among all people
+    // e.g., "Kiley" and "Kiley Grovers" — one name is a prefix of the other
+    const allSorted = [...(people ?? [])].sort((a, b) => b.name.length - a.name.length)
+    for (let i = 0; i < allSorted.length; i++) {
+      for (let j = i + 1; j < allSorted.length; j++) {
+        const longer = allSorted[i]
+        const shorter = allSorted[j]
+        if (longer.id === shorter.id) continue
+
+        const longerLower = longer.name.toLowerCase()
+        const shorterLower = shorter.name.toLowerCase()
+
+        // Exact match or shorter is a first-name-only version of longer
+        const isExact = longerLower === shorterLower
+        const isPrefix = !isExact &&
+          shorterLower === firstName(longerLower) &&
+          shorter.name.trim().split(/\s+/).length === 1
+
+        if (!isExact && !isPrefix) continue
+        // Must be same company (or both unaffiliated)
+        if (longer.company_id !== shorter.company_id) continue
+
+        const key = `${shorter.id}:${longer.id}`
+        if (dismissed.has(key)) continue
+
+        result.push({
+          keep: longer,
+          merge: shorter,
+          reason: isExact ? 'Exact name match' : `"${shorter.name}" is likely "${longer.name}"`,
+        })
       }
     }
 
