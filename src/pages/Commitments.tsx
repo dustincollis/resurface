@@ -18,6 +18,7 @@ import {
 import {
   useCommitments,
   useSetCommitmentStatus,
+  useUpdateCommitment,
   useDeleteCommitment,
   useCreateCommitment,
 } from '../hooks/useCommitments'
@@ -50,12 +51,101 @@ function formatDate(d: string): string {
 
 function CommitmentRow({ commitment }: { commitment: Commitment }) {
   const setStatus = useSetCommitmentStatus()
+  const updateCommitment = useUpdateCommitment()
   const del = useDeleteCommitment()
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editCounterpart, setEditCounterpart] = useState('')
+  const [editCompany, setEditCompany] = useState('')
+  const [editDoBy, setEditDoBy] = useState('')
+  const [editPromisedBy, setEditPromisedBy] = useState('')
+  const [editReviewBy, setEditReviewBy] = useState('')
+
+  const startEdit = () => {
+    setEditTitle(commitment.title)
+    setEditDescription(commitment.description ?? '')
+    setEditCounterpart(commitment.counterpart ?? '')
+    setEditCompany(commitment.company ?? '')
+    setEditDoBy(commitment.do_by ?? '')
+    setEditPromisedBy(commitment.promised_by ?? '')
+    setEditReviewBy(commitment.needs_review_by ?? '')
+    setEditing(true)
+  }
+
+  const saveEdit = async () => {
+    if (!editTitle.trim()) return
+    await updateCommitment.mutateAsync({
+      id: commitment.id,
+      title: editTitle.trim(),
+      description: editDescription.trim() || null,
+      counterpart: editCounterpart.trim() || null,
+      company: editCompany.trim() || null,
+      do_by: editDoBy || null,
+      promised_by: editPromisedBy || null,
+      needs_review_by: editReviewBy || null,
+    })
+    setEditing(false)
+  }
 
   const isOverdue =
     commitment.status === 'open' &&
     commitment.do_by &&
     new Date(commitment.do_by + 'T23:59:59') < new Date()
+
+  if (editing) {
+    return (
+      <div className="rounded-xl border border-purple-800/40 bg-gray-900 px-4 py-3 space-y-2">
+        <input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+          autoFocus
+        />
+        <textarea
+          value={editDescription}
+          onChange={(e) => setEditDescription(e.target.value)}
+          placeholder="Notes"
+          rows={2}
+          className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+        <div className="flex gap-2">
+          <input
+            value={editCounterpart}
+            onChange={(e) => setEditCounterpart(e.target.value)}
+            placeholder="Counterpart"
+            className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+          />
+          <input
+            value={editCompany}
+            onChange={(e) => setEditCompany(e.target.value)}
+            placeholder="Company"
+            className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <label className="text-[10px] uppercase tracking-wider text-gray-500">Do by</label>
+          <input type="date" value={editDoBy} onChange={(e) => setEditDoBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-purple-500 focus:outline-none" />
+          <label className="text-[10px] uppercase tracking-wider text-gray-500">Promised</label>
+          <input type="date" value={editPromisedBy} onChange={(e) => setEditPromisedBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-purple-500 focus:outline-none" />
+          <label className="text-[10px] uppercase tracking-wider text-gray-500">Review</label>
+          <input type="date" value={editReviewBy} onChange={(e) => setEditReviewBy(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-purple-500 focus:outline-none" />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={saveEdit} disabled={updateCommitment.isPending || !editTitle.trim()}
+            className="flex items-center gap-1 rounded bg-purple-600 px-3 py-1.5 text-xs text-white hover:bg-purple-500 disabled:opacity-50">
+            {updateCommitment.isPending ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Save
+          </button>
+          <button onClick={() => setEditing(false)} className="rounded px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200">
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3">
@@ -84,7 +174,9 @@ function CommitmentRow({ commitment }: { commitment: Commitment }) {
               {STATUS_LABEL[commitment.status]}
             </span>
           </div>
-          <div className="mt-1.5 text-base font-semibold text-white">{commitment.title}</div>
+          <button onClick={startEdit} className="mt-1.5 text-left text-base font-semibold text-white hover:text-purple-300" title="Click to edit">
+            {commitment.title}
+          </button>
           {commitment.description && (
             <div className="mt-0.5 text-xs text-gray-400">{commitment.description}</div>
           )}
