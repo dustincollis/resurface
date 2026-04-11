@@ -54,8 +54,15 @@ export default function Layout() {
     <div className="flex h-screen bg-gray-950 text-gray-100">
       {/* Sidebar */}
       <aside className="flex w-60 flex-col border-r border-gray-800 bg-gray-900">
-        <div className="flex h-14 items-center px-4 text-lg font-semibold tracking-tight">
-          Resurface
+        <div className="flex h-14 items-center justify-between px-4">
+          <span className="text-lg font-semibold tracking-tight">Resurface</span>
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+            title="Search (Cmd+K)"
+          >
+            <Search size={16} />
+          </button>
         </div>
 
         <nav className="space-y-1 px-2 py-2">
@@ -140,18 +147,6 @@ export default function Layout() {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="flex h-14 items-center gap-4 border-b border-gray-800 px-6">
-          <button
-            onClick={() => setSearchOpen(true)}
-            className="flex flex-1 items-center gap-2 rounded-lg bg-gray-800/50 px-3 py-1.5"
-          >
-            <Search size={16} className="text-gray-500" />
-            <span className="text-sm text-gray-500">Search... (Cmd+K)</span>
-          </button>
-        </header>
-
-        {/* Page content */}
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
