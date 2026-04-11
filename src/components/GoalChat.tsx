@@ -172,6 +172,12 @@ export default function GoalChat({ goalId }: { goalId: string }) {
             <span className="text-xs text-gray-400">Planning milestones...</span>
           </div>
         )}
+
+        {sendMessage.isError && (
+          <div className="rounded-lg border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+            {sendMessage.error instanceof Error ? sendMessage.error.message : 'Something went wrong'}
+          </div>
+        )}
       </div>
 
       {/* Input */}
