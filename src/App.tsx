@@ -7,6 +7,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Focus from './pages/Focus'
+import DashRiver from './pages/DashRiver'
 import Streams from './pages/Streams'
 import StreamDetail from './pages/StreamDetail'
 import ItemDetail from './pages/ItemDetail'
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="focus" element={<Focus />} />
+              <Route path="river" element={<DashRiver />} />
               <Route path="streams" element={<Streams />} />
               <Route path="stream/:id" element={<StreamDetail />} />
               <Route path="items/:id" element={<ItemDetail />} />
