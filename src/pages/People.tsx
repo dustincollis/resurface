@@ -1,8 +1,10 @@
 import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, Search, Building2, ChevronRight, Star } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { usePeople } from '../hooks/usePeople'
 import { useCompanies } from '../hooks/useCompanies'
+import { supabase } from '../lib/supabase'
 import SuggestedMerges from '../components/SuggestedMerges'
 import type { Person } from '../lib/types'
 
@@ -35,29 +37,31 @@ export default function People() {
   }, [people, search, companyFilter])
 
   // Frequent contacts: people with the most meeting appearances
-  // We approximate this by counting meeting_attendees (loaded via the people hook's join)
-  // Since we don't have that count directly, use a heuristic: people who are NOT
-  // just email-only (have aliases = were merged from voice) are more engaged
+  const { data: meetingCounts } = useQuery({
+    queryKey: ['people_meeting_counts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('meeting_attendees')
+        .select('person_id')
+      if (error) throw error
+      const counts = new Map<string, number>()
+      for (const row of data ?? []) {
+        counts.set(row.person_id, (counts.get(row.person_id) ?? 0) + 1)
+      }
+      return counts
+    },
+  })
+
   const frequentContacts = useMemo(() => {
-    if (search || companyFilter) return []
+    if (search || companyFilter || !meetingCounts) return []
     const all = people ?? []
-    // Rank by: has email + has aliases (merged) → more interactions
-    // Then by company affiliation (affiliated > not)
-    // This is a rough proxy until we have proper interaction counts
-    const scored = all.map((p) => ({
-      person: p,
-      score:
-        (p.email ? 2 : 0) +
-        (p.aliases.length > 0 ? 3 : 0) +
-        (p.company_id ? 1 : 0) +
-        (p.role ? 1 : 0),
-    }))
-    return scored
-      .filter((s) => s.score >= 3)
-      .sort((a, b) => b.score - a.score)
+    return all
+      .map((p) => ({ person: p, count: meetingCounts.get(p.id) ?? 0 }))
+      .filter((s) => s.count >= 2)
+      .sort((a, b) => b.count - a.count)
       .slice(0, 20)
       .map((s) => s.person)
-  }, [people, search, companyFilter])
+  }, [people, meetingCounts, search, companyFilter])
 
   // Group by first letter
   const alphabetGroups = useMemo(() => {
