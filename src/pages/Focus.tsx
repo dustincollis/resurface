@@ -4,14 +4,13 @@ import { Clock, Check, ChevronDown, Sparkles, Play, Zap, Pin } from 'lucide-reac
 import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
-import ItemCard from '../components/ItemCard'
+// ItemCard removed — focus mode uses compact FocusCards only
 import QuickAddBar from '../components/QuickAddBar'
 import OnboardingWizard from '../components/OnboardingWizard'
 import EasyButtonModal from '../components/EasyButtonModal'
 import {
   getSurfaceReasons,
   getSuggestedMove,
-  getClusterFactors,
   sortByPriority,
   effectiveStalenessLevel,
   type SurfaceReason,
@@ -101,11 +100,11 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
 
   return (
     <div
-      className={`overflow-hidden rounded-xl border bg-gray-900 transition-colors ${
+      className={`overflow-hidden rounded-lg border bg-gray-900 transition-colors ${
         expanded ? 'border-gray-700' : 'border-gray-800 hover:border-gray-700'
       } ${level === 'critical' ? 'ring-1 ring-red-900/30' : ''}`}
     >
-      {/* Always-visible row */}
+      {/* Compact card */}
       <div
         role="button"
         tabIndex={0}
@@ -116,163 +115,105 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             setExpanded(!expanded)
           }
         }}
-        className="w-full cursor-pointer px-4 py-3 text-left"
+        className="w-full cursor-pointer px-3 py-2 text-left"
       >
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2">
           {item.pinned ? (
-            <Pin
-              size={14}
-              className="mt-1 flex-shrink-0 text-yellow-400"
-              aria-label="Pinned to focus"
-            />
+            <Pin size={11} className="mt-0.5 flex-shrink-0 text-yellow-400" />
           ) : (
-            <span className="mt-0.5 flex-shrink-0 text-sm font-medium text-gray-600">
+            <span className="mt-0.5 flex-shrink-0 text-[10px] font-medium text-gray-600">
               {rank}
             </span>
           )}
 
           <div className="min-w-0 flex-1">
-            {/* Stream + company + due tag — kept subtle so the title dominates */}
-            <div className="flex items-center gap-2 text-[11px]">
-              {item.streams ? (
-                <span className="flex items-center gap-1 text-gray-500">
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: streamColor }}
-                  />
-                  {item.streams.name}
-                </span>
-              ) : (
-                <span className="text-gray-600">No stream</span>
-              )}
-              {(item.custom_fields?.company as string | undefined) && (
-                <>
-                  <span className="text-gray-700">·</span>
-                  <span className="text-gray-500">
-                    {item.custom_fields.company as string}
-                  </span>
-                </>
-              )}
-              {dueLabel && (
-                <>
-                  <span className="text-gray-700">·</span>
-                  <span
-                    className={
-                      dueLabel.tone === 'red'
-                        ? 'font-medium text-red-400'
-                        : dueLabel.tone === 'orange'
-                        ? 'font-medium text-orange-400'
-                        : 'text-gray-500'
-                    }
-                  >
-                    {dueLabel.text}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {/* Title — the most prominent element */}
-            <h3 className="mt-1 text-lg font-semibold leading-snug text-white">
+            {/* Title */}
+            <h3 className="text-sm font-semibold leading-tight text-white line-clamp-2">
               {item.title}
             </h3>
 
-            {/* Notes (description) — shown collapsed too */}
-            {item.description && (
-              <p className={`mt-1 text-xs text-gray-400 ${expanded ? 'line-clamp-5' : 'line-clamp-2'}`}>
-                {item.description}
-              </p>
-            )}
+            {/* Meta row: stream + company + due */}
+            <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+              {item.streams && (
+                <span className="flex items-center gap-1 text-gray-500">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: streamColor }} />
+                  {item.streams.name}
+                </span>
+              )}
+              {(item.custom_fields?.company as string | undefined) && (
+                <span className="text-gray-600">{item.custom_fields.company as string}</span>
+              )}
+              {dueLabel && (
+                <span className={
+                  dueLabel.tone === 'red' ? 'font-medium text-red-400'
+                    : dueLabel.tone === 'orange' ? 'font-medium text-orange-400'
+                    : 'text-gray-500'
+                }>
+                  {dueLabel.text}
+                </span>
+              )}
+            </div>
 
-            {/* Next step */}
-            {item.next_action && (
-              <p
-                className="mt-1.5 line-clamp-1 text-xs text-gray-300"
-                title="The very next physical step to make progress on this task. Editable on the task detail page."
-              >
-                <span className="text-gray-500">Next step:</span> {item.next_action}
+            {/* Next step — compact */}
+            {item.next_action && !expanded && (
+              <p className="mt-0.5 line-clamp-1 text-[10px] text-gray-400">
+                <span className="text-gray-600">Next:</span> {item.next_action}
               </p>
-            )}
-
-            {/* Reason chips */}
-            {reasons.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {reasons.map((reason, i) => (
-                  <ReasonChip key={i} reason={reason} />
-                ))}
-              </div>
             )}
           </div>
 
-          {/* Right rail: suggested action only */}
-          <div className="flex-shrink-0">
-            <button
-              onClick={handleSuggestedAction}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
-              title={
-                suggestedMove === 'Do Now'
-                  ? 'Open this task and act on it'
-                  : suggestedMove === 'Break Down'
-                  ? 'Open this task to break it into sub-tasks'
-                  : 'Open task details'
-              }
-            >
-              <SuggestedIcon size={12} />
-              {suggestedMove}
-            </button>
-          </div>
+          {/* Suggested action — icon only in compact mode */}
+          <button
+            onClick={handleSuggestedAction}
+            className={`flex-shrink-0 rounded px-2 py-1 text-[10px] font-semibold ${SUGGESTED_MOVE_STYLES[suggestedMove].className}`}
+          >
+            <SuggestedIcon size={11} />
+          </button>
         </div>
       </div>
 
       {/* Expanded section */}
       {expanded && (
-        <div className="border-t border-gray-800/60 bg-gray-950/40 px-4 py-4">
-          {/* Action row */}
-          <div className="mb-4 grid grid-cols-3 gap-2">
+        <div className="border-t border-gray-800/60 bg-gray-950/40 px-3 py-3">
+          {item.description && (
+            <p className="mb-2 text-xs text-gray-400 line-clamp-4">{item.description}</p>
+          )}
+          {item.next_action && (
+            <p className="mb-2 text-xs text-gray-300">
+              <span className="text-gray-500">Next:</span> {item.next_action}
+            </p>
+          )}
+          {reasons.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {reasons.map((reason, i) => (
+                <ReasonChip key={i} reason={reason} />
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
             <button
               onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500"
-              title="Open task details and act on it"
+              className="flex items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-purple-500"
             >
-              <Play size={12} /> Do Now
+              <Play size={10} /> Open
             </button>
             <button
               onClick={handleTouch}
               disabled={touchItem.isPending}
-              className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+              className={`flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium disabled:opacity-50 ${
                 touchedFlash
                   ? 'border-green-700 bg-green-900/30 text-green-300'
                   : 'border-gray-700 text-gray-300 hover:bg-gray-800'
               }`}
-              title="Bump 'last touched' to now"
             >
-              {touchedFlash ? (
-                <>
-                  <Check size={12} /> Touched!
-                </>
-              ) : (
-                <>
-                  <Clock size={12} /> {new Date().getDay() === 5 ? 'Touch → Mon' : 'Touch +1d'}
-                </>
-              )}
+              {touchedFlash ? <><Check size={10} /> Done</> : <><Clock size={10} /> Touch</>}
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); navigate(`/items/${item.id}`) }}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-800"
-              title="Open task details to break it down"
-            >
-              <Sparkles size={12} /> Break Down
-            </button>
-          </div>
-
-          {/* Bottom row: Mark Complete on the right (Open lives in top-right corner) */}
-          <div className="flex items-center justify-end">
             <button
               onClick={handleComplete}
               disabled={updateItem.isPending}
-              className="flex items-center gap-1.5 rounded-lg border border-green-800/60 bg-green-900/20 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-900/40 disabled:opacity-50"
-              title="Mark this task as done"
+              className="flex items-center gap-1 rounded border border-green-800/60 bg-green-900/20 px-2 py-1 text-[11px] font-medium text-green-300 hover:bg-green-900/40 disabled:opacity-50"
             >
-              <Check size={12} /> Mark Complete
+              <Check size={10} /> Done
             </button>
           </div>
         </div>
@@ -307,11 +248,6 @@ export default function Focus() {
     sort_by: 'staleness_score',
   })
 
-  const { data: recentItems } = useItems({
-    sort_by: 'last_touched_at',
-    limit: 5,
-  })
-
   const FOCUS_LIMIT = 10
   // Filter out snoozed and tracking-only items.
   // Tracked items live on pursuit pages, not the dashboard.
@@ -339,113 +275,55 @@ export default function Focus() {
   }, [sortedActiveItems])
   const hiddenCount = sortedActiveItems.length - focusItems.length
   const snoozedCount = (activeItems?.length ?? 0) - visibleActiveItems.length
-  const clusterFactors = useMemo(() => getClusterFactors(focusItems), [focusItems])
-
-  const dueSoonItems = useMemo(() => {
-    if (!visibleActiveItems) return []
-    const weekFromNow = new Date(now + 7 * 24 * 60 * 60 * 1000)
-    return visibleActiveItems
-      .filter((item) => item.due_date && new Date(item.due_date) <= weekFromNow)
-      .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
-  }, [visibleActiveItems, now])
 
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      {/* Today's Focus */}
-      <section>
-        <div className="mb-3 flex items-end justify-between">
-          <div>
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-xl font-bold text-white">Today&apos;s Focus</h2>
-              {focusItems.length > 0 && (
-                <span className="text-xs text-gray-500">
-                  {focusItems.length} of {sortedActiveItems.length} active
-                </span>
-              )}
-            </div>
-            {clusterFactors.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {clusterFactors.map((factor, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-400"
-                  >
-                    {factor.label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleEasyButton}
-              className="flex items-center gap-1.5 rounded-lg border border-yellow-700/50 bg-yellow-900/20 px-3 py-1.5 text-xs font-medium text-yellow-300 hover:bg-yellow-900/40"
-              title="Pick a low-effort task to knock out quickly"
-            >
-              <Zap size={14} />
-              Easy Win
-            </button>
-            <QuickAddBar compact />
-          </div>
+    <div className="mx-auto max-w-5xl">
+      {/* Top bar: count + actions */}
+      <div className="mb-3 flex items-center gap-3">
+        <span className="text-xs text-gray-500">
+          {focusItems.length} of {sortedActiveItems.length} active
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleEasyButton}
+            className="flex items-center gap-1.5 rounded-lg border border-yellow-700/50 bg-yellow-900/20 px-2.5 py-1 text-xs font-medium text-yellow-300 hover:bg-yellow-900/40"
+          >
+            <Zap size={12} />
+            Easy Win
+          </button>
+          <QuickAddBar compact />
         </div>
-        {isLoading ? (
-          <div className="text-sm text-gray-500">Loading...</div>
-        ) : focusItems.length > 0 ? (
-          <>
-            <div className="space-y-3">
-              {focusItems.map((item, i) => (
-                <FocusCard key={item.id} item={item} rank={i + 1} />
-              ))}
-            </div>
-            {(hiddenCount > 0 || snoozedCount > 0) && (
-              <p className="mt-3 text-center text-xs text-gray-600">
-                {hiddenCount > 0 && (
-                  <>+ {hiddenCount} more active task{hiddenCount !== 1 ? 's' : ''} not shown</>
-                )}
-                {hiddenCount > 0 && snoozedCount > 0 && <> · </>}
-                {snoozedCount > 0 && (
-                  <>{snoozedCount} snoozed for later</>
-                )}
-              </p>
-            )}
-          </>
-        ) : (
-          <div className="rounded-lg border border-dashed border-gray-800 py-6 text-center text-sm text-gray-500">
-            No tasks to focus on. Add one to get started.
-          </div>
-        )}
-      </section>
+      </div>
 
-      {/* Due Soon */}
-      {dueSoonItems.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-            Due Soon
-          </h2>
-          <div className="space-y-2">
-            {dueSoonItems.map((item) => (
-              <ItemCard key={item.id} item={item} />
+      {isLoading ? (
+        <div className="text-sm text-gray-500">Loading...</div>
+      ) : focusItems.length > 0 ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {focusItems.map((item, i) => (
+              <FocusCard key={item.id} item={item} rank={i + 1} />
             ))}
           </div>
-        </section>
-      )}
-
-      {/* Recently Touched */}
-      {recentItems && recentItems.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-            Recently Touched
-          </h2>
-          <div className="space-y-2">
-            {recentItems.map((item) => (
-              <ItemCard key={item.id} item={item} />
-            ))}
-          </div>
-        </section>
+          {(hiddenCount > 0 || snoozedCount > 0) && (
+            <p className="mt-2 text-center text-xs text-gray-600">
+              {hiddenCount > 0 && (
+                <>+ {hiddenCount} more</>
+              )}
+              {hiddenCount > 0 && snoozedCount > 0 && <> · </>}
+              {snoozedCount > 0 && (
+                <>{snoozedCount} snoozed</>
+              )}
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="rounded-lg border border-dashed border-gray-800 py-6 text-center text-sm text-gray-500">
+          No tasks to focus on.
+        </div>
       )}
 
       <EasyButtonModal
