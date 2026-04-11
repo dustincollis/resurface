@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Settings, Search, LogOut } from 'lucide-react'
+import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Settings, Search, LogOut, Crosshair } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -8,6 +8,7 @@ import SearchModal from './SearchModal'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/focus', icon: Crosshair, label: 'Focus' },
   { to: '/proposals', icon: Inbox, label: 'Proposals' },
   { to: '/commitments', icon: Handshake, label: 'Commitments' },
   { to: '/pursuits', icon: Target, label: 'Pursuits' },
