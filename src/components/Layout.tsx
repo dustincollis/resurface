@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Layers, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Settings, Search, LogOut, Crosshair } from 'lucide-react'
+import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -13,11 +13,13 @@ const navItems = [
   { to: '/commitments', icon: Handshake, label: 'Commitments' },
   { to: '/pursuits', icon: Target, label: 'Pursuits' },
   { to: '/goals', icon: Flag, label: 'Goals' },
+  { to: '/meetings', icon: Calendar, label: 'Discussions' },
+]
+
+const directoryItems = [
   { to: '/people', icon: Users, label: 'People' },
   { to: '/companies', icon: Building2, label: 'Companies' },
   { to: '/streams', icon: Layers, label: 'Streams' },
-  { to: '/meetings', icon: Calendar, label: 'Discussions' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function Layout() {
@@ -25,6 +27,7 @@ export default function Layout() {
   const { data: streams } = useStreams()
   const { data: uncategorized } = useUncategorizedItems()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [directoryOpen, setDirectoryOpen] = useState(false)
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -53,49 +56,78 @@ export default function Layout() {
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
       {/* Sidebar */}
-      <aside className="flex w-60 flex-col border-r border-gray-800 bg-gray-900">
-        <div className="flex h-14 items-center justify-between px-4">
-          <span className="text-lg font-semibold tracking-tight">Resurface</span>
+      <aside className="flex w-56 flex-col border-r border-gray-800 bg-gray-900">
+        <div className="flex h-12 items-center justify-between px-4">
+          <span className="text-base font-semibold tracking-tight">Resurface</span>
           <button
             onClick={() => setSearchOpen(true)}
             className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
             title="Search (Cmd+K)"
           >
-            <Search size={16} />
+            <Search size={15} />
           </button>
         </div>
 
-        <nav className="space-y-1 px-2 py-2">
+        {/* Main nav */}
+        <nav className="space-y-0.5 px-2 py-1">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
                   isActive
                     ? 'bg-gray-800 text-white'
                     : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                 }`
               }
             >
-              <Icon size={18} />
+              <Icon size={16} />
               {label}
             </NavLink>
           ))}
         </nav>
 
-        {/* Stream list */}
+        {/* Directory — collapsible section for People, Companies, Streams */}
+        <div className="border-t border-gray-800 px-2 pt-2">
+          <button
+            onClick={() => setDirectoryOpen(!directoryOpen)}
+            className="flex w-full items-center gap-2 px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600 hover:text-gray-400"
+          >
+            {directoryOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            Directory
+          </button>
+          {directoryOpen && (
+            <div className="mt-0.5 space-y-0.5">
+              {directoryItems.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                      isActive
+                        ? 'bg-gray-800 text-white'
+                        : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                    }`
+                  }
+                >
+                  <Icon size={16} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Stream shortcuts */}
         <div className="flex-1 overflow-y-auto border-t border-gray-800 px-2 py-2">
-          <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600">
-            Streams
-          </div>
           {streams?.map((stream) => (
             <NavLink
               key={stream.id}
               to={`/stream/${stream.id}`}
               className={({ isActive }) =>
-                `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                `flex items-center gap-2 rounded-lg px-3 py-1 text-sm transition-colors ${
                   isActive
                     ? 'bg-gray-800 text-white'
                     : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
@@ -112,7 +144,7 @@ export default function Layout() {
           <NavLink
             to="/stream/uncategorized"
             className={({ isActive }) =>
-              `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              `flex items-center gap-2 rounded-lg px-3 py-1 text-sm transition-colors ${
                 isActive
                   ? 'bg-gray-800 text-white'
                   : 'text-gray-500 hover:bg-gray-800/50 hover:text-gray-300'
@@ -129,17 +161,31 @@ export default function Layout() {
           </NavLink>
         </div>
 
-        <div className="border-t border-gray-800 p-3">
-          <div className="flex items-center justify-between">
-            <span className="truncate text-sm text-gray-400">
+        {/* Bottom: settings + user */}
+        <div className="border-t border-gray-800 px-2 py-2">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                isActive
+                  ? 'bg-gray-800 text-white'
+                  : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+              }`
+            }
+          >
+            <Settings size={16} />
+            Settings
+          </NavLink>
+          <div className="mt-1 flex items-center justify-between px-3 py-1">
+            <span className="truncate text-xs text-gray-500">
               {user?.email}
             </span>
             <button
               onClick={signOut}
-              className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+              className="rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-gray-300"
               title="Sign out"
             >
-              <LogOut size={16} />
+              <LogOut size={14} />
             </button>
           </div>
         </div>
