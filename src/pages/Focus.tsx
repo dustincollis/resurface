@@ -115,7 +115,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
             setExpanded(!expanded)
           }
         }}
-        className="w-full cursor-pointer px-4 py-3 text-left"
+        className="w-full cursor-pointer px-5 py-4 text-left"
       >
         <div className="flex items-start gap-2.5">
           {item.pinned ? (
