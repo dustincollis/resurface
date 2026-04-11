@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Handshake, Target, Calendar, CheckSquare, Flag, AlertTriangle } from 'lucide-react'
-import { useGoals } from '../hooks/useGoals'
+import { Handshake, Calendar, CheckSquare, Flag, AlertTriangle } from 'lucide-react'
 import { usePursuits } from '../hooks/usePursuits'
 import { useCommitments } from '../hooks/useCommitments'
 import { useItems } from '../hooks/useItems'
@@ -43,7 +42,6 @@ function dayLabel(daysAway: number): string {
 
 export default function DashRiver() {
   const navigate = useNavigate()
-  const { data: goals } = useGoals('active')
   const { data: pursuits } = usePursuits({ status: 'active' })
   const { data: commitments } = useCommitments()
   const { data: items } = useItems({ status: ['open', 'in_progress', 'waiting'] })
