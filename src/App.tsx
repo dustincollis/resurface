@@ -19,6 +19,7 @@ import Pursuits from './pages/Pursuits'
 import PursuitDetail from './pages/PursuitDetail'
 import Goals from './pages/Goals'
 import GoalDetail from './pages/GoalDetail'
+import Ideas from './pages/Ideas'
 import People from './pages/People'
 import PersonDetail from './pages/PersonDetail'
 import Companies from './pages/Companies'
@@ -50,6 +51,7 @@ export default function App() {
               <Route path="pursuits/:id" element={<PursuitDetail />} />
               <Route path="goals" element={<Goals />} />
               <Route path="goals/:id" element={<GoalDetail />} />
+              <Route path="ideas" element={<Ideas />} />
               <Route path="people" element={<People />} />
               <Route path="people/:id" element={<PersonDetail />} />
               <Route path="companies" element={<Companies />} />

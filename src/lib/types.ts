@@ -191,7 +191,7 @@ export interface CommitmentProposalPayload {
 // Commitments — soft obligations (outgoing or incoming)
 // ============================================================
 
-export type CommitmentStatus = 'open' | 'met' | 'broken' | 'cancelled' | 'waiting'
+export type CommitmentStatus = 'open' | 'met' | 'broken' | 'cancelled' | 'waiting' | 'historical'
 export type CommitmentDirection = 'outgoing' | 'incoming'
 
 export interface Commitment {
@@ -435,4 +435,40 @@ export interface Proposal {
   updated_at: string
   // Client-side derived (set by useProposals via a join query, not a column)
   source_title?: string | null
+}
+
+export type IdeaStatus = 'surfaced' | 'exploring' | 'accepted' | 'dismissed' | 'archived'
+
+export type IdeaCategory =
+  | 'gtm_motion'
+  | 'selling_approach'
+  | 'partnership'
+  | 'positioning'
+  | 'campaign'
+  | 'bundling'
+  | 'product'
+  | 'process'
+  | 'other'
+
+export interface Idea {
+  id: string
+  user_id: string
+  title: string
+  description: string | null
+  evidence_text: string | null
+  source_meeting_id: string | null
+  originated_by: string | null
+  company_id: string | null
+  company_name: string | null
+  context_notes: string | null
+  category: IdeaCategory | null
+  tags: string[] | null
+  status: IdeaStatus
+  promoted_to_goal_id: string | null
+  promoted_to_pursuit_id: string | null
+  cluster_id: string | null
+  cluster_label: string | null
+  created_at: string
+  updated_at: string
+  reviewed_at: string | null
 }

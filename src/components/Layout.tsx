@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown } from 'lucide-react'
+import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
+import { useIdeaCounts } from '../hooks/useIdeas'
 import SearchModal from './SearchModal'
 
 const navItems = [
@@ -13,6 +14,7 @@ const navItems = [
   { to: '/commitments', icon: Handshake, label: 'Commitments' },
   { to: '/pursuits', icon: Target, label: 'Pursuits' },
   { to: '/goals', icon: Flag, label: 'Goals' },
+  { to: '/ideas', icon: Lightbulb, label: 'Ideas' },
   { to: '/meetings', icon: Calendar, label: 'Discussions' },
 ]
 
@@ -26,8 +28,10 @@ export default function Layout() {
   const { session, user, loading, signOut } = useAuth()
   const { data: streams } = useStreams()
   const { data: uncategorized } = useUncategorizedItems()
+  const { data: ideaCounts } = useIdeaCounts()
   const [searchOpen, setSearchOpen] = useState(false)
   const [directoryOpen, setDirectoryOpen] = useState(false)
+  const surfacedCount = ideaCounts?.surfaced ?? 0
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -85,6 +89,11 @@ export default function Layout() {
             >
               <Icon size={16} />
               {label}
+              {label === 'Ideas' && surfacedCount > 0 && (
+                <span className="ml-auto rounded-full bg-amber-900/40 px-1.5 py-0.5 text-[10px] text-amber-300">
+                  {surfacedCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

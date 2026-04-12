@@ -31,6 +31,7 @@ const STATUS_LABEL: Record<CommitmentStatus, string> = {
   broken: 'Broken',
   cancelled: 'Cancelled',
   waiting: 'Waiting',
+  historical: 'Historical',
 }
 
 const STATUS_STYLE: Record<CommitmentStatus, string> = {
@@ -39,6 +40,7 @@ const STATUS_STYLE: Record<CommitmentStatus, string> = {
   broken: 'bg-red-900/30 text-red-300',
   cancelled: 'bg-gray-800 text-gray-500',
   waiting: 'bg-blue-900/30 text-blue-300',
+  historical: 'bg-gray-800/50 text-gray-400',
 }
 
 function formatDate(d: string): string {
@@ -309,10 +311,10 @@ export default function Commitments() {
   // Split by direction first, then group by status within each.
   const { outgoing, incoming, hasIncoming } = useMemo(() => {
     const outgoingGroups: Record<CommitmentStatus, Commitment[]> = {
-      open: [], waiting: [], met: [], broken: [], cancelled: [],
+      open: [], waiting: [], met: [], broken: [], cancelled: [], historical: [],
     }
     const incomingGroups: Record<CommitmentStatus, Commitment[]> = {
-      open: [], waiting: [], met: [], broken: [], cancelled: [],
+      open: [], waiting: [], met: [], broken: [], cancelled: [], historical: [],
     }
     let anyIncoming = false
     for (const c of commitments ?? []) {

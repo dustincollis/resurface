@@ -1,10 +1,11 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio } from 'lucide-react'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio, Lightbulb, Eye, X } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, type MeetingImportMode } from '../hooks/useMeetings'
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
 import { useCommitmentsByMeeting } from '../hooks/useCommitments'
+import { useIdeasByMeeting, useUpdateIdeaStatus } from '../hooks/useIdeas'
 import AddToPursuit from '../components/AddToPursuit'
 import { queryClient } from '../lib/queryClient'
 import { supabase } from '../lib/supabase'
@@ -50,6 +51,8 @@ export default function MeetingDetail() {
   const { data: linkedTasks } = useItemsByDiscussion(id!)
   const { data: meetingProposals } = useProposalsBySource('meeting', id!)
   const { data: meetingCommitments } = useCommitmentsByMeeting(id!)
+  const { data: meetingIdeas } = useIdeasByMeeting(id!)
+  const updateIdeaStatus = useUpdateIdeaStatus()
   const uploadTranscript = useUploadTranscript()
   const updateMeeting = useUpdateMeeting()
   const deleteMeeting = useDeleteMeeting()
@@ -501,6 +504,52 @@ export default function MeetingDetail() {
                   </div>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Ideas */}
+        {meetingIdeas && meetingIdeas.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 text-sm font-medium text-gray-300">Ideas ({meetingIdeas.length})</h3>
+            <div className="space-y-2">
+              {meetingIdeas.map((idea) => (
+                <div key={idea.id} className="flex items-start gap-2">
+                  <Lightbulb size={14} className="mt-0.5 flex-shrink-0 text-amber-400" />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm text-gray-200">{idea.title}</span>
+                    {idea.category && (
+                      <span className="ml-2 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-gray-400">
+                        {idea.category.replace('_', ' ')}
+                      </span>
+                    )}
+                    {idea.description && (
+                      <p className="mt-0.5 text-xs text-gray-400">{idea.description}</p>
+                    )}
+                    {idea.evidence_text && (
+                      <p className="mt-0.5 text-xs italic text-gray-500">"{idea.evidence_text}"</p>
+                    )}
+                  </div>
+                  {idea.status === 'surfaced' && (
+                    <div className="flex flex-shrink-0 gap-1">
+                      <button
+                        onClick={() => updateIdeaStatus.mutate({ id: idea.id, status: 'exploring' })}
+                        className="rounded bg-blue-900/30 p-1 text-blue-300 hover:bg-blue-900/50"
+                        title="Explore this idea"
+                      >
+                        <Eye size={12} />
+                      </button>
+                      <button
+                        onClick={() => updateIdeaStatus.mutate({ id: idea.id, status: 'dismissed' })}
+                        className="rounded bg-gray-800 p-1 text-gray-500 hover:bg-gray-700"
+                        title="Dismiss"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}

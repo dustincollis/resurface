@@ -29,6 +29,7 @@ export interface Meeting {
   }[]
   extracted_decisions: { decision: string; context?: string }[]
   extracted_open_questions: { question: string; owner?: string }[]
+  extracted_topics: string[] | null
   source: string | null
   processed_at: string | null
   created_at: string

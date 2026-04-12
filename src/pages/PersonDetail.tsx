@@ -11,6 +11,7 @@ const STATUS_STYLE: Record<CommitmentStatus, string> = {
   broken: 'bg-red-900/30 text-red-300',
   cancelled: 'bg-gray-800 text-gray-500',
   waiting: 'bg-blue-900/30 text-blue-300',
+  historical: 'bg-gray-800/50 text-gray-400',
 }
 
 export default function PersonDetail() {

@@ -4,7 +4,7 @@ import {
   ArrowLeft, Flag, Trash2, Plus, Check, RotateCcw, Archive,
   Circle, CheckCircle, Clock, SkipForward, Loader2,
   Target, Handshake, Calendar, Zap, Hash,
-  RefreshCw, Link2,
+  RefreshCw, Link2, Lightbulb,
 } from 'lucide-react'
 import {
   useGoal,
@@ -18,6 +18,7 @@ import {
   useEvaluateGoal,
 } from '../hooks/useGoals'
 import { usePursuits } from '../hooks/usePursuits'
+import { useIdeasByGoal } from '../hooks/useIdeas'
 import InlineEditable from '../components/InlineEditable'
 import GoalChat from '../components/GoalChat'
 import type { GoalTask, GoalTaskStatus, MilestoneConditionType } from '../lib/types'
@@ -53,6 +54,7 @@ export default function GoalDetail() {
   const setTaskStatus = useSetGoalTaskStatus()
   const deleteTask = useDeleteGoalTask()
   const evaluateGoal = useEvaluateGoal()
+  const { data: originIdeas } = useIdeasByGoal(id!)
 
   const [showAddMilestone, setShowAddMilestone] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -413,6 +415,26 @@ export default function GoalDetail() {
             </button>
           )}
         </div>
+
+        {/* Origin ideas */}
+        {originIdeas && originIdeas.length > 0 && (
+          <div className="mt-6 rounded-xl border border-gray-800 bg-gray-900 p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-300">
+              <Lightbulb size={14} className="text-amber-400" />
+              Origin Ideas ({originIdeas.length})
+            </h3>
+            <div className="space-y-2">
+              {originIdeas.map((idea) => (
+                <div key={idea.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                  <span className="text-sm text-gray-200">{idea.title}</span>
+                  {idea.description && (
+                    <p className="mt-0.5 text-xs text-gray-400">{idea.description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* AI Goal Planner */}
         <GoalChat goalId={goal.id} />

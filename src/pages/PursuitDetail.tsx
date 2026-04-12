@@ -12,6 +12,7 @@ import {
   Handshake,
   Calendar,
   ChevronRight,
+  Lightbulb,
 } from 'lucide-react'
 import {
   usePursuit,
@@ -24,6 +25,7 @@ import {
 import { useItems } from '../hooks/useItems'
 import { useCommitments } from '../hooks/useCommitments'
 import { useMeetings } from '../hooks/useMeetings'
+import { useIdeasByPursuit } from '../hooks/useIdeas'
 import InlineEditable from '../components/InlineEditable'
 import StatusBadge from '../components/StatusBadge'
 import PlaybookHealth from '../components/PlaybookHealth'
@@ -39,6 +41,7 @@ export default function PursuitDetail() {
   const setStatus = useSetPursuitStatus()
   const deletePursuit = useDeletePursuit()
   const removeMember = useRemovePursuitMember()
+  const { data: originIdeas } = useIdeasByPursuit(id!)
 
   // Pull all items / commitments / meetings, then filter to membership.
   // Inefficient but simple — pursuits are small enough that this is fine.
@@ -179,6 +182,36 @@ export default function PursuitDetail() {
         {pursuit.template_id && (
           <div className="border-b border-gray-800 px-6 py-4">
             <PlaybookHealth pursuitId={pursuit.id} />
+          </div>
+        )}
+
+        {/* Origin ideas */}
+        {originIdeas && originIdeas.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-300">
+              <Lightbulb size={14} className="text-amber-400" />
+              Origin Ideas ({originIdeas.length})
+            </h3>
+            <div className="space-y-2">
+              {originIdeas.map((idea) => (
+                <div key={idea.id} className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm text-gray-200">{idea.title}</span>
+                    {idea.description && (
+                      <p className="mt-0.5 text-xs text-gray-400">{idea.description}</p>
+                    )}
+                    {idea.source_meeting_id && (
+                      <Link
+                        to={`/meetings/${idea.source_meeting_id}`}
+                        className="mt-1 inline-block text-xs text-blue-400 hover:text-blue-300"
+                      >
+                        Source meeting
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
