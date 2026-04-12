@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Lightbulb, X, Loader2, RefreshCw, FileText, Target, BarChart3, MapPin, TrendingUp,
+  Lightbulb, X, Loader2, RefreshCw, FileText, Target, BarChart3, MapPin, TrendingUp, Layers,
 } from 'lucide-react'
-import { useIdeas, useUpdateIdeaStatus } from '../hooks/useIdeas'
+import { useIdeas, useUpdateIdeaStatus, useRunClustering } from '../hooks/useIdeas'
 import {
   useClusterReports,
   useGenerateClusterReport,
@@ -45,6 +45,7 @@ interface ClusterInfo {
 
 export default function Ideas() {
   const { data: ideas, isLoading } = useIdeas()
+  const runClustering = useRunClustering()
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
   const [showUnclustered, setShowUnclustered] = useState(false)
 
@@ -135,6 +136,42 @@ export default function Ideas() {
             {totalIdeas} ideas from {accountCount} accounts — {clusters.length} themes identified
           </p>
         </div>
+
+        {/* Re-cluster suggestion when unclustered count is high */}
+        {unclustered.length > 20 && (
+          <div className="border-b border-gray-800 bg-amber-900/10 px-3 py-2.5">
+            <div className="flex items-start gap-2">
+              <Layers size={13} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] leading-tight text-amber-200">
+                  {unclustered.length} ideas haven't been clustered yet.
+                </p>
+                <button
+                  onClick={() => runClustering.mutate()}
+                  disabled={runClustering.isPending}
+                  className="mt-1.5 flex items-center gap-1 rounded bg-amber-900/30 px-2 py-1 text-[11px] font-medium text-amber-200 hover:bg-amber-900/50 disabled:opacity-50"
+                >
+                  {runClustering.isPending ? (
+                    <>
+                      <Loader2 size={10} className="animate-spin" />
+                      Clustering...
+                    </>
+                  ) : (
+                    <>
+                      <Layers size={10} />
+                      Run clustering
+                    </>
+                  )}
+                </button>
+                {runClustering.isSuccess && (
+                  <p className="mt-1 text-[10px] text-amber-300/70">
+                    Found {runClustering.data?.clusters_found} clusters
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
           <div className="space-y-0.5 p-2">

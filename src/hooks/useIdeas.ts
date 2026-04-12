@@ -206,6 +206,26 @@ export function usePromoteIdeaToGoal() {
   })
 }
 
+export function useRunClustering() {
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('ai-cluster-ideas', {
+        body: {},
+      })
+      if (error) throw error
+      return data as {
+        total_ideas: number
+        clusters_found: number
+        ideas_clustered: number
+        ideas_unclustered: number
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] })
+    },
+  })
+}
+
 export function usePromoteIdeaToPursuit() {
   return useMutation({
     mutationFn: async ({ ideaId, pursuitId }: { ideaId: string; pursuitId?: string }) => {
