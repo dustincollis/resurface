@@ -11,20 +11,30 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
-    // Auth check
+    // Auth — accept user JWT (browser) or service role (scripts)
     const authHeader = req.headers.get("Authorization");
-    const token = authHeader?.replace(/^Bearer\s+/i, "").trim() ?? "";
-    if (token !== serviceRoleKey) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const isServiceRole = token === serviceRoleKey;
+
+    if (!isServiceRole) {
+      const { data: { user } } = await adminClient.auth.getUser(token);
+      if (!user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run === true;
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     // Fetch all ideas
     const { data: ideas, error: fetchErr } = await adminClient
