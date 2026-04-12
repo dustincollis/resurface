@@ -450,6 +450,8 @@ export type IdeaCategory =
   | 'process'
   | 'other'
 
+export type IdeaQuality = 'high' | 'medium' | 'low'
+
 export interface Idea {
   id: string
   user_id: string
@@ -468,6 +470,9 @@ export interface Idea {
   promoted_to_pursuit_id: string | null
   cluster_id: string | null
   cluster_label: string | null
+  quality: IdeaQuality | null
+  triage_reason: string | null
+  triaged_at: string | null
   created_at: string
   updated_at: string
   reviewed_at: string | null

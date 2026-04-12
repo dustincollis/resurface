@@ -36,13 +36,31 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dry_run === true;
 
-    // Fetch all ideas
-    const { data: ideas, error: fetchErr } = await adminClient
-      .from("ideas")
-      .select("id, title, description, company_name, category, originated_by")
-      .order("created_at", { ascending: true });
+    // Fetch all ideas — paginate past the default 1000-row PostgREST limit
+    const allIdeas: Array<Record<string, unknown>> = [];
+    const pageSize = 1000;
+    let page = 0;
+    while (true) {
+      const { data: pageRows, error: pageErr } = await adminClient
+        .from("ideas")
+        .select("id, title, description, company_name, category, originated_by")
+        .order("created_at", { ascending: true })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      if (pageErr) throw pageErr;
+      if (!pageRows || pageRows.length === 0) break;
+      allIdeas.push(...pageRows);
+      if (pageRows.length < pageSize) break;
+      page++;
+    }
+    const ideas = allIdeas as Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      company_name: string | null;
+      category: string | null;
+      originated_by: string | null;
+    }>;
 
-    if (fetchErr) throw fetchErr;
     if (!ideas || ideas.length < 3) {
       return new Response(
         JSON.stringify({ error: "Not enough ideas to cluster", count: ideas?.length ?? 0 }),
@@ -50,12 +68,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build prompt
+    // Build prompt — keep idea lines compact to stay within token budget
     const ideaLines = ideas.map((idea, i) => {
-      const co = idea.company_name || "general";
-      const cat = idea.category || "other";
-      const desc = (idea.description || "").substring(0, 120);
-      return `${i}: [${cat}] (${co}) ${idea.title} — ${desc}`;
+      const co = idea.company_name || "";
+      const cat = idea.category || "";
+      return `${i}:${cat ? `[${cat}]` : ""}${co ? `(${co})` : ""} ${idea.title}`;
     });
 
     const prompt = `You are analyzing a corpus of ${ideas.length} strategic ideas extracted from 6+ months of sales meetings for a senior GTM leader at EPAM (a technology consultancy). Your job is to identify natural clusters — groups of ideas that address the same theme, strategy, or opportunity, even if they appeared in different meetings about different clients.
@@ -93,7 +110,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 8192,
+        max_tokens: 32000,
         temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
       }),

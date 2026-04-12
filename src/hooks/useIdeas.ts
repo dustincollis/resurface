@@ -21,29 +21,41 @@ export function useIdeas(filters?: IdeaFilters) {
   return useQuery({
     queryKey: ['ideas', filters],
     queryFn: async () => {
-      let query = supabase.from('ideas').select('*')
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          query = query.in('status', filters.status)
-        } else {
-          query = query.eq('status', filters.status)
+      // Paginate past PostgREST's default 1000-row limit
+      const pageSize = 1000
+      const allRows: Idea[] = []
+      let page = 0
+      while (true) {
+        let query = supabase.from('ideas').select('*')
+        if (filters?.status) {
+          if (Array.isArray(filters.status)) {
+            query = query.in('status', filters.status)
+          } else {
+            query = query.eq('status', filters.status)
+          }
         }
+        if (filters?.category) {
+          query = query.eq('category', filters.category)
+        }
+        if (filters?.company_id) {
+          query = query.eq('company_id', filters.company_id)
+        }
+        if (filters?.cluster_id) {
+          query = query.eq('cluster_id', filters.cluster_id)
+        }
+        if (filters?.source_meeting_id) {
+          query = query.eq('source_meeting_id', filters.source_meeting_id)
+        }
+        const { data, error } = await query
+          .order('created_at', { ascending: false })
+          .range(page * pageSize, (page + 1) * pageSize - 1)
+        if (error) throw error
+        if (!data || data.length === 0) break
+        allRows.push(...(data as Idea[]))
+        if (data.length < pageSize) break
+        page++
       }
-      if (filters?.category) {
-        query = query.eq('category', filters.category)
-      }
-      if (filters?.company_id) {
-        query = query.eq('company_id', filters.company_id)
-      }
-      if (filters?.cluster_id) {
-        query = query.eq('cluster_id', filters.cluster_id)
-      }
-      if (filters?.source_meeting_id) {
-        query = query.eq('source_meeting_id', filters.source_meeting_id)
-      }
-      const { data, error } = await query.order('created_at', { ascending: false })
-      if (error) throw error
-      return data as Idea[]
+      return allRows
     },
     enabled: !!user,
   })

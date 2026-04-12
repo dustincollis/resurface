@@ -11,7 +11,13 @@ import {
   REPORT_TYPE_DESCRIPTIONS,
   type ClusterReportType,
 } from '../hooks/useClusterReports'
-import type { Idea, IdeaCategory } from '../lib/types'
+import type { Idea, IdeaCategory, IdeaQuality } from '../lib/types'
+
+const QUALITY_STYLE: Record<IdeaQuality, string> = {
+  high: 'bg-green-900/40 text-green-300',
+  medium: 'bg-gray-700/40 text-gray-400',
+  low: 'bg-red-900/30 text-red-400',
+}
 
 const CATEGORY_LABEL: Record<IdeaCategory, string> = {
   gtm_motion: 'GTM Motion',
@@ -44,10 +50,20 @@ interface ClusterInfo {
 }
 
 export default function Ideas() {
-  const { data: ideas, isLoading } = useIdeas()
+  const { data: rawIdeas, isLoading } = useIdeas()
   const runClustering = useRunClustering()
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
   const [showUnclustered, setShowUnclustered] = useState(false)
+  const [qualityFilter, setQualityFilter] = useState<'signal' | 'all' | 'untriaged'>('signal')
+
+  // Apply quality filter. Default 'signal' = high + medium (hide low + null).
+  const ideas = useMemo(() => {
+    if (!rawIdeas) return rawIdeas
+    if (qualityFilter === 'all') return rawIdeas
+    if (qualityFilter === 'untriaged') return rawIdeas.filter((i) => !i.quality)
+    // signal: include high/medium and un-triaged ideas (hide low)
+    return rawIdeas.filter((i) => i.quality === 'high' || i.quality === 'medium' || !i.quality)
+  }, [rawIdeas, qualityFilter])
   const [clusteringStartedAt, setClusteringStartedAt] = useState<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [lastResult, setLastResult] = useState<{
@@ -179,6 +195,29 @@ export default function Ideas() {
           <p className="mt-0.5 text-xs text-gray-500">
             {totalIdeas} ideas from {accountCount} accounts — {clusters.length} themes identified
           </p>
+          <div className="mt-2 flex gap-1">
+            <button
+              onClick={() => setQualityFilter('signal')}
+              className={`rounded px-2 py-0.5 text-[10px] ${qualityFilter === 'signal' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:bg-gray-800'}`}
+              title="Hide low-quality (default)"
+            >
+              Signal
+            </button>
+            <button
+              onClick={() => setQualityFilter('all')}
+              className={`rounded px-2 py-0.5 text-[10px] ${qualityFilter === 'all' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:bg-gray-800'}`}
+              title="Show everything including low-quality"
+            >
+              All
+            </button>
+            <button
+              onClick={() => setQualityFilter('untriaged')}
+              className={`rounded px-2 py-0.5 text-[10px] ${qualityFilter === 'untriaged' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:bg-gray-800'}`}
+              title="Only ideas that haven't been triaged yet"
+            >
+              Untriaged
+            </button>
+          </div>
         </div>
 
         {/* Clustering in progress — persistent overlay */}
@@ -431,6 +470,14 @@ function IdeaTimelineRow({
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-sm text-gray-200">{idea.title}</span>
+        {idea.quality && (
+          <span
+            className={`flex-shrink-0 rounded px-1 py-0.5 text-[9px] ${QUALITY_STYLE[idea.quality]}`}
+            title={idea.triage_reason || ''}
+          >
+            {idea.quality}
+          </span>
+        )}
         {idea.status === 'exploring' && (
           <span className="flex-shrink-0 rounded bg-blue-900/30 px-1 py-0.5 text-[9px] text-blue-300">exploring</span>
         )}

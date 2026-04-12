@@ -393,10 +393,32 @@ Extract the following:
 
 6. **KEY TOPICS**: 3-8 short topic labels that characterize what this meeting was about. Examples: "Adobe partnership pricing", "S&P AEM migration timeline", "team hiring Q1". Keep labels concise and reusable across meetings about the same subject.${topicHint}
 
-7. **IDEAS**: Strategic ideas, GTM motions, selling approaches, partnership proposals, positioning concepts, campaign ideas, product bundling, or any forward-looking "we should..." / "what if we..." / "have you considered..." moments. Cast a wide net — capture anything that sounds like a proposed approach, strategy, tactic, or initiative, whether fully formed or offhand. For each:
+7. **IDEAS — STRICT CRITERIA**: Strategic ideas worth archiving for ${opts.userDisplayName}'s future reference. BE HIGHLY SELECTIVE. Most meetings produce 0-3 real strategic ideas, not 10-20. Err aggressively on the side of extracting fewer.
+
+   ${opts.userDisplayName}'s role context: Head of Content Go-to-Market at EPAM. Runs partner alliances (Adobe, Sitecore, ContentStack, Contentful, Microsoft) for content management, DAM, and search. E-commerce is NOT his scope — a counterpart owns commerce.
+
+   An item COUNTS as an idea ONLY if ALL are true:
+   - It proposes a new strategic approach, offering, GTM motion, positioning angle, or partnership play
+   - It is specific enough to be actionable (names a company, approach, or concrete concept — not generic)
+   - It is relevant to content GTM (not commerce, not HR, not low-level technical implementation)
+   - The originator is clearly identified by name (NOT "Speaker 1", "Speaker 2", "Unknown")
+   - It's novel or sharp enough to be worth re-reading in 3 months
+
+   An item does NOT count and MUST be skipped if:
+   - The speaker is labeled "Speaker N" or "Unknown" — parser couldn't identify them, likely noise
+   - It's a tactical/operational detail (sprint planning, UAT process, internal meeting logistics, resource allocation mechanics)
+   - It's out of scope (commerce platforms, HR/learning design, code architecture, low-level devops)
+   - It's a generic platitude ("cross-train team", "better collaboration", "use case studies")
+   - It's a restatement of what's already being done
+   - It's vague ("explore more opportunities", "think about pricing")
+   - It's a description of current practice, not a proposal for something new
+
+   When in doubt, skip it. 2 sharp ideas beat 10 fuzzy ones.
+
+   For each qualifying idea:
    - title: clear, descriptive (5-15 words)
-   - description: 1-3 sentence summary of the idea
-   - originated_by: who suggested it (name if identifiable, null if unclear)
+   - description: 1-3 sentence summary
+   - originated_by: MUST be a real person's name (skip if only a Speaker N label exists)
    - company: what company/account/partner it relates to (null if general)
    - category: one of "gtm_motion", "selling_approach", "partnership", "positioning", "campaign", "bundling", "product", "process", "other"
    - evidence_quote: relevant quote or close paraphrase (under 200 chars)
