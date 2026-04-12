@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Lightbulb, X, Loader2, RefreshCw, FileText, Target, BarChart3, MapPin, TrendingUp, Layers,
@@ -48,6 +48,50 @@ export default function Ideas() {
   const runClustering = useRunClustering()
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
   const [showUnclustered, setShowUnclustered] = useState(false)
+  const [clusteringStartedAt, setClusteringStartedAt] = useState<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [lastResult, setLastResult] = useState<{
+    clusters_found: number
+    ideas_clustered: number
+    ideas_unclustered: number
+    at: number
+  } | null>(null)
+
+  // Tick elapsed time during clustering
+  useEffect(() => {
+    if (!clusteringStartedAt) return
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - clusteringStartedAt) / 1000))
+    }, 250)
+    return () => clearInterval(interval)
+  }, [clusteringStartedAt])
+
+  // Auto-dismiss result banner after 10s
+  useEffect(() => {
+    if (!lastResult) return
+    const timeout = setTimeout(() => setLastResult(null), 10000)
+    return () => clearTimeout(timeout)
+  }, [lastResult])
+
+  const handleRunClustering = () => {
+    setClusteringStartedAt(Date.now())
+    setElapsed(0)
+    setLastResult(null)
+    runClustering.mutate(undefined, {
+      onSuccess: (data) => {
+        setClusteringStartedAt(null)
+        setLastResult({
+          clusters_found: data.clusters_found,
+          ideas_clustered: data.ideas_clustered,
+          ideas_unclustered: data.ideas_unclustered,
+          at: Date.now(),
+        })
+      },
+      onError: () => {
+        setClusteringStartedAt(null)
+      },
+    })
+  }
 
   // Build cluster list
   const { clusters, unclustered, totalIdeas } = useMemo(() => {
@@ -137,8 +181,54 @@ export default function Ideas() {
           </p>
         </div>
 
+        {/* Clustering in progress — persistent overlay */}
+        {clusteringStartedAt && (
+          <div className="border-b border-gray-800 bg-blue-900/10 px-3 py-3">
+            <div className="flex items-start gap-2">
+              <Loader2 size={13} className="mt-0.5 flex-shrink-0 animate-spin text-blue-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-blue-200">
+                  Clustering {totalIdeas} ideas...
+                </p>
+                <p className="mt-0.5 text-[10px] text-blue-300/70">
+                  {elapsed}s elapsed · usually takes 20-40s
+                </p>
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-blue-950">
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${Math.min(95, (elapsed / 30) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Result banner — persists for 10s after completion */}
+        {!clusteringStartedAt && lastResult && (
+          <div className="border-b border-gray-800 bg-green-900/10 px-3 py-2.5">
+            <div className="flex items-start gap-2">
+              <Layers size={13} className="mt-0.5 flex-shrink-0 text-green-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-green-200">
+                  Clustering complete
+                </p>
+                <p className="mt-0.5 text-[10px] text-green-300/70">
+                  {lastResult.clusters_found} themes · {lastResult.ideas_clustered} grouped · {lastResult.ideas_unclustered} unclustered
+                </p>
+              </div>
+              <button
+                onClick={() => setLastResult(null)}
+                className="rounded p-0.5 text-green-400/60 hover:bg-green-900/30 hover:text-green-300"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Re-cluster suggestion when unclustered count is high */}
-        {unclustered.length > 20 && (
+        {!clusteringStartedAt && !lastResult && unclustered.length > 20 && (
           <div className="border-b border-gray-800 bg-amber-900/10 px-3 py-2.5">
             <div className="flex items-start gap-2">
               <Layers size={13} className="mt-0.5 flex-shrink-0 text-amber-400" />
@@ -147,27 +237,13 @@ export default function Ideas() {
                   {unclustered.length} ideas haven't been clustered yet.
                 </p>
                 <button
-                  onClick={() => runClustering.mutate()}
+                  onClick={handleRunClustering}
                   disabled={runClustering.isPending}
                   className="mt-1.5 flex items-center gap-1 rounded bg-amber-900/30 px-2 py-1 text-[11px] font-medium text-amber-200 hover:bg-amber-900/50 disabled:opacity-50"
                 >
-                  {runClustering.isPending ? (
-                    <>
-                      <Loader2 size={10} className="animate-spin" />
-                      Clustering...
-                    </>
-                  ) : (
-                    <>
-                      <Layers size={10} />
-                      Run clustering
-                    </>
-                  )}
+                  <Layers size={10} />
+                  Run clustering
                 </button>
-                {runClustering.isSuccess && (
-                  <p className="mt-1 text-[10px] text-amber-300/70">
-                    Found {runClustering.data?.clusters_found} clusters
-                  </p>
-                )}
               </div>
             </div>
           </div>
