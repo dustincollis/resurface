@@ -1,26 +1,17 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Lightbulb, Search, Eye, Check, X, Archive, ChevronDown, ChevronRight, Calendar, User, Building2 } from 'lucide-react'
-import { useIdeas, useUpdateIdeaStatus, usePromoteIdeaToGoal, usePromoteIdeaToPursuit } from '../hooks/useIdeas'
-import { useGoals } from '../hooks/useGoals'
-import { usePursuits } from '../hooks/usePursuits'
-import type { Idea, IdeaStatus, IdeaCategory } from '../lib/types'
-
-const STATUS_LABEL: Record<IdeaStatus, string> = {
-  surfaced: 'Surfaced',
-  exploring: 'Exploring',
-  accepted: 'Accepted',
-  dismissed: 'Dismissed',
-  archived: 'Archived',
-}
-
-const STATUS_STYLE: Record<IdeaStatus, string> = {
-  surfaced: 'bg-amber-900/30 text-amber-300',
-  exploring: 'bg-blue-900/30 text-blue-300',
-  accepted: 'bg-green-900/30 text-green-300',
-  dismissed: 'bg-gray-800 text-gray-500',
-  archived: 'bg-gray-800 text-gray-500',
-}
+import {
+  Lightbulb, X, Loader2, RefreshCw, FileText, Target, BarChart3, MapPin, TrendingUp,
+} from 'lucide-react'
+import { useIdeas, useUpdateIdeaStatus } from '../hooks/useIdeas'
+import {
+  useClusterReports,
+  useGenerateClusterReport,
+  REPORT_TYPE_LABELS,
+  REPORT_TYPE_DESCRIPTIONS,
+  type ClusterReportType,
+} from '../hooks/useClusterReports'
+import type { Idea, IdeaCategory } from '../lib/types'
 
 const CATEGORY_LABEL: Record<IdeaCategory, string> = {
   gtm_motion: 'GTM Motion',
@@ -34,249 +25,271 @@ const CATEGORY_LABEL: Record<IdeaCategory, string> = {
   other: 'Other',
 }
 
-const CATEGORY_STYLE: Record<IdeaCategory, string> = {
-  gtm_motion: 'bg-purple-900/30 text-purple-300',
-  selling_approach: 'bg-cyan-900/30 text-cyan-300',
-  partnership: 'bg-indigo-900/30 text-indigo-300',
-  positioning: 'bg-orange-900/30 text-orange-300',
-  campaign: 'bg-pink-900/30 text-pink-300',
-  bundling: 'bg-teal-900/30 text-teal-300',
-  product: 'bg-emerald-900/30 text-emerald-300',
-  process: 'bg-yellow-900/30 text-yellow-300',
-  other: 'bg-gray-800 text-gray-400',
+const REPORT_ICONS: Record<ClusterReportType, typeof FileText> = {
+  strategic_assessment: FileText,
+  action_plan: Target,
+  competitive_landscape: BarChart3,
+  account_map: MapPin,
+  trend_analysis: TrendingUp,
 }
 
-type ViewMode = 'status' | 'category' | 'cluster'
-type StatusFilter = 'active' | 'all' | IdeaStatus
+interface ClusterInfo {
+  id: string
+  label: string
+  ideas: Idea[]
+  companies: string[]
+  originators: string[]
+  dateRange: string
+  mostRecent: string
+}
 
 export default function Ideas() {
   const { data: ideas, isLoading } = useIdeas()
-  const [viewMode, setViewMode] = useState<ViewMode>('status')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
-  const [categoryFilter, setCategoryFilter] = useState<IdeaCategory | ''>('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
+  const [showUnclustered, setShowUnclustered] = useState(false)
 
-  const filtered = useMemo(() => {
-    if (!ideas) return []
-    let result = ideas
+  // Build cluster list
+  const { clusters, unclustered, totalIdeas } = useMemo(() => {
+    if (!ideas) return { clusters: [] as ClusterInfo[], unclustered: [] as Idea[], totalIdeas: 0 }
 
-    // Status filter
-    if (statusFilter === 'active') {
-      result = result.filter((i) => i.status === 'surfaced' || i.status === 'exploring')
-    } else if (statusFilter !== 'all') {
-      result = result.filter((i) => i.status === statusFilter)
+    const clusterMap = new Map<string, Idea[]>()
+    const unc: Idea[] = []
+
+    for (const idea of ideas) {
+      if (idea.cluster_id && idea.cluster_label) {
+        const existing = clusterMap.get(idea.cluster_id) || []
+        existing.push(idea)
+        clusterMap.set(idea.cluster_id, existing)
+      } else {
+        unc.push(idea)
+      }
     }
 
-    // Category filter
-    if (categoryFilter) {
-      result = result.filter((i) => i.category === categoryFilter)
+    const clusterList: ClusterInfo[] = []
+    for (const [id, clusterIdeas] of clusterMap) {
+      const label = clusterIdeas[0].cluster_label!
+      const companies = [...new Set(clusterIdeas.map((i) => i.company_name).filter(Boolean) as string[])]
+      const originators = [...new Set(clusterIdeas.map((i) => i.originated_by).filter(Boolean) as string[])]
+      const dates = clusterIdeas.map((i) => i.created_at).sort()
+      const earliest = new Date(dates[0]).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      const latest = new Date(dates[dates.length - 1]).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      const dateRange = earliest === latest ? earliest : `${earliest} – ${latest}`
+
+      clusterList.push({
+        id,
+        label,
+        ideas: clusterIdeas,
+        companies,
+        originators,
+        dateRange,
+        mostRecent: dates[dates.length - 1],
+      })
     }
 
-    // Search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(
-        (i) =>
-          i.title.toLowerCase().includes(q) ||
-          i.description?.toLowerCase().includes(q) ||
-          i.company_name?.toLowerCase().includes(q) ||
-          i.originated_by?.toLowerCase().includes(q)
-      )
-    }
+    // Sort by idea count desc
+    clusterList.sort((a, b) => b.ideas.length - a.ideas.length)
 
-    return result
-  }, [ideas, statusFilter, categoryFilter, searchQuery])
-
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { surfaced: 0, exploring: 0, accepted: 0, dismissed: 0, archived: 0 }
-    for (const i of ideas ?? []) c[i.status] = (c[i.status] || 0) + 1
-    return c
+    return { clusters: clusterList, unclustered: unc, totalIdeas: ideas.length }
   }, [ideas])
 
-  const grouped = useMemo(() => {
-    const groups: Record<string, Idea[]> = {}
-    for (const i of filtered) {
-      let key: string
-      if (viewMode === 'status') {
-        key = i.status
-      } else if (viewMode === 'category') {
-        key = i.category || 'other'
-      } else {
-        key = i.cluster_label || 'Unclustered'
-      }
-      if (!groups[key]) groups[key] = []
-      groups[key].push(i)
-    }
-    // For cluster view, sort by group size descending
-    if (viewMode === 'cluster') {
-      const sorted: Record<string, Idea[]> = {}
-      const entries = Object.entries(groups).sort((a, b) => {
-        if (a[0] === 'Unclustered') return 1
-        if (b[0] === 'Unclustered') return -1
-        return b[1].length - a[1].length
-      })
-      for (const [k, v] of entries) sorted[k] = v
-      return sorted
-    }
-    return groups
-  }, [filtered, viewMode])
+  // Auto-select first cluster
+  const selectedCluster = useMemo(() => {
+    if (showUnclustered) return null
+    if (selectedClusterId) return clusters.find((c) => c.id === selectedClusterId) || null
+    return clusters[0] || null
+  }, [clusters, selectedClusterId, showUnclustered])
 
-  return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Ideas</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Strategic concepts surfaced from meetings. Explore, promote to goals or pursuits, or dismiss.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {counts.surfaced > 0 && (
-            <span className="rounded-full bg-amber-900/30 px-3 py-1 text-xs text-amber-300">
-              {counts.surfaced} new
-            </span>
-          )}
-          {counts.exploring > 0 && (
-            <span className="rounded-full bg-blue-900/30 px-3 py-1 text-xs text-blue-300">
-              {counts.exploring} exploring
-            </span>
-          )}
-        </div>
-      </div>
+  const accountCount = useMemo(() => {
+    const all = new Set<string>()
+    for (const c of clusters) for (const co of c.companies) all.add(co)
+    return all.size
+  }, [clusters])
 
-      {/* Filters bar */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-2.5 top-2 text-gray-500" />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search ideas..."
-            className="w-full rounded-lg border border-gray-800 bg-gray-900 py-1.5 pl-8 pr-3 text-sm text-white placeholder-gray-600 focus:border-gray-600 focus:outline-none"
-          />
-        </div>
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-gray-500">Loading...</div>
+    )
+  }
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-          className="rounded-lg border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 focus:border-gray-600 focus:outline-none"
-        >
-          <option value="active">Active (surfaced + exploring)</option>
-          <option value="all">All statuses</option>
-          <option value="surfaced">Surfaced</option>
-          <option value="exploring">Exploring</option>
-          <option value="accepted">Accepted</option>
-          <option value="dismissed">Dismissed</option>
-          <option value="archived">Archived</option>
-        </select>
-
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value as IdeaCategory | '')}
-          className="rounded-lg border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 focus:border-gray-600 focus:outline-none"
-        >
-          <option value="">All categories</option>
-          {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-
-        <div className="flex rounded-lg border border-gray-800">
-          <button
-            onClick={() => setViewMode('status')}
-            className={`px-2.5 py-1.5 text-xs ${viewMode === 'status' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-          >
-            Status
-          </button>
-          <button
-            onClick={() => setViewMode('category')}
-            className={`px-2.5 py-1.5 text-xs ${viewMode === 'category' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-          >
-            Category
-          </button>
-          <button
-            onClick={() => setViewMode('cluster')}
-            className={`px-2.5 py-1.5 text-xs ${viewMode === 'cluster' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-          >
-            Clusters
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
-      {isLoading ? (
-        <div className="text-sm text-gray-500">Loading...</div>
-      ) : filtered.length === 0 ? (
+  if (!ideas || ideas.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl">
         <div className="rounded-xl border border-dashed border-gray-800 px-6 py-16 text-center">
           <Lightbulb size={32} className="mx-auto text-gray-700" />
-          <h2 className="mt-3 text-sm font-medium text-gray-400">
-            {(ideas?.length ?? 0) === 0 ? 'No ideas yet' : 'No ideas match your filters'}
-          </h2>
+          <h2 className="mt-3 text-sm font-medium text-gray-400">No ideas yet</h2>
           <p className="mt-1 text-xs text-gray-600">
-            {(ideas?.length ?? 0) === 0
-              ? 'Ideas are extracted from meeting transcripts during AI parsing.'
-              : 'Try broadening your filters.'}
+            Ideas are extracted from meeting transcripts during AI parsing.
           </p>
         </div>
-      ) : (
-        <div className="space-y-6">
-          {Object.entries(grouped).map(([key, items]) => {
-            const title = viewMode === 'status'
-              ? STATUS_LABEL[key as IdeaStatus] || key
-              : viewMode === 'category'
-                ? CATEGORY_LABEL[key as IdeaCategory] || key
-                : key
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex -m-6 h-[calc(100%+48px)]">
+      {/* Left panel: Cluster navigator */}
+      <div className="flex w-72 flex-shrink-0 flex-col border-r border-gray-800">
+        <div className="border-b border-gray-800 px-4 py-3">
+          <h1 className="text-lg font-semibold text-white">Ideas</h1>
+          <p className="mt-0.5 text-xs text-gray-500">
+            {totalIdeas} ideas from {accountCount} accounts — {clusters.length} themes identified
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="space-y-0.5 p-2">
+            {clusters.map((cluster) => {
+              const isActive = selectedCluster?.id === cluster.id && !showUnclustered
+              return (
+                <button
+                  key={cluster.id}
+                  onClick={() => { setSelectedClusterId(cluster.id); setShowUnclustered(false) }}
+                  className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
+                    isActive
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium leading-tight">{cluster.label}</span>
+                      <span className="flex-shrink-0 rounded-full bg-gray-700/50 px-1.5 py-0.5 text-[10px] text-gray-400">
+                        {cluster.ideas.length}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-gray-600">
+                      {cluster.companies.length > 0 ? cluster.companies.slice(0, 3).join(', ') : 'General'}
+                      {cluster.companies.length > 3 && ` +${cluster.companies.length - 3}`}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Unclustered */}
+          {unclustered.length > 0 && (
+            <div className="border-t border-gray-800 p-2">
+              <button
+                onClick={() => { setShowUnclustered(true); setSelectedClusterId(null) }}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  showUnclustered
+                    ? 'bg-gray-800 text-white'
+                    : 'text-gray-500 hover:bg-gray-800/50 hover:text-gray-300'
+                }`}
+              >
+                <span className="flex-1">Unclustered</span>
+                <span className="rounded-full bg-gray-700/50 px-1.5 py-0.5 text-[10px] text-gray-500">
+                  {unclustered.length}
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right panel: Detail view */}
+      <div className="flex-1 overflow-y-auto">
+        {showUnclustered ? (
+          <UnclusteredView ideas={unclustered} />
+        ) : selectedCluster ? (
+          <ClusterDetailView cluster={selectedCluster} />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-gray-600">
+            Select a cluster to explore
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Cluster Detail View
+// ============================================================
+
+function ClusterDetailView({ cluster }: { cluster: ClusterInfo }) {
+  const [activeReport, setActiveReport] = useState<ClusterReportType | null>(null)
+  const [expandedIdeaId, setExpandedIdeaId] = useState<string | null>(null)
+
+  return (
+    <div className="p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-white">{cluster.label}</h2>
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+          <span>{cluster.ideas.length} ideas</span>
+          <span>·</span>
+          <span>{cluster.originators.length} originators</span>
+          <span>·</span>
+          <span>{cluster.companies.length} accounts</span>
+          <span>·</span>
+          <span>{cluster.dateRange}</span>
+        </div>
+        {cluster.companies.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {cluster.companies.map((co) => (
+              <span key={co} className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+                {co}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Ideas timeline */}
+      <div className="mb-6">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-600">Ideas</h3>
+        <div className="space-y-0.5">
+          {cluster.ideas.map((idea) => (
+            <IdeaTimelineRow
+              key={idea.id}
+              idea={idea}
+              expanded={expandedIdeaId === idea.id}
+              onToggle={() => setExpandedIdeaId(expandedIdeaId === idea.id ? null : idea.id)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Report actions */}
+      <div className="mb-4">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-600">Analysis</h3>
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(REPORT_TYPE_LABELS) as ClusterReportType[]).map((type) => {
+            const Icon = REPORT_ICONS[type]
+            const isActive = activeReport === type
             return (
-              <IdeaSection
-                key={key}
-                title={title}
-                ideas={items}
-                expandedId={expandedId}
-                onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
-                dim={key === 'dismissed' || key === 'archived' || key === 'Unclustered'}
-              />
+              <button
+                key={type}
+                onClick={() => setActiveReport(isActive ? null : type)}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                  isActive
+                    ? 'border-gray-600 bg-gray-800 text-white'
+                    : 'border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-300'
+                }`}
+              >
+                <Icon size={13} />
+                {REPORT_TYPE_LABELS[type]}
+              </button>
             )
           })}
         </div>
+      </div>
+
+      {/* Report content */}
+      {activeReport && (
+        <ReportPanel clusterId={cluster.id} reportType={activeReport} />
       )}
     </div>
   )
 }
 
-function IdeaSection({
-  title,
-  ideas,
-  expandedId,
-  onToggle,
-  dim = false,
-}: {
-  title: string
-  ideas: Idea[]
-  expandedId: string | null
-  onToggle: (id: string) => void
-  dim?: boolean
-}) {
-  return (
-    <section className={dim ? 'opacity-60' : ''}>
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
-        {title} ({ideas.length})
-      </h2>
-      <div className="space-y-2">
-        {ideas.map((idea) => (
-          <IdeaCard
-            key={idea.id}
-            idea={idea}
-            expanded={expandedId === idea.id}
-            onToggle={() => onToggle(idea.id)}
-          />
-        ))}
-      </div>
-    </section>
-  )
-}
+// ============================================================
+// Idea Timeline Row
+// ============================================================
 
-function IdeaCard({
+function IdeaTimelineRow({
   idea,
   expanded,
   onToggle,
@@ -286,208 +299,280 @@ function IdeaCard({
   onToggle: () => void
 }) {
   const updateStatus = useUpdateIdeaStatus()
-  const promoteToGoal = usePromoteIdeaToGoal()
-  const promoteToPursuit = usePromoteIdeaToPursuit()
-  const { data: goals } = useGoals()
-  const { data: pursuits } = usePursuits()
-  const [showPromote, setShowPromote] = useState(false)
-
+  const date = new Date(idea.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   const category = idea.category as IdeaCategory | null
 
-  const meetingDate = idea.created_at
-    ? new Date(idea.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    : null
-
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900 transition-colors hover:border-gray-700">
-      {/* Header row — always visible */}
+    <div className={`rounded-lg transition-colors ${expanded ? 'bg-gray-900 border border-gray-800' : 'hover:bg-gray-900/50'}`}>
       <button
         onClick={onToggle}
-        className="flex w-full items-start gap-3 px-4 py-3 text-left"
+        className="flex w-full items-center gap-3 px-3 py-2 text-left"
       >
-        <Lightbulb size={16} className="mt-0.5 flex-shrink-0 text-amber-400" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white">{idea.title}</span>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${STATUS_STYLE[idea.status]}`}>
-              {STATUS_LABEL[idea.status]}
-            </span>
-            {category && (
-              <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${CATEGORY_STYLE[category]}`}>
-                {CATEGORY_LABEL[category]}
-              </span>
-            )}
-            {idea.company_name && (
-              <span className="flex items-center gap-0.5 text-[10px] text-gray-500">
-                <Building2 size={9} />
-                {idea.company_name}
-              </span>
-            )}
-            {idea.originated_by && (
-              <span className="flex items-center gap-0.5 text-[10px] text-gray-500">
-                <User size={9} />
-                {idea.originated_by}
-              </span>
-            )}
-          </div>
-        </div>
-        {expanded ? (
-          <ChevronDown size={14} className="mt-1 flex-shrink-0 text-gray-600" />
-        ) : (
-          <ChevronRight size={14} className="mt-1 flex-shrink-0 text-gray-600" />
+        <span className="w-12 flex-shrink-0 text-[11px] text-gray-600">{date}</span>
+        <span className="w-20 flex-shrink-0 truncate text-[11px] text-gray-500">
+          {idea.originated_by || '—'}
+        </span>
+        {idea.company_name && (
+          <span className="flex-shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+            {idea.company_name}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate text-sm text-gray-200">{idea.title}</span>
+        {idea.status === 'exploring' && (
+          <span className="flex-shrink-0 rounded bg-blue-900/30 px-1 py-0.5 text-[9px] text-blue-300">exploring</span>
+        )}
+        {idea.status === 'accepted' && (
+          <span className="flex-shrink-0 rounded bg-green-900/30 px-1 py-0.5 text-[9px] text-green-300">accepted</span>
         )}
       </button>
 
-      {/* Expanded detail */}
       {expanded && (
-        <div className="border-t border-gray-800 px-4 py-3">
+        <div className="border-t border-gray-800 px-3 py-3">
           {idea.description && (
-            <p className="mb-3 text-sm text-gray-300">{idea.description}</p>
+            <p className="mb-2 text-sm text-gray-300">{idea.description}</p>
           )}
-
           {idea.evidence_text && (
-            <div className="mb-3 rounded border border-gray-800 bg-gray-950 px-3 py-2">
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">Evidence</div>
-              <p className="text-xs italic text-gray-400">"{idea.evidence_text}"</p>
-            </div>
+            <p className="mb-2 text-xs italic text-gray-500">"{idea.evidence_text}"</p>
           )}
-
-          <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-            {meetingDate && (
-              <span className="flex items-center gap-1">
-                <Calendar size={11} />
-                {meetingDate}
+          <div className="flex flex-wrap items-center gap-2">
+            {category && (
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+                {CATEGORY_LABEL[category]}
               </span>
             )}
             {idea.source_meeting_id && (
               <Link
                 to={`/meetings/${idea.source_meeting_id}`}
-                className="text-blue-400 hover:text-blue-300"
-                onClick={(e) => e.stopPropagation()}
+                className="text-[11px] text-blue-400 hover:text-blue-300"
               >
-                View meeting
+                Source meeting
               </Link>
             )}
-            {idea.promoted_to_goal_id && (
-              <Link
-                to={`/goals/${idea.promoted_to_goal_id}`}
-                className="text-purple-400 hover:text-purple-300"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Linked to goal
-              </Link>
-            )}
-            {idea.promoted_to_pursuit_id && (
-              <Link
-                to={`/pursuits/${idea.promoted_to_pursuit_id}`}
-                className="text-purple-400 hover:text-purple-300"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Linked to pursuit
-              </Link>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            {idea.status === 'surfaced' && (
-              <>
-                <button
-                  onClick={() => updateStatus.mutate({ id: idea.id, status: 'exploring' })}
-                  className="flex items-center gap-1 rounded-lg bg-blue-600/20 px-2.5 py-1.5 text-xs text-blue-300 hover:bg-blue-600/30"
-                >
-                  <Eye size={12} />
-                  Explore
-                </button>
-                <button
-                  onClick={() => updateStatus.mutate({ id: idea.id, status: 'dismissed' })}
-                  className="flex items-center gap-1 rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:bg-gray-700"
-                >
-                  <X size={12} />
-                  Dismiss
-                </button>
-              </>
-            )}
-            {(idea.status === 'surfaced' || idea.status === 'exploring') && (
-              <button
-                onClick={() => setShowPromote(!showPromote)}
-                className="flex items-center gap-1 rounded-lg bg-green-600/20 px-2.5 py-1.5 text-xs text-green-300 hover:bg-green-600/30"
-              >
-                <Check size={12} />
-                Promote
-              </button>
-            )}
-            {idea.status === 'exploring' && (
-              <button
-                onClick={() => updateStatus.mutate({ id: idea.id, status: 'archived' })}
-                className="flex items-center gap-1 rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:bg-gray-700"
-              >
-                <Archive size={12} />
-                Shelve
-              </button>
-            )}
-            {(idea.status === 'dismissed' || idea.status === 'archived') && (
-              <button
-                onClick={() => updateStatus.mutate({ id: idea.id, status: 'surfaced' })}
-                className="flex items-center gap-1 rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:bg-gray-700"
-              >
-                Resurface
-              </button>
-            )}
-          </div>
-
-          {/* Promote panel */}
-          {showPromote && (
-            <div className="mt-3 space-y-2 rounded-lg border border-gray-800 bg-gray-950 p-3">
-              <div className="text-[10px] uppercase tracking-wider text-gray-500">Promote to...</div>
-              {(goals ?? []).length > 0 && (
-                <div>
-                  <div className="mb-1 text-xs text-gray-400">Goal</div>
-                  <div className="flex flex-wrap gap-1">
-                    {(goals ?? []).filter((g) => g.status === 'active').map((g) => (
-                      <button
-                        key={g.id}
-                        onClick={() => {
-                          promoteToGoal.mutate({ ideaId: idea.id, goalId: g.id })
-                          setShowPromote(false)
-                        }}
-                        className="rounded bg-purple-900/30 px-2 py-1 text-xs text-purple-300 hover:bg-purple-900/50"
-                      >
-                        {g.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            <div className="ml-auto flex gap-1">
+              {idea.status === 'surfaced' && (
+                <>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); updateStatus.mutate({ id: idea.id, status: 'exploring' }) }}
+                    className="rounded bg-blue-900/30 px-2 py-1 text-[10px] text-blue-300 hover:bg-blue-900/50"
+                  >
+                    Explore
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); updateStatus.mutate({ id: idea.id, status: 'dismissed' }) }}
+                    className="rounded bg-gray-800 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-700"
+                  >
+                    Dismiss
+                  </button>
+                </>
               )}
-              {(pursuits ?? []).length > 0 && (
-                <div>
-                  <div className="mb-1 text-xs text-gray-400">Pursuit</div>
-                  <div className="flex flex-wrap gap-1">
-                    {(pursuits ?? []).filter((p) => p.status === 'active').map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          promoteToPursuit.mutate({ ideaId: idea.id, pursuitId: p.id })
-                          setShowPromote(false)
-                        }}
-                        className="rounded bg-indigo-900/30 px-2 py-1 text-xs text-indigo-300 hover:bg-indigo-900/50"
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(goals ?? []).filter((g) => g.status === 'active').length === 0 &&
-                (pursuits ?? []).filter((p) => p.status === 'active').length === 0 && (
-                <p className="text-xs text-gray-500">No active goals or pursuits to promote to.</p>
+              {idea.status === 'exploring' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); updateStatus.mutate({ id: idea.id, status: 'archived' }) }}
+                  className="rounded bg-gray-800 px-2 py-1 text-[10px] text-gray-500 hover:bg-gray-700"
+                >
+                  Shelve
+                </button>
               )}
             </div>
-          )}
+          </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ============================================================
+// Report Panel
+// ============================================================
+
+function ReportPanel({
+  clusterId,
+  reportType,
+}: {
+  clusterId: string
+  reportType: ClusterReportType
+}) {
+  const { data: cachedReports } = useClusterReports(clusterId)
+  const generateReport = useGenerateClusterReport()
+
+  const cached = cachedReports?.find((r) => r.report_type === reportType)
+  const isGenerating = generateReport.isPending
+
+  const handleGenerate = (regenerate = false) => {
+    generateReport.mutate({ cluster_id: clusterId, report_type: reportType, regenerate })
+  }
+
+  // Auto-generate if no cache
+  if (!cached && !isGenerating && !generateReport.data && !generateReport.error) {
+    // Show generate button instead of auto-firing
+    return (
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 text-center">
+        <p className="mb-3 text-sm text-gray-400">
+          {REPORT_TYPE_DESCRIPTIONS[reportType]}
+        </p>
+        <button
+          onClick={() => handleGenerate()}
+          className="rounded-lg bg-gray-800 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+        >
+          Generate {REPORT_TYPE_LABELS[reportType]}
+        </button>
+      </div>
+    )
+  }
+
+  if (isGenerating) {
+    return (
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          <Loader2 size={14} className="animate-spin" />
+          Generating {REPORT_TYPE_LABELS[reportType]}...
+        </div>
+      </div>
+    )
+  }
+
+  const content = generateReport.data?.content || cached?.content
+  const generatedAt = generateReport.data?.generated_at || cached?.generated_at
+
+  if (generateReport.error) {
+    return (
+      <div className="rounded-xl border border-red-900/30 bg-red-950/20 p-4">
+        <p className="text-sm text-red-300">Failed to generate report. Try again.</p>
+        <button
+          onClick={() => handleGenerate(true)}
+          className="mt-2 rounded bg-gray-800 px-3 py-1 text-xs text-gray-300 hover:bg-gray-700"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (!content) return null
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900">
+      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-2">
+        <span className="text-xs font-medium text-gray-400">{REPORT_TYPE_LABELS[reportType]}</span>
+        <div className="flex items-center gap-2">
+          {generatedAt && (
+            <span className="text-[10px] text-gray-600">
+              {new Date(generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+          )}
+          <button
+            onClick={() => handleGenerate(true)}
+            disabled={isGenerating}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+          >
+            <RefreshCw size={10} />
+            Regenerate
+          </button>
+        </div>
+      </div>
+      <div className="prose-invert p-5">
+        <ReportContent content={content} />
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Report Markdown Renderer
+// ============================================================
+
+function ReportContent({ content }: { content: string }) {
+  // Simple markdown-ish rendering: headers, bold, paragraphs
+  const lines = content.split('\n')
+  const elements: React.ReactNode[] = []
+  let key = 0
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      elements.push(<div key={key++} className="h-3" />)
+      continue
+    }
+    if (trimmed.startsWith('## ')) {
+      elements.push(
+        <h3 key={key++} className="mb-2 mt-4 text-sm font-semibold text-white first:mt-0">
+          {trimmed.replace('## ', '')}
+        </h3>
+      )
+    } else if (trimmed.startsWith('# ')) {
+      elements.push(
+        <h2 key={key++} className="mb-3 mt-4 text-base font-semibold text-white first:mt-0">
+          {trimmed.replace('# ', '')}
+        </h2>
+      )
+    } else if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
+      elements.push(
+        <p key={key++} className="mb-1 mt-3 text-sm font-semibold text-gray-200">
+          {trimmed.replace(/\*\*/g, '')}
+        </p>
+      )
+    } else {
+      // Render inline bold
+      const parts = trimmed.split(/(\*\*[^*]+\*\*)/g)
+      elements.push(
+        <p key={key++} className="mb-2 text-sm leading-relaxed text-gray-300">
+          {parts.map((part, i) =>
+            part.startsWith('**') && part.endsWith('**') ? (
+              <strong key={i} className="font-semibold text-white">
+                {part.replace(/\*\*/g, '')}
+              </strong>
+            ) : (
+              part
+            )
+          )}
+        </p>
+      )
+    }
+  }
+
+  return <>{elements}</>
+}
+
+// ============================================================
+// Unclustered View
+// ============================================================
+
+function UnclusteredView({ ideas }: { ideas: Idea[] }) {
+  const updateStatus = useUpdateIdeaStatus()
+
+  return (
+    <div className="p-6">
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-white">Unclustered Ideas</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          {ideas.length} ideas that haven't been grouped into themes yet. Re-run clustering after more meetings are parsed to pick these up.
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        {ideas.map((idea) => {
+          const date = new Date(idea.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          return (
+            <div key={idea.id} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-900/50">
+              <span className="w-12 flex-shrink-0 text-[11px] text-gray-600">{date}</span>
+              {idea.company_name && (
+                <span className="flex-shrink-0 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+                  {idea.company_name}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm text-gray-300">{idea.title}</span>
+              {idea.status === 'surfaced' && (
+                <button
+                  onClick={() => updateStatus.mutate({ id: idea.id, status: 'dismissed' })}
+                  className="flex-shrink-0 rounded bg-gray-800 p-1 text-gray-600 hover:bg-gray-700 hover:text-gray-400"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
