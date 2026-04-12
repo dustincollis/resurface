@@ -46,7 +46,7 @@ const CATEGORY_STYLE: Record<IdeaCategory, string> = {
   other: 'bg-gray-800 text-gray-400',
 }
 
-type ViewMode = 'status' | 'category'
+type ViewMode = 'status' | 'category' | 'cluster'
 type StatusFilter = 'active' | 'all' | IdeaStatus
 
 export default function Ideas() {
@@ -95,23 +95,31 @@ export default function Ideas() {
   }, [ideas])
 
   const grouped = useMemo(() => {
-    if (viewMode === 'status') {
-      const groups: Record<string, Idea[]> = {}
-      for (const i of filtered) {
-        const key = i.status
-        if (!groups[key]) groups[key] = []
-        groups[key].push(i)
+    const groups: Record<string, Idea[]> = {}
+    for (const i of filtered) {
+      let key: string
+      if (viewMode === 'status') {
+        key = i.status
+      } else if (viewMode === 'category') {
+        key = i.category || 'other'
+      } else {
+        key = i.cluster_label || 'Unclustered'
       }
-      return groups
-    } else {
-      const groups: Record<string, Idea[]> = {}
-      for (const i of filtered) {
-        const key = i.category || 'other'
-        if (!groups[key]) groups[key] = []
-        groups[key].push(i)
-      }
-      return groups
+      if (!groups[key]) groups[key] = []
+      groups[key].push(i)
     }
+    // For cluster view, sort by group size descending
+    if (viewMode === 'cluster') {
+      const sorted: Record<string, Idea[]> = {}
+      const entries = Object.entries(groups).sort((a, b) => {
+        if (a[0] === 'Unclustered') return 1
+        if (b[0] === 'Unclustered') return -1
+        return b[1].length - a[1].length
+      })
+      for (const [k, v] of entries) sorted[k] = v
+      return sorted
+    }
+    return groups
   }, [filtered, viewMode])
 
   return (
@@ -179,13 +187,19 @@ export default function Ideas() {
             onClick={() => setViewMode('status')}
             className={`px-2.5 py-1.5 text-xs ${viewMode === 'status' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
           >
-            By status
+            Status
           </button>
           <button
             onClick={() => setViewMode('category')}
             className={`px-2.5 py-1.5 text-xs ${viewMode === 'category' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
           >
-            By category
+            Category
+          </button>
+          <button
+            onClick={() => setViewMode('cluster')}
+            className={`px-2.5 py-1.5 text-xs ${viewMode === 'cluster' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            Clusters
           </button>
         </div>
       </div>
@@ -207,16 +221,23 @@ export default function Ideas() {
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(grouped).map(([key, items]) => (
-            <IdeaSection
-              key={key}
-              title={viewMode === 'status' ? STATUS_LABEL[key as IdeaStatus] || key : CATEGORY_LABEL[key as IdeaCategory] || key}
-              ideas={items}
-              expandedId={expandedId}
-              onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
-              dim={key === 'dismissed' || key === 'archived'}
-            />
-          ))}
+          {Object.entries(grouped).map(([key, items]) => {
+            const title = viewMode === 'status'
+              ? STATUS_LABEL[key as IdeaStatus] || key
+              : viewMode === 'category'
+                ? CATEGORY_LABEL[key as IdeaCategory] || key
+                : key
+            return (
+              <IdeaSection
+                key={key}
+                title={title}
+                ideas={items}
+                expandedId={expandedId}
+                onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
+                dim={key === 'dismissed' || key === 'archived' || key === 'Unclustered'}
+              />
+            )
+          })}
         </div>
       )}
     </div>
