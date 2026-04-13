@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: parseMode === "historical" ? 8192 : 4096,
+        max_tokens: parseMode === "historical" ? 8192 : 8192,
         temperature: 0.3,
         messages: [{ role: "user", content: prompt }],
       }),
