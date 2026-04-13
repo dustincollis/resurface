@@ -238,6 +238,8 @@ function nextBusinessDay(from: Date): Date {
   if (day === 5) result.setDate(result.getDate() + 3)       // Fri → Mon
   else if (day === 6) result.setDate(result.getDate() + 2)  // Sat → Mon
   else result.setDate(result.getDate() + 1)                 // Sun-Thu → next day
+  // Snooze until start of day so items reappear first thing in the morning
+  result.setHours(0, 0, 0, 0)
   return result
 }
 
