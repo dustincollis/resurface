@@ -340,36 +340,40 @@ Deno.serve(async (req) => {
       console.warn("[jamie-webhook] identity resolution warning:", linkErr);
     }
 
-    // ----- Invoke parser — fire and forget -----
-    // The previous approach awaited the parser response, which was failing
-    // silently (timeout, network flakiness between edge functions, Claude
-    // overload). The webhook doesn't need the parse result — the meeting
-    // row is already created. So we fire the fetch and return immediately.
-    //
-    // If the parse fails, the compute-staleness cron job will pick up
-    // meetings with processed_at IS NULL and re-trigger parsing as a
-    // safety net.
-    fetch(`${supabaseUrl}/functions/v1/ai-parse-transcript`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-      body: JSON.stringify({
-        meeting_id: meetingId,
-        transcript: formattedTranscript,
-      }),
-    }).then((res) => {
-      if (!res.ok) {
-        res.text().then((detail) => {
-          console.error("[jamie-webhook] parser invocation failed:", res.status, detail.substring(0, 500));
-        });
+    // ----- Invoke parser (awaited) -----
+    // Must await the parser call — Deno.serve kills the isolate once the
+    // Response is returned, so fire-and-forget fetch never completes.
+    // Use AbortSignal.timeout to stay within Supabase's 60s edge function
+    // limit. If the parser fails, compute-staleness will retry later.
+    let parseStatus = "pending";
+    try {
+      const parseRes = await fetch(
+        `${supabaseUrl}/functions/v1/ai-parse-transcript`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify({
+            meeting_id: meetingId,
+            transcript: formattedTranscript,
+          }),
+          signal: AbortSignal.timeout(55000),
+        }
+      );
+      if (parseRes.ok) {
+        parseStatus = "success";
+        console.log("[jamie-webhook] parser succeeded for", meetingId);
       } else {
-        console.log("[jamie-webhook] parser invocation succeeded for", meetingId);
+        const detail = await parseRes.text().catch(() => "");
+        parseStatus = "failed";
+        console.error("[jamie-webhook] parser failed:", parseRes.status, detail.substring(0, 500));
       }
-    }).catch((err) => {
-      console.error("[jamie-webhook] parser fetch error:", err);
-    });
+    } catch (err) {
+      parseStatus = "failed";
+      console.error("[jamie-webhook] parser error:", err);
+    }
 
     return new Response(
       JSON.stringify({
@@ -379,7 +383,7 @@ Deno.serve(async (req) => {
         title,
         attendees,
         segments_count: segments.length,
-        parse_status: "triggered_async",
+        parse_status: parseStatus,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

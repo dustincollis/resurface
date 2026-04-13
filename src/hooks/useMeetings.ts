@@ -50,8 +50,8 @@ export function useMeetings() {
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
-        .not('processed_at', 'is', null)
-        .order('start_time', { ascending: false })
+        .or('processed_at.not.is.null,transcript.not.is.null')
+        .order('start_time', { ascending: false, nullsFirst: false })
         .limit(50)
       if (error) throw error
       return data as Meeting[]

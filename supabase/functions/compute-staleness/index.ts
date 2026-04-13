@@ -74,8 +74,46 @@ Deno.serve(async (req) => {
       .update({ staleness_score: 0 })
       .in("status", ["done", "dropped"]);
 
+    // ----- Safety net: retry unprocessed meetings -----
+    // Meetings that have a transcript but were never parsed (e.g. because
+    // the jamie-webhook parser call timed out or failed).
+    const fiveMinAgo = new Date(now - 5 * 60 * 1000).toISOString();
+    const { data: unprocessed } = await adminClient
+      .from("meetings")
+      .select("id")
+      .is("processed_at", null)
+      .not("transcript", "is", null)
+      .lt("created_at", fiveMinAgo)
+      .limit(5);
+
+    let parsedCount = 0;
+    for (const meeting of unprocessed ?? []) {
+      try {
+        const parseRes = await fetch(
+          `${supabaseUrl}/functions/v1/ai-parse-transcript`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${serviceRoleKey}`,
+            },
+            body: JSON.stringify({ meeting_id: meeting.id }),
+            signal: AbortSignal.timeout(55000),
+          }
+        );
+        if (parseRes.ok) {
+          parsedCount++;
+          console.log("[compute-staleness] retried parse for", meeting.id);
+        } else {
+          console.error("[compute-staleness] retry failed for", meeting.id, parseRes.status);
+        }
+      } catch (err) {
+        console.error("[compute-staleness] retry error for", meeting.id, err);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ updated: updatedCount }),
+      JSON.stringify({ updated: updatedCount, retried_parses: parsedCount }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }

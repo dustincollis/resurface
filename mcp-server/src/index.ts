@@ -380,9 +380,9 @@ server.tool(
         .select(
           'id, title, start_time, end_time, location, attendees, transcript_summary, processed_at'
         )
-        .gte('start_time', start)
-        .lte('start_time', end)
-        .order('start_time', { ascending: false })
+        .or(`start_time.gte.${start},start_time.is.null`)
+        .or(`start_time.lte.${end},start_time.is.null`)
+        .order('start_time', { ascending: false, nullsFirst: false })
         .limit(limit)
 
       if (error) throw error

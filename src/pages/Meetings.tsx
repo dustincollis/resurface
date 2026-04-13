@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Calendar, FileText, Trash2, Upload, Archive, Radio, Loader2, Check, X, AlertCircle, Link2 } from 'lucide-react'
+import { Plus, Calendar, FileText, Trash2, Upload, Archive, Radio, Loader2, Check, X, AlertCircle, Link2, RotateCw } from 'lucide-react'
 import {
   useMeetings,
   useCreateMeeting,
@@ -619,9 +619,27 @@ export default function Meetings() {
                         </div>
                       )}
                     </div>
-                    {meeting.transcript_summary && (
+                    {meeting.transcript_summary ? (
                       <FileText size={14} className="flex-shrink-0 text-purple-400" />
-                    )}
+                    ) : meeting.transcript && !meeting.processed_at ? (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            await supabase.functions.invoke('ai-parse-transcript', {
+                              body: { meeting_id: meeting.id },
+                            })
+                          } catch {
+                            // ignore — will retry via cron
+                          }
+                        }}
+                        className="flex flex-shrink-0 items-center gap-1 rounded bg-yellow-900/30 px-1.5 py-0.5 text-[10px] text-yellow-400 hover:bg-yellow-900/50"
+                        title="Parse pending — click to retry"
+                      >
+                        <RotateCw size={9} />
+                        Pending
+                      </button>
+                    ) : null}
                     <button
                       onClick={(e) => handleDelete(e, meeting.id)}
                       className="flex-shrink-0 rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-red-400"
