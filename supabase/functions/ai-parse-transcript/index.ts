@@ -247,7 +247,10 @@ Deno.serve(async (req) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        // Active/real-time parses go to Opus for sharper extraction on a
+        // small volume of live meetings. Historical batch stays on Sonnet
+        // to keep backfill cost reasonable (770+ meetings × 6x cost).
+        model: parseMode === "historical" ? "claude-sonnet-4-6" : "claude-opus-4-6",
         max_tokens: 16384,
         temperature: 0.3,
         messages: [{ role: "user", content: prompt }],
