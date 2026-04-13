@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: parseMode === "historical" ? 8192 : 8192,
+        max_tokens: 16384,
         temperature: 0.3,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -272,6 +272,11 @@ Deno.serve(async (req) => {
 
     const aiResponse = await response.json();
     const rawContent = aiResponse.content?.[0]?.text ?? "";
+    const stopReason = aiResponse.stop_reason;
+
+    if (stopReason === "max_tokens") {
+      console.warn("[ai-parse-transcript] response truncated (max_tokens) for meeting", meeting_id);
+    }
 
     // Strip any code fence wrapping the model might have added
     let cleanContent = rawContent.trim();
