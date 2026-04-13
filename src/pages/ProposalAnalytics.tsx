@@ -18,6 +18,7 @@ const ACTION_LABEL: Record<ProposalReviewAction, string> = {
   merge: 'Merged',
   not_actionable: 'Not actionable',
   dismiss_banter: 'Dismissed (banter)',
+  assigned_to_other: 'Assigned to other',
 }
 
 const ACTION_COLOR: Record<ProposalReviewAction, string> = {
@@ -26,6 +27,7 @@ const ACTION_COLOR: Record<ProposalReviewAction, string> = {
   merge: 'bg-purple-500',
   not_actionable: 'bg-yellow-500',
   dismiss_banter: 'bg-gray-500',
+  assigned_to_other: 'bg-indigo-500',
 }
 
 export default function ProposalAnalytics() {

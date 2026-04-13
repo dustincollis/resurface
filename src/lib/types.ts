@@ -164,6 +164,7 @@ export type ProposalReviewAction =
   | 'merge'
   | 'not_actionable'
   | 'dismiss_banter'
+  | 'assigned_to_other'
 
 // Payload shape for proposal_type='task'. Mirrors CreateItemPayload but
 // adds the assignee/urgency hints the AI emits, and is the canonical
@@ -438,6 +439,7 @@ export interface Proposal {
   resulting_object_type: string | null
   resulting_object_id: string | null
   merge_target_id: string | null
+  suggested_merge_target_id: string | null
   created_at: string
   reviewed_at: string | null
   updated_at: string

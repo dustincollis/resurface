@@ -24,21 +24,29 @@ SERVICE_ROLE_KEY = os.environ.get("SB_SERVICE_ROLE_KEY", "")
 TRIAGE_URL = f"{SUPABASE_URL}/functions/v1/ai-triage-ideas"
 
 
-def call_triage(batch_size):
+def call_triage(batch_size, max_retries=3):
     body = json.dumps({"batch_size": batch_size}).encode()
-    req = urllib.request.Request(TRIAGE_URL, data=body, headers={
-        "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
-        "Content-Type": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return resp.status, json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
+    last_err = None
+    for attempt in range(max_retries):
+        req = urllib.request.Request(TRIAGE_URL, data=body, headers={
+            "Authorization": f"Bearer {SERVICE_ROLE_KEY}",
+            "Content-Type": "application/json",
+        })
         try:
-            return e.code, json.loads(error_body)
-        except:
-            return e.code, {"error": error_body[:200]}
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode()
+            try:
+                return e.code, json.loads(error_body)
+            except:
+                return e.code, {"error": error_body[:200]}
+        except (ConnectionResetError, TimeoutError, urllib.error.URLError, OSError) as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(5 * (attempt + 1))  # 5s, 10s, 15s backoff
+                continue
+    return 0, {"error": f"Network error after {max_retries} retries: {last_err}"}
 
 
 def main():
@@ -67,8 +75,9 @@ def main():
 
         if status != 200:
             print(f"[batch {batch_num}] FAIL ({status}): {result.get('error', 'unknown')}")
-            # Don't keep hammering on errors
-            break
+            # Wait longer and continue rather than giving up — triage is idempotent
+            time.sleep(10)
+            continue
 
         if result.get("done") or result.get("processed", 0) == 0:
             print(f"\n✓ Triage complete.")

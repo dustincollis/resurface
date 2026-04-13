@@ -327,6 +327,52 @@ export function useRejectProposal() {
   })
 }
 
+// Confirm the AI's attribution: this item is for NAME, not the user.
+// Records the decision + writes a lightweight delegated_items log row
+// so it can later fuel "NAME's plate" views.
+export function useAssignProposalToOther() {
+  const { user } = useAuth()
+  return useMutation({
+    mutationFn: async ({
+      proposal,
+      assignedToName,
+    }: {
+      proposal: Proposal
+      assignedToName: string
+    }) => {
+      const payload = proposal.normalized_payload as Record<string, unknown>
+      const { error: logErr } = await supabase.from('delegated_items').insert({
+        user_id: user!.id,
+        proposal_id: proposal.id,
+        assigned_to_name: assignedToName,
+        title: (payload.title as string) ?? 'Untitled',
+        description: (payload.description as string) ?? null,
+        evidence_text: proposal.evidence_text,
+        due_date: (payload.due_date as string | null) ?? null,
+        company: (payload.company as string | null) ?? null,
+        source_meeting_id: (payload.source_meeting_id as string | null) ?? null,
+      })
+      if (logErr) throw logErr
+
+      // Record the accepted_payload with the confirmed assignee — enables
+      // future learning loops to compare AI attribution vs user confirmation.
+      const acceptedPayload = { ...payload, assignee: assignedToName }
+
+      const { error } = await supabase
+        .from('proposals')
+        .update({
+          status: 'rejected' as ProposalStatus,
+          review_action: 'assigned_to_other' as ProposalReviewAction,
+          accepted_payload: acceptedPayload,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', proposal.id)
+      if (error) throw error
+    },
+    onSuccess: invalidateProposals,
+  })
+}
+
 // Deprecated: superseded by useAcceptProposal with acceptAs='commitment_incoming'.
 // The ProposalCard's old "Track as commitment" button has been replaced by
 // the type chip group, so this hook is no longer used in the UI. Kept as

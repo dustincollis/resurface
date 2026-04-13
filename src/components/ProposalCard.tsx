@@ -18,14 +18,17 @@ import {
   Target,
 } from 'lucide-react'
 import { useStreams } from '../hooks/useStreams'
-import { useSearch } from '../hooks/useSearch'
 import {
   useAcceptProposal,
   useRejectProposal,
   useMergeProposal,
+  useAssignProposalToOther,
   defaultAcceptAs,
   type AcceptAs,
 } from '../hooks/useProposals'
+import { useItem } from '../hooks/useItems'
+import { Link } from 'react-router-dom'
+import { UserCheck } from 'lucide-react'
 import { usePursuits, useCreatePursuit } from '../hooks/usePursuits'
 import type {
   Proposal,
@@ -51,7 +54,7 @@ const TYPE_META: Record<
 
 export default function ProposalCard({ proposal }: ProposalCardProps) {
   const parserSuggestion = TYPE_META[proposal.proposal_type]
-  const [mode, setMode] = useState<'view' | 'edit' | 'merge'>('view')
+  const [mode, setMode] = useState<'view' | 'edit'>('view')
   // The user picks the target type at acceptance time. Defaults to the
   // parser's suggestion (task → 'task', commitment → 'commitment_outgoing'),
   // but the user can override.
@@ -61,11 +64,26 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
   const acceptMut = useAcceptProposal()
   const rejectMut = useRejectProposal()
   const mergeMut = useMergeProposal()
+  const assignOtherMut = useAssignProposalToOther()
   const createPursuit = useCreatePursuit()
   const { data: activePursuits } = usePursuits({ status: 'active' })
   const [creatingPursuit, setCreatingPursuit] = useState(false)
   const [newPursuitName, setNewPursuitName] = useState('')
-  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending || createPursuit.isPending
+  const busy = acceptMut.isPending || rejectMut.isPending || mergeMut.isPending || assignOtherMut.isPending || createPursuit.isPending
+
+  // If the parser suggested merging into an existing item, fetch that item
+  // so we can show its title inline on the merge button.
+  const { data: mergeTarget } = useItem(proposal.suggested_merge_target_id ?? '')
+
+  // Parse the payload's assignee to decide if we should offer "Assign to NAME".
+  // We offer it when assignee is a real person's name (not "user" / "unknown" / null).
+  const payloadRaw = proposal.normalized_payload as Record<string, unknown>
+  const assigneeRaw = (payloadRaw.assignee as string | null | undefined)?.trim() ?? ''
+  const assigneeIsPerson =
+    assigneeRaw &&
+    assigneeRaw.toLowerCase() !== 'user' &&
+    assigneeRaw.toLowerCase() !== 'unknown' &&
+    !/^speaker\s*\d/i.test(assigneeRaw)
 
   const handleCreatePursuit = async () => {
     if (!newPursuitName.trim()) return
@@ -206,17 +224,6 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 busy={busy}
               />
             )
-          ) : mode === 'merge' ? (
-            <MergePicker
-              onCancel={() => setMode('view')}
-              onPick={(itemId) => {
-                mergeMut.mutate(
-                  { proposal, targetItemId: itemId },
-                  { onSuccess: () => setMode('view') }
-                )
-              }}
-              busy={busy}
-            />
           ) : showAsCommitment ? (
             <CommitmentInterpretation proposal={proposal} />
           ) : (
@@ -365,23 +372,66 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
         </div>
       )}
 
+      {/* AI-suggested merge callout — shows prominently when the parser flagged
+          this as a likely duplicate of an existing item. */}
+      {mode === 'view' && proposal.suggested_merge_target_id && mergeTarget && (
+        <div className="border-t border-gray-800 bg-blue-900/10 px-4 py-2.5">
+          <div className="flex items-start gap-2">
+            <GitMerge size={14} className="mt-0.5 flex-shrink-0 text-blue-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-blue-200">
+                Looks like a duplicate of:{' '}
+                <Link to={`/items/${mergeTarget.id}`} className="font-medium underline hover:text-blue-100">
+                  {mergeTarget.title}
+                </Link>
+              </p>
+              <button
+                onClick={() =>
+                  mergeMut.mutate({ proposal, targetItemId: proposal.suggested_merge_target_id! })
+                }
+                disabled={busy}
+                className="mt-1.5 flex items-center gap-1 rounded bg-blue-600/30 px-2 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-600/50 disabled:opacity-50"
+              >
+                <GitMerge size={11} />
+                Merge into that item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action row */}
       {mode === 'view' && (
         <div className="flex flex-wrap gap-2 border-t border-gray-800 px-4 py-2.5">
           {parserSuggestion.supported && (
             <>
               <button
+                onClick={() => setMode('edit')}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+              <button
                 onClick={handleAccept}
                 disabled={busy}
                 className="flex items-center gap-1.5 rounded bg-green-600/20 px-2.5 py-1 text-xs font-medium text-green-300 hover:bg-green-600/30 disabled:opacity-50"
               >
                 {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                {acceptAs === 'task'
-                  ? 'Save as task'
-                  : acceptAs === 'commitment_outgoing'
-                    ? 'Save as outgoing commitment'
-                    : 'Save as incoming commitment'}
+                Accept
               </button>
+              {assigneeIsPerson && (
+                <button
+                  onClick={() => assignOtherMut.mutate({ proposal, assignedToName: assigneeRaw })}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded bg-purple-600/20 px-2.5 py-1 text-xs font-medium text-purple-300 hover:bg-purple-600/30 disabled:opacity-50"
+                  title={`Confirm this item belongs to ${assigneeRaw}. Dismisses from your queue and logs under their name.`}
+                >
+                  {assignOtherMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
+                  Assign to {assigneeRaw}
+                </button>
+              )}
               <button
                 onClick={handleTrack}
                 disabled={busy}
@@ -391,24 +441,6 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 <Target size={12} />
                 Track
               </button>
-              <button
-                onClick={() => setMode('edit')}
-                disabled={busy}
-                className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
-              >
-                <Pencil size={12} />
-                Edit
-              </button>
-              {acceptAs === 'task' && (
-                <button
-                  onClick={() => setMode('merge')}
-                  disabled={busy}
-                  className="flex items-center gap-1.5 rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
-                >
-                  <GitMerge size={12} />
-                  Merge into existing
-                </button>
-              )}
             </>
           )}
           <button
@@ -739,60 +771,3 @@ function CommitmentEditor({ proposal, onSave, onCancel, busy }: CommitmentEditor
   )
 }
 
-// ============================================================
-// Merge picker (search existing items)
-// ============================================================
-
-interface MergePickerProps {
-  onPick: (itemId: string) => void
-  onCancel: () => void
-  busy: boolean
-}
-
-function MergePicker({ onPick, onCancel, busy }: MergePickerProps) {
-  const [query, setQuery] = useState('')
-  const { data: results, isLoading } = useSearch(query, query.length >= 2)
-  const itemResults = results?.filter((r) => r.result_type === 'item') ?? []
-
-  return (
-    <div className="space-y-2">
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search existing items..."
-        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
-        autoFocus
-      />
-      <div className="max-h-48 overflow-y-auto rounded border border-gray-800">
-        {query.length < 2 ? (
-          <div className="px-2 py-3 text-xs text-gray-500">Type to search...</div>
-        ) : isLoading ? (
-          <div className="px-2 py-3 text-xs text-gray-500">Searching...</div>
-        ) : itemResults.length === 0 ? (
-          <div className="px-2 py-3 text-xs text-gray-500">No matching items.</div>
-        ) : (
-          itemResults.map((r) => (
-            <button
-              key={r.result_id}
-              onClick={() => onPick(r.result_id)}
-              disabled={busy}
-              className="flex w-full flex-col items-start border-b border-gray-800 px-2 py-1.5 text-left text-xs hover:bg-gray-800 disabled:opacity-50"
-            >
-              <span className="text-gray-200">{r.title}</span>
-              {r.stream_name && (
-                <span className="text-[10px] text-gray-500">{r.stream_name}</span>
-              )}
-            </button>
-          ))
-        )}
-      </div>
-      <button
-        onClick={onCancel}
-        disabled={busy}
-        className="rounded px-2 py-1 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
-      >
-        Cancel
-      </button>
-    </div>
-  )
-}

@@ -186,7 +186,7 @@ Deno.serve(async (req) => {
       itemsSummary = items
         ?.map(
           (i) =>
-            `- [${i.id.substring(0, 8)}] "${i.title}" (stream: ${(i.streams as { name: string } | null)?.name ?? "none"})`
+            `- id=${i.id} title="${i.title}" stream=${(i.streams as { name: string } | null)?.name ?? "none"}`
         )
         .join("\n") ?? "No existing items.";
     }
@@ -574,7 +574,9 @@ Extract these elements:
    - **evidence_quote**: verbatim from the transcript, the line where the user made the commitment
    - **ambiguity_flags**: array, any of: "social_language", "relative_date", "external_dependency", "ambiguous_actionability", "no_counterpart"
 
-6. **References**: Match against existing work items where applicable
+6. **Duplicate detection (suggest_merge_item_id)**: For each action item, check against the "Current open items" list below. If the new action item clearly refers to the same underlying work as an existing item (same task, same deliverable, same client context), set suggest_merge_item_id to that item's full UUID (copy it directly from the id= field in the items list). Be conservative — only suggest a merge when you're confident it's the same thing, not just topically related. When in doubt, leave it null.
+
+7. **References**: Match against existing work items where applicable
 
 7. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
@@ -603,6 +605,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       "assignee": "user|name|unknown",
       "urgency": "high|medium|low",
       "suggested_due_date": "YYYY-MM-DD or null",
+      "suggest_merge_item_id": "full UUID from itemsSummary if this clearly duplicates an existing item, otherwise null",
       "related_item_ids": ["string"]
     }
   ],
@@ -883,6 +886,7 @@ async function handleActiveMode(
     assignee?: string;
     urgency?: string;
     suggested_due_date?: string | null;
+    suggest_merge_item_id?: string | null;
     related_item_ids?: string[];
   }>;
 
@@ -895,6 +899,7 @@ async function handleActiveMode(
     normalized_payload: Record<string, unknown>;
     confidence: number | null;
     ambiguity_flags: string[];
+    suggested_merge_target_id?: string | null;
   };
 
   function normalizeName(s: string): string {
@@ -952,6 +957,13 @@ async function handleActiveMode(
         ? a.evidence_quote.trim()
         : null;
 
+    // Only accept merge suggestion if it's a well-formed UUID
+    const mergeId =
+      typeof a.suggest_merge_item_id === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(a.suggest_merge_item_id)
+        ? a.suggest_merge_item_id
+        : null;
+
     return {
       user_id: userId,
       proposal_type: "task",
@@ -970,6 +982,7 @@ async function handleActiveMode(
       },
       confidence: baseConfidence,
       ambiguity_flags: flags,
+      suggested_merge_target_id: mergeId,
     };
   });
 
