@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, Sparkles, Play, Zap, Pin } from 'lucide-react'
+import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin } from 'lucide-react'
 import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
@@ -120,10 +120,12 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
         <div className="flex items-start gap-2.5">
           {item.pinned ? (
             <Pin size={12} className="mt-1 flex-shrink-0 text-yellow-400" />
-          ) : (
+          ) : rank > 0 ? (
             <span className="mt-1 flex-shrink-0 text-xs font-medium text-gray-600">
               {rank}
             </span>
+          ) : (
+            <span className="mt-1 w-3 flex-shrink-0" />
           )}
 
           <div className="min-w-0 flex-1">
@@ -275,6 +277,21 @@ export default function Focus() {
   }, [sortedActiveItems])
   const hiddenCount = sortedActiveItems.length - focusItems.length
   const snoozedCount = (activeItems?.length ?? 0) - visibleActiveItems.length
+  const [showAll, setShowAll] = useState(false)
+
+  // Remaining items (not in focus), sorted by due date (calendar order)
+  const remainingByDate = useMemo(() => {
+    const focusIds = new Set(focusItems.map((i) => i.id))
+    const remaining = sortedActiveItems.filter((i) => !focusIds.has(i.id))
+    return remaining.slice().sort((a, b) => {
+      // Items with due dates come first, sorted ascending
+      if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+      if (a.due_date && !b.due_date) return -1
+      if (!a.due_date && b.due_date) return 1
+      // No due date: fall back to created_at ascending
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+  }, [sortedActiveItems, focusItems])
 
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
@@ -309,15 +326,43 @@ export default function Focus() {
             ))}
           </div>
           {(hiddenCount > 0 || snoozedCount > 0) && (
-            <p className="mt-2 text-center text-xs text-gray-600">
+            <div className="mt-3 text-center">
               {hiddenCount > 0 && (
-                <>+ {hiddenCount} more</>
+                <button
+                  onClick={() => setShowAll(!showAll)}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                >
+                  {showAll ? (
+                    <>
+                      <ChevronUp size={12} />
+                      Hide {hiddenCount} items
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} />
+                      View all {hiddenCount} more by date
+                    </>
+                  )}
+                </button>
               )}
-              {hiddenCount > 0 && snoozedCount > 0 && <> · </>}
               {snoozedCount > 0 && (
-                <>{snoozedCount} snoozed</>
+                <p className="mt-1 text-xs text-gray-600">
+                  {snoozedCount} snoozed
+                </p>
               )}
-            </p>
+            </div>
+          )}
+          {showAll && remainingByDate.length > 0 && (
+            <div className="mt-4">
+              <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+                All items by date
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                {remainingByDate.map((item) => (
+                  <FocusCard key={item.id} item={item} rank={0} />
+                ))}
+              </div>
+            </div>
           )}
         </>
       ) : (
