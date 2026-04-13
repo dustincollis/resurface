@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 1500,
         temperature: 0.3,
         messages: [{ role: "user", content: prompt }],
@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
           cluster_label: clusterLabel,
           report_type,
           content,
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           generated_at: new Date().toISOString(),
         },
         { onConflict: "user_id,cluster_id,report_type" }
