@@ -220,6 +220,12 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ----- Supabase admin client (needed early for webhook logging) -----
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey =
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
     // ----- Parse payload -----
     const payload = (await req.json().catch(() => null)) as
       | Record<string, unknown>
@@ -234,12 +240,35 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ----- Log raw payload for disaster recovery -----
+    const logExternalId = (() => {
+      const m = (payload.metadata as Record<string, unknown>) ?? {};
+      const raw = m.id ?? m.meetingId ?? m.meeting_id;
+      return typeof raw === "string" || typeof raw === "number"
+        ? `jamie:meeting:${raw}` : null;
+    })();
+    const { data: logRow } = await adminClient
+      .from("webhook_payload_log")
+      .insert({ source: "jamie_webhook", external_source_id: logExternalId, payload })
+      .select("id")
+      .single();
+    const webhookLogId = logRow?.id as string | undefined;
+
+    const finalizeLog = async (status: number, meetingId?: string, error?: string) => {
+      if (!webhookLogId) return;
+      await adminClient
+        .from("webhook_payload_log")
+        .update({ http_status: status, meeting_id: meetingId ?? null, error: error ?? null })
+        .eq("id", webhookLogId);
+    };
+
     const meta = (payload.metadata as Record<string, unknown>) ?? {};
     const data = (payload.data as Record<string, unknown>) ?? {};
 
     const eventType = typeof meta.event === "string" ? meta.event : "";
     if (eventType && eventType !== "meeting.completed") {
       // Acknowledge unrecognized events without creating anything.
+      await finalizeLog(200, undefined, `ignored_event:${eventType}`);
       return new Response(
         JSON.stringify({ ok: true, ignored_event: eventType }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -256,6 +285,7 @@ Deno.serve(async (req) => {
     if (segments.length === 0) {
       // No transcript = nothing to ingest. Acknowledge so Jamie doesn't retry.
       console.warn("[jamie-webhook] empty transcript", { externalId });
+      await finalizeLog(200, undefined, "empty_transcript");
       return new Response(
         JSON.stringify({ ok: true, warning: "empty transcript, nothing ingested" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -273,12 +303,6 @@ Deno.serve(async (req) => {
     const attendees = uniqueSpeakers(segments);
     const title = deriveTitle(payload);
     const startTime = deriveStartTimeISO(payload);
-
-    // ----- Insert meeting row -----
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const insertPayload: Record<string, unknown> = {
       user_id: userId,
@@ -303,12 +327,14 @@ Deno.serve(async (req) => {
       const code = (insertErr as { code?: string }).code;
       if (code === "23505") {
         console.log("[jamie-webhook] duplicate, ignoring", { externalId });
+        await finalizeLog(200, undefined, "duplicate");
         return new Response(
           JSON.stringify({ ok: true, duplicate: true, external_id: externalId }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       console.error("[jamie-webhook] insert failed:", insertErr);
+      await finalizeLog(500, undefined, insertErr.message);
       return new Response(
         JSON.stringify({
           error: "Failed to insert meeting",
@@ -375,6 +401,7 @@ Deno.serve(async (req) => {
       console.error("[jamie-webhook] parser error:", err);
     }
 
+    await finalizeLog(200, meetingId);
     return new Response(
       JSON.stringify({
         ok: true,
@@ -391,6 +418,8 @@ Deno.serve(async (req) => {
     console.error("[jamie-webhook] uncaught error:", err);
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
+    // Best-effort log finalization (finalizeLog may not be defined if error was early)
+    try { await finalizeLog(500, undefined, message); } catch { /* ignore */ }
     return new Response(
       JSON.stringify({ error: "Internal server error", detail: message, stack }),
       {

@@ -163,7 +163,7 @@ export default function MeetingDetail() {
           <ArrowLeft size={16} /> Back to Discussions
         </button>
         <button
-          onClick={() => { deleteMeeting.mutate(meeting.id); navigate('/meetings') }}
+          onClick={() => { if (confirm(`Delete discussion "${meeting.title}"? This cannot be undone.`)) { deleteMeeting.mutate(meeting.id); navigate('/meetings') } }}
           className="flex items-center gap-1 rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-red-400"
           title="Delete discussion"
         >

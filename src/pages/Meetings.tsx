@@ -217,9 +217,11 @@ export default function Meetings() {
     }
   }
 
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = (e: React.MouseEvent, id: string, title: string) => {
     e.stopPropagation()
-    deleteMeeting.mutate(id)
+    if (confirm(`Delete discussion "${title}"? This cannot be undone.`)) {
+      deleteMeeting.mutate(id)
+    }
   }
 
   // ============================================================
@@ -641,7 +643,7 @@ export default function Meetings() {
                       </button>
                     ) : null}
                     <button
-                      onClick={(e) => handleDelete(e, meeting.id)}
+                      onClick={(e) => handleDelete(e, meeting.id, meeting.title)}
                       className="flex-shrink-0 rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-red-400"
                       title="Delete discussion"
                     >
