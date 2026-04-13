@@ -194,6 +194,27 @@ export function useAddPursuitMember() {
         .select()
         .single()
       if (error) throw error
+
+      // Backfill company on items: if the pursuit has a company and the
+      // item doesn't, copy it over so the user doesn't have to set it manually.
+      if (memberType === 'item') {
+        const [{ data: pursuit }, { data: item }] = await Promise.all([
+          supabase.from('pursuits').select('company').eq('id', pursuitId).single(),
+          supabase.from('items').select('custom_fields').eq('id', memberId).single(),
+        ])
+        if (pursuit?.company && !((item?.custom_fields as Record<string, unknown>)?.company)) {
+          await supabase
+            .from('items')
+            .update({
+              custom_fields: {
+                ...((item?.custom_fields as Record<string, unknown>) ?? {}),
+                company: pursuit.company,
+              },
+            })
+            .eq('id', memberId)
+        }
+      }
+
       return data as PursuitMember
     },
     onSuccess: (_data, vars) => {
@@ -201,6 +222,7 @@ export function useAddPursuitMember() {
       queryClient.invalidateQueries({
         queryKey: ['pursuit_members', 'for', vars.memberType, vars.memberId],
       })
+      queryClient.invalidateQueries({ queryKey: ['items'] })
     },
   })
 }

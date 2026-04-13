@@ -233,7 +233,8 @@ export function useAcceptProposal() {
         resultingObjectId = commitment.id
       }
 
-      // If the user picked a pursuit, attach the new object to it.
+      // If the user picked a pursuit, attach the new object to it and
+      // backfill company from the pursuit when it's missing on the item.
       if (pursuitId && resultingObjectId && resultingObjectType) {
         const memberType = resultingObjectType === 'item' ? 'item' : 'commitment'
         await supabase.from('pursuit_members').insert({
@@ -241,6 +242,32 @@ export function useAcceptProposal() {
           member_type: memberType,
           member_id: resultingObjectId,
         })
+
+        if (resultingObjectType === 'item') {
+          const { data: pursuit } = await supabase
+            .from('pursuits')
+            .select('company')
+            .eq('id', pursuitId)
+            .single()
+          if (pursuit?.company) {
+            const { data: item } = await supabase
+              .from('items')
+              .select('custom_fields')
+              .eq('id', resultingObjectId)
+              .single()
+            if (!((item?.custom_fields as Record<string, unknown>)?.company)) {
+              await supabase
+                .from('items')
+                .update({
+                  custom_fields: {
+                    ...((item?.custom_fields as Record<string, unknown>) ?? {}),
+                    company: pursuit.company,
+                  },
+                })
+                .eq('id', resultingObjectId)
+            }
+          }
+        }
       }
 
       const { error: updateErr } = await supabase
