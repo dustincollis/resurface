@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check, Pin, PinOff, Handshake } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Plus, ArrowRight, Pencil, Link as LinkIcon, Calendar, GitBranch, Check, Pin, PinOff, Handshake, MessageSquare, Send } from 'lucide-react'
 import { useItem, useUpdateItem, useTouchItem, useDeleteItem, useTogglePin } from '../hooks/useItems'
+import { useItemNotes, useAddItemNote } from '../hooks/useItemNotes'
 import { useStreams } from '../hooks/useStreams'
 import { useActivityLog } from '../hooks/useActivityLog'
 import InlineEditable from '../components/InlineEditable'
@@ -107,6 +108,64 @@ function activityLabel(action: string, details: Record<string, unknown>): string
     default:
       return action.replace(/_/g, ' ')
   }
+}
+
+function ItemNotesSection({ itemId }: { itemId: string }) {
+  const { data: notes } = useItemNotes(itemId)
+  const addNote = useAddItemNote()
+  const [draft, setDraft] = useState('')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = draft.trim()
+    if (!trimmed) return
+    addNote.mutate({ itemId, content: trimmed })
+    setDraft('')
+  }
+
+  return (
+    <div className="border-b border-gray-800 px-6 py-4">
+      <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-300">
+        <MessageSquare size={14} />
+        Notes{notes && notes.length > 0 ? ` (${notes.length})` : ''}
+      </h3>
+
+      <form onSubmit={handleSubmit} className="mb-3 flex gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a progress note..."
+          className="flex-1 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim() || addNote.isPending}
+          className="rounded bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        >
+          <Send size={14} />
+        </button>
+      </form>
+
+      {notes && notes.length > 0 && (
+        <div className="space-y-2">
+          {notes.map((note) => (
+            <div key={note.id} className="rounded border border-gray-800 bg-gray-950/40 px-3 py-2">
+              <p className="text-sm text-gray-300">{note.content}</p>
+              <span className="mt-1 block text-xs text-gray-600">
+                {new Date(note.created_at).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ItemDetail() {
@@ -398,6 +457,9 @@ export default function ItemDetail() {
             Resist: how much you dread doing this. Stakes: cost of letting it slip.
           </p>
         </div>
+
+        {/* Notes — running progress log */}
+        <ItemNotesSection itemId={item.id} />
 
         {/* Action bar — Complete is the dominant action */}
         <div className="px-6 py-4">
