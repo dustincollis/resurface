@@ -50,6 +50,7 @@ export function useMeetings() {
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
+        .not('processed_at', 'is', null)
         .order('start_time', { ascending: false })
         .limit(50)
       if (error) throw error
