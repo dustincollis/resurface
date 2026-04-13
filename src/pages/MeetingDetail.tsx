@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio, Lightbulb, Eye, X } from 'lucide-react'
+import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio, Lightbulb, Eye, X, AlertCircle } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, type MeetingImportMode } from '../hooks/useMeetings'
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
@@ -260,6 +260,29 @@ export default function MeetingDetail() {
                 <p className="text-sm font-medium text-white">Processing transcript...</p>
                 <p className="text-xs text-gray-500">Analyzing discussion content, extracting action items, decisions, and open questions. This may take 15-30 seconds.</p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pending parse — meeting has transcript but wasn't processed */}
+        {meeting.transcript && !meeting.processed_at && !uploadTranscript.isPending && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle size={16} className="flex-shrink-0 text-yellow-400" />
+              <p className="flex-1 text-sm text-gray-400">
+                This discussion has content but hasn't been analyzed yet.
+              </p>
+              <button
+                onClick={() =>
+                  uploadTranscript.mutate({
+                    meetingId: meeting.id,
+                    transcript: meeting.transcript!,
+                  })
+                }
+                className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
+              >
+                Analyze
+              </button>
             </div>
           </div>
         )}
