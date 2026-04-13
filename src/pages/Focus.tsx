@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin } from 'lucide-react'
-import { useItems, useTouchItem, useUpdateItem } from '../hooks/useItems'
+import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff } from 'lucide-react'
+import { useItems, useTouchItem, useUpdateItem, useUnsnoozeItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
 // ItemCard removed — focus mode uses compact FocusCards only
@@ -276,8 +276,20 @@ export default function Focus() {
     return [...pinned, ...unpinned.slice(0, remainingSlots)]
   }, [sortedActiveItems])
   const hiddenCount = sortedActiveItems.length - focusItems.length
-  const snoozedCount = (activeItems?.length ?? 0) - visibleActiveItems.length
+  const snoozedItems = useMemo(() => {
+    if (!activeItems) return []
+    return activeItems.filter(
+      (item) =>
+        !item.tracking &&
+        !item.pinned &&
+        item.snoozed_until &&
+        new Date(item.snoozed_until) > new Date(now)
+    )
+  }, [activeItems, now])
+  const snoozedCount = snoozedItems.length
   const [showAll, setShowAll] = useState(false)
+  const [showSnoozed, setShowSnoozed] = useState(false)
+  const unsnoozeItem = useUnsnoozeItem()
 
   // Remaining items (not in focus), sorted by due date (calendar order)
   const remainingByDate = useMemo(() => {
@@ -346,10 +358,55 @@ export default function Focus() {
                 </button>
               )}
               {snoozedCount > 0 && (
-                <p className="mt-1 text-xs text-gray-600">
-                  {snoozedCount} snoozed
-                </p>
+                <button
+                  onClick={() => setShowSnoozed(!showSnoozed)}
+                  className="mt-1 inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400"
+                >
+                  <AlarmClockOff size={11} />
+                  {snoozedCount} snoozed {showSnoozed ? '(hide)' : '(show)'}
+                </button>
               )}
+            </div>
+          )}
+          {showSnoozed && snoozedItems.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Snoozed
+                </h3>
+                <button
+                  onClick={() => {
+                    snoozedItems.forEach((item) => unsnoozeItem.mutate(item.id))
+                    setShowSnoozed(false)
+                  }}
+                  className="text-xs text-purple-400 hover:text-purple-300"
+                >
+                  Unsnooze all
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {snoozedItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-2.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="text-sm text-gray-300">{item.title}</span>
+                      {item.snoozed_until && (
+                        <span className="ml-2 text-xs text-gray-600">
+                          until {new Date(item.snoozed_until).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => unsnoozeItem.mutate(item.id)}
+                      className="ml-2 flex-shrink-0 rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                    >
+                      Unsnooze
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {showAll && remainingByDate.length > 0 && (
