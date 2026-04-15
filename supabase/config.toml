@@ -376,6 +376,9 @@ verify_jwt = false
 [functions.retry-unprocessed]
 verify_jwt = false
 
+[functions.ai-parse-input]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
