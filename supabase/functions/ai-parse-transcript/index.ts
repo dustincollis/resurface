@@ -36,7 +36,13 @@ Deno.serve(async (req) => {
     let transcript: string = typeof bodyTranscript === "string" ? bodyTranscript : "";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    // Supabase now exposes TWO service-role env vars with different values:
+    //   SB_SERVICE_ROLE_KEY       — new short-format key (sb_sec_...)
+    //   SUPABASE_SERVICE_ROLE_KEY — legacy JWT-format key (eyJhbG...)
+    // A caller might send either. Accept both as valid service-role auth.
+    const serviceRoleKeyLegacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKeyNew = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKey = serviceRoleKeyLegacy || serviceRoleKeyNew;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -49,9 +55,13 @@ Deno.serve(async (req) => {
     // since some clients send the key there instead of in Authorization.
     const apiKeyHeader = req.headers.get("apikey") ?? req.headers.get("ApiKey") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    const isServiceRole =
-      (serviceRoleKey && token === serviceRoleKey) ||
-      (serviceRoleKey && apiKeyHeader === serviceRoleKey);
+    const tokenMatchesServiceRole =
+      (!!serviceRoleKeyLegacy && token === serviceRoleKeyLegacy) ||
+      (!!serviceRoleKeyNew && token === serviceRoleKeyNew);
+    const apiKeyMatchesServiceRole =
+      (!!serviceRoleKeyLegacy && apiKeyHeader === serviceRoleKeyLegacy) ||
+      (!!serviceRoleKeyNew && apiKeyHeader === serviceRoleKeyNew);
+    const isServiceRole = tokenMatchesServiceRole || apiKeyMatchesServiceRole;
 
     // Debug fingerprint helper — never logs full keys
     function fingerprint(s: string | null | undefined): string {
@@ -180,8 +190,7 @@ Deno.serve(async (req) => {
         .from("items")
         .select("id, title, stream_id, streams(name)")
         .eq("user_id", userId)
-        .not("status", "in", '("done","dropped")')
-        .limit(50);
+        .not("status", "in", '("done","dropped")');
 
       itemsSummary = items
         ?.map(
@@ -1069,14 +1078,32 @@ async function handleActiveMode(
     console.warn(`[parser-validation] dropped ${skippedCount} invalid proposals`);
   }
 
+  let insertedProposals: Array<{ id: string; proposal_type: string; normalized_payload: Record<string, unknown> }> = [];
   if (validatedRows.length > 0) {
-    const { error: proposalErr } = await adminClient
+    const { data: insertedRows, error: proposalErr } = await adminClient
       .from("proposals")
-      .insert(validatedRows);
+      .insert(validatedRows)
+      .select("id, proposal_type, normalized_payload");
     if (proposalErr) {
       console.error("Failed to insert proposals:", proposalErr);
+    } else if (insertedRows) {
+      insertedProposals = insertedRows as typeof insertedProposals;
     }
   }
+
+  // Cluster detection: if this meeting produced 3+ task proposals, ask the
+  // model whether any of them belong to a single named deliverable (e.g.
+  // "the S&P deck"). Clusters land in proposal_groups as pending suggestions
+  // -- never auto-applied. User accepts/rejects on the /proposals page.
+  const groupsCreated = await detectProposalGroups({
+    anthropicKey,
+    adminClient,
+    userId,
+    meetingId,
+    meetingTitle: meetingUpdate.title ?? currentTitle,
+    meetingSummary: typeof parsed.synopsis === "string" ? parsed.synopsis : "",
+    proposals: insertedProposals.filter((p) => p.proposal_type === "task"),
+  });
 
   return new Response(
     JSON.stringify({
@@ -1084,6 +1111,7 @@ async function handleActiveMode(
       title: meetingUpdate.title ?? currentTitle,
       proposals_created: proposalRows.length,
       commitments_created: commitmentRows.length,
+      groups_created: groupsCreated,
       not_for_user: notForUser,
       skipped_speculative: skippedSpeculative,
       import_mode: "active",
@@ -1092,4 +1120,147 @@ async function handleActiveMode(
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     }
   );
+}
+
+// ----------------------------------------------------------------------------
+// Proposal group detection
+// ----------------------------------------------------------------------------
+// Runs after task proposals are inserted. Asks Claude whether any 3+ of them
+// share a single named deliverable discussed in this meeting. If yes, a
+// proposal_groups row is inserted (always pending -- user must accept).
+//
+// Strict clustering criteria are in the prompt: 3+ members, concretely-named
+// artifact, human-sayable parent title. The model is told to return an empty
+// clusters array when in doubt.
+// ----------------------------------------------------------------------------
+
+interface ClusterDetectionArgs {
+  anthropicKey: string;
+  // deno-lint-ignore no-explicit-any
+  adminClient: any;
+  userId: string;
+  meetingId: string;
+  meetingTitle: string;
+  meetingSummary: string;
+  proposals: Array<{ id: string; proposal_type: string; normalized_payload: Record<string, unknown> }>;
+}
+
+async function detectProposalGroups(args: ClusterDetectionArgs): Promise<number> {
+  const { anthropicKey, adminClient, userId, meetingId, meetingTitle, meetingSummary, proposals } = args;
+
+  // No point calling the model if there aren't enough proposals for a cluster.
+  if (proposals.length < 3) return 0;
+
+  const proposalList = proposals.map((p, i) => {
+    const payload = p.normalized_payload ?? {};
+    const title = (payload.title as string | undefined) ?? "";
+    const description = (payload.description as string | undefined) ?? "";
+    return `[${i}] ${title}${description ? ` -- ${description.substring(0, 140)}` : ""}`;
+  }).join("\n");
+
+  const prompt = `You are reviewing the action items extracted from a single meeting. Your job is to decide whether any subset of them are really sub-steps toward ONE named deliverable.
+
+MEETING: ${meetingTitle}
+${meetingSummary ? `SUMMARY: ${meetingSummary.substring(0, 1200)}\n` : ""}
+
+ACTION ITEMS:
+${proposalList}
+
+Return a JSON object with a "clusters" array. Each cluster represents 3+ action items that all contribute to a single concretely-named deliverable (a specific deck, document, proposal, demo, SOW, etc.).
+
+STRICT CRITERIA -- only return a cluster if ALL of these are true:
+1. At least 3 of the items listed above clearly feed into the same deliverable.
+2. The deliverable has a concrete name a human would say out loud ("the S&P deck", "the FedEx SOW", "the proposal for Acme"). NOT vague themes like "sales follow-ups", "research items", "client outreach".
+3. You can write a parent title like "Deck work for <client>" or "<specific deliverable> prep" that clearly names the artifact.
+4. You are highly confident these items belong together. When in doubt, do NOT return a cluster.
+
+It is perfectly acceptable to return an empty clusters array. Most meetings will not have a qualifying cluster. False positives are worse than missing a cluster.
+
+Response schema:
+{
+  "clusters": [
+    {
+      "title": "Deck work for <named deliverable>",
+      "item_indices": [0, 2, 5, 7],
+      "confidence": 0.85
+    }
+  ]
+}
+
+Confidence must be between 0 and 1. Only return clusters with confidence >= 0.7. Return ONLY the JSON object, no prose.`;
+
+  let clusterResponse: Response;
+  try {
+    clusterResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        temperature: 0.1,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+  } catch (err) {
+    console.error("[cluster-detect] network error:", err);
+    return 0;
+  }
+
+  if (!clusterResponse.ok) {
+    console.error("[cluster-detect] Claude API error:", await clusterResponse.text());
+    return 0;
+  }
+
+  const aiJson = await clusterResponse.json();
+  const raw = (aiJson.content?.[0]?.text ?? "").trim();
+  const cleaned = raw.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+
+  let parsed: { clusters?: Array<{ title?: string; item_indices?: number[]; confidence?: number }> };
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    console.error("[cluster-detect] failed to parse response:", err, "raw:", raw.substring(0, 300));
+    return 0;
+  }
+
+  const clusters = Array.isArray(parsed.clusters) ? parsed.clusters : [];
+  if (clusters.length === 0) return 0;
+
+  const groupRows: Array<Record<string, unknown>> = [];
+  for (const cluster of clusters) {
+    const title = typeof cluster.title === "string" ? cluster.title.trim() : "";
+    const indices = Array.isArray(cluster.item_indices) ? cluster.item_indices : [];
+    const confidence = typeof cluster.confidence === "number" ? cluster.confidence : 0;
+
+    if (!title || indices.length < 3 || confidence < 0.7) continue;
+
+    const proposalIds = indices
+      .map((i) => proposals[i]?.id)
+      .filter((id): id is string => typeof id === "string");
+
+    if (proposalIds.length < 3) continue;
+
+    groupRows.push({
+      user_id: userId,
+      source_meeting_id: meetingId,
+      suggested_title: title,
+      proposal_ids: proposalIds,
+      confidence,
+      status: "pending",
+    });
+  }
+
+  if (groupRows.length === 0) return 0;
+
+  const { error } = await adminClient.from("proposal_groups").insert(groupRows);
+  if (error) {
+    console.error("[cluster-detect] failed to insert proposal_groups:", error);
+    return 0;
+  }
+
+  return groupRows.length;
 }

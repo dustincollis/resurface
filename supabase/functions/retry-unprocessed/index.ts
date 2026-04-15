@@ -22,10 +22,10 @@ Deno.serve(async (req) => {
       .from("meetings")
       .select("id, transcript")
       .is("processed_at", null)
-      .not("transcript", "is", null)
-      .limit(5);
+      .not("transcript", "is", null);
 
     let parsedCount = 0;
+    const failures: Array<{ meeting_id: string; status?: number; detail: string }> = [];
     for (const meeting of unprocessed ?? []) {
       const transcript = meeting.transcript as string | null;
       if (!transcript || transcript.length < 100) continue;
@@ -50,11 +50,14 @@ Deno.serve(async (req) => {
           console.error(
             `[retry-unprocessed] parse failed for ${meeting.id}:`,
             parseRes.status,
-            detail.substring(0, 200)
+            detail.substring(0, 500)
           );
+          failures.push({ meeting_id: meeting.id, status: parseRes.status, detail: detail.substring(0, 1000) });
         }
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(`[retry-unprocessed] error for ${meeting.id}:`, err);
+        failures.push({ meeting_id: meeting.id, detail: msg });
       }
     }
 
@@ -63,6 +66,7 @@ Deno.serve(async (req) => {
         ok: true,
         unprocessed_found: (unprocessed ?? []).length,
         parsed: parsedCount,
+        failures,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

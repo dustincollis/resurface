@@ -12,6 +12,11 @@ interface ItemFilters {
   sort_by?: 'staleness_score' | 'last_touched_at' | 'due_date' | 'created_at'
   sort_ascending?: boolean
   limit?: number
+  // When true (the default), items with parent_id IS NOT NULL are excluded
+  // from the result. Children only render inside their parent's detail view
+  // via useChildItems. Pass `false` to opt back into a flat list (e.g.
+  // Stream Kanban or any debug view).
+  exclude_children?: boolean
 }
 
 export function useItems(filters?: ItemFilters) {
@@ -41,6 +46,13 @@ export function useItems(filters?: ItemFilters) {
         }
       }
 
+      // Hide children of grouped items by default. Children are only
+      // surfaced inside the parent's detail view (via useChildItems).
+      const excludeChildren = filters?.exclude_children ?? true
+      if (excludeChildren) {
+        query = query.is('parent_id', null)
+      }
+
       const sortBy = filters?.sort_by ?? 'created_at'
       const ascending = filters?.sort_ascending ?? false
       query = query.order(sortBy, { ascending })
@@ -51,7 +63,28 @@ export function useItems(filters?: ItemFilters) {
 
       const { data, error } = await query
       if (error) throw error
-      return data as Item[]
+      const items = data as Item[]
+
+      // Attach open child counts to any parent items so the UI can show a
+      // "N open tasks" chip. One extra query covers all parents at once.
+      if (items.length > 0) {
+        const parentIds = items.map((i) => i.id)
+        const { data: childRows } = await supabase
+          .from('items')
+          .select('parent_id')
+          .in('parent_id', parentIds)
+          .in('status', ['open', 'in_progress', 'waiting'])
+        const counts = new Map<string, number>()
+        for (const row of (childRows ?? []) as Array<{ parent_id: string }>) {
+          counts.set(row.parent_id, (counts.get(row.parent_id) ?? 0) + 1)
+        }
+        for (const item of items) {
+          const c = counts.get(item.id)
+          if (c && c > 0) item.open_children_count = c
+        }
+      }
+
+      return items
     },
     enabled: !!user,
   })
@@ -111,6 +144,7 @@ export function useUncategorizedItems() {
         .from('items')
         .select('*, streams(*)')
         .is('stream_id', null)
+        .is('parent_id', null)
         .order('created_at', { ascending: false })
       if (error) throw error
       return data as Item[]

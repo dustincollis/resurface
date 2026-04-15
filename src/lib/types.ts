@@ -45,6 +45,10 @@ export interface Item {
   tracking: boolean
   // Joined fields
   streams?: Stream | null
+  // Count of open/in_progress children (computed client-side from a
+  // separate aggregate query). Used to render a "N open tasks" chip on
+  // parent items in main lists.
+  open_children_count?: number
 }
 
 export interface ItemNote {
@@ -445,6 +449,28 @@ export interface Proposal {
   updated_at: string
   // Client-side derived (set by useProposals via a join query, not a column)
   source_title?: string | null
+}
+
+// ============================================================
+// Proposal groups: AI-suggested clusters of proposals from one meeting
+// that all contribute to a single named deliverable. Always pending
+// until the user accepts/rejects on the /proposals page.
+// ============================================================
+
+export type ProposalGroupStatus = 'pending' | 'accepted' | 'rejected'
+
+export interface ProposalGroup {
+  id: string
+  user_id: string
+  source_meeting_id: string
+  suggested_title: string
+  proposal_ids: string[]
+  confidence: number | null
+  status: ProposalGroupStatus
+  resulting_parent_item_id: string | null
+  created_at: string
+  reviewed_at: string | null
+  updated_at: string
 }
 
 export type IdeaStatus = 'surfaced' | 'exploring' | 'accepted' | 'dismissed' | 'archived'

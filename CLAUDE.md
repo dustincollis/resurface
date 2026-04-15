@@ -16,10 +16,10 @@ Note: The spec and setup guide use the name "Streamline" throughout. The project
 
 ## What Is Already Configured
 - Supabase project is provisioned and linked (`supabase/` directory exists)
-- Extensions enabled: pg_trgm, pgcrypto (do NOT enable pgvector, that is Phase 2)
+- Extensions enabled: pg_trgm, pgcrypto, vector (pgvector — enabled for semantic search over meeting chunks)
 - Supabase Auth configured: Email provider enabled, Site URL and redirects set for both localhost:5173 and the Vercel production URL
 - Storage bucket `transcripts` created (private, with RLS policy for user-owned folders)
-- Edge Function secrets are set: ANTHROPIC_API_KEY and SB_SERVICE_ROLE_KEY (note: the service role key uses the name SB_SERVICE_ROLE_KEY because Supabase reserves the SUPABASE_ prefix for secrets)
+- Edge Function secrets are set: ANTHROPIC_API_KEY, SB_SERVICE_ROLE_KEY, VOYAGE_API_KEY (note: the service role key uses the name SB_SERVICE_ROLE_KEY because Supabase reserves the SUPABASE_ prefix for secrets)
 - Vercel project is connected to this repo with env vars configured (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
 - Frontend scaffold: Vite + React + TypeScript initialized, all dependencies installed
 - Frontend env vars are in `.env.local` (not committed)

@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { Inbox, X, BarChart3 } from 'lucide-react'
 import { useProposals } from '../hooks/useProposals'
+import { usePendingProposalGroupsByMeeting } from '../hooks/useProposalGroups'
 import ProposalCard from '../components/ProposalCard'
+import GroupingSuggestion from '../components/GroupingSuggestion'
 import type { ProposalSourceType } from '../lib/types'
 
 export default function Proposals() {
@@ -19,6 +21,11 @@ export default function Proposals() {
   )
 
   const { data: proposals, isLoading } = useProposals(filter)
+
+  // Grouping suggestions only render when filtered to a single meeting --
+  // they need a meeting context to be coherent.
+  const meetingFilterId = sourceType === 'meeting' ? sourceId : null
+  const { data: pendingGroups } = usePendingProposalGroupsByMeeting(meetingFilterId)
 
   const clearFilter = () => {
     const next = new URLSearchParams(searchParams)
@@ -89,11 +96,20 @@ export default function Proposals() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {proposals.map((p) => (
-            <ProposalCard key={p.id} proposal={p} />
-          ))}
-        </div>
+        <>
+          {pendingGroups && pendingGroups.length > 0 && (
+            <div>
+              {pendingGroups.map((g) => (
+                <GroupingSuggestion key={g.id} group={g} />
+              ))}
+            </div>
+          )}
+          <div className="space-y-3">
+            {proposals.map((p) => (
+              <ProposalCard key={p.id} proposal={p} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

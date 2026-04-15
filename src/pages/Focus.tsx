@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff } from 'lucide-react'
+import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff, FolderTree } from 'lucide-react'
 import { useItems, useTouchItem, useUpdateItem, useUnsnoozeItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
@@ -145,6 +145,12 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               {(item.custom_fields?.company as string | undefined) && (
                 <span className="text-gray-600">{item.custom_fields.company as string}</span>
               )}
+              {item.open_children_count && item.open_children_count > 0 ? (
+                <span className="flex items-center gap-1 rounded-full border border-purple-900/40 bg-purple-950/30 px-1.5 py-0.5 text-[10px] text-purple-300">
+                  <FolderTree size={9} />
+                  {item.open_children_count} open task{item.open_children_count === 1 ? '' : 's'}
+                </span>
+              ) : null}
               {dueLabel && (
                 <span className={
                   dueLabel.tone === 'red' ? 'font-medium text-red-400'

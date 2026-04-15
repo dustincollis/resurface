@@ -7,6 +7,7 @@ Usage:
     python sync_hinotes.py --days 30    # sync last 30 days
     python sync_hinotes.py --backfill   # sync all, import_mode='archive'
     python sync_hinotes.py --dry-run    # preview what would sync, no writes
+    python sync_hinotes.py --backfill --no-parse  # ingest all, skip AI parsing
 
 Environment variables (required):
     HINOTES_ACCESS_TOKEN        — from browser DevTools (AccessToken header)
@@ -46,6 +47,68 @@ USER_ID = os.environ.get("RESURFACE_USER_ID", "")
 
 SOURCE = "hinotes_sync"
 EXTERNAL_ID_PREFIX = "hinotes:note:"
+
+# Path to Outlook calendar export (Power Automate JSON)
+CALENDAR_JSON = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "past-meetings.json")
+
+
+# ---------------------------------------------------------------------------
+# Calendar matching — enrich HiNotes recordings with Outlook event metadata
+# ---------------------------------------------------------------------------
+
+def load_outlook_events(path: str = CALENDAR_JSON) -> list:
+    """Load and parse Outlook calendar events from Power Automate JSON export."""
+    if not os.path.exists(path):
+        print(f"Calendar file not found: {path} — skipping calendar matching.")
+        return []
+    with open(path) as f:
+        data = json.load(f)
+    raw_events = data.get("body", {}).get("value", [])
+    events = []
+    for e in raw_events:
+        try:
+            start = datetime.fromisoformat(e["startWithTimeZone"])
+            end = datetime.fromisoformat(e["endWithTimeZone"])
+        except (KeyError, ValueError):
+            continue
+        attendee_str = e.get("requiredAttendees", "") or ""
+        # Parse "first_last@domain.com;..." into display names
+        attendee_names = []
+        for addr in attendee_str.split(";"):
+            addr = addr.strip()
+            if not addr or "@" not in addr:
+                continue
+            local = addr.split("@")[0]
+            # Convert first_last or first.last to "First Last"
+            name = " ".join(part.capitalize() for part in re.split(r"[._]", local))
+            attendee_names.append(name)
+        events.append({
+            "start": start,
+            "end": end,
+            "subject": e.get("subject", "").strip(),
+            "attendees": attendee_names,
+        })
+    events.sort(key=lambda x: x["start"])
+    print(f"Loaded {len(events)} Outlook calendar events for matching.")
+    return events
+
+
+def match_calendar_event(hn_utc: datetime, calendar_events: list):
+    """Find the Outlook event whose start is closest to hn_utc.
+
+    Window: HiNotes may start up to 5 min before the calendar slot (early join)
+    or up to 15 min after (late join / recording lag). Returns the best match
+    or None.
+    """
+    best = None
+    best_abs = timedelta(hours=99)
+    for ev in calendar_events:
+        delta = hn_utc - ev["start"]
+        if timedelta(minutes=-5) <= delta <= timedelta(minutes=15):
+            if abs(delta) < best_abs:
+                best_abs = abs(delta)
+                best = ev
+    return best
 
 
 def check_env():
@@ -350,7 +413,7 @@ def invoke_parser(meeting_id: str, transcript: str):
 # Sync logic
 # ---------------------------------------------------------------------------
 
-def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
+def sync(days: int = 7, backfill: bool = False, dry_run: bool = False, no_parse: bool = False):
     check_env()
 
     cutoff_ms = None
@@ -363,6 +426,9 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
     print(f"Mode: {'backfill (archive)' if backfill else f'last {days} days (active)'}")
     if dry_run:
         print("DRY RUN — no writes will be made.\n")
+
+    # Load Outlook calendar events for title/attendee enrichment
+    calendar_events = load_outlook_events()
 
     # Fetch existing synced IDs to skip already-synced notes
     if not dry_run:
@@ -405,7 +471,20 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
                 continue
 
             ts = datetime.fromtimestamp(create_time / 1000, tz=timezone.utc)
-            print(f"  [{ts.strftime('%Y-%m-%d %H:%M')}] {title}")
+
+            # Try to match to an Outlook calendar event
+            cal_match = match_calendar_event(ts, calendar_events)
+            if cal_match:
+                cal_title = cal_match["subject"]
+                cal_attendees = cal_match["attendees"]
+                delta_min = (ts - cal_match["start"]).total_seconds() / 60
+                print(f"  [{ts.strftime('%Y-%m-%d %H:%M')}] {title}")
+                print(f"    📅 Matched ({delta_min:+.0f}min): \"{cal_title[:70]}\"")
+                if cal_attendees:
+                    print(f"    👥 {', '.join(cal_attendees[:6])}{' ...' if len(cal_attendees) > 6 else ''}")
+            else:
+                print(f"  [{ts.strftime('%Y-%m-%d %H:%M')}] {title}")
+                print(f"    📅 No calendar match")
 
             if dry_run:
                 synced += 1
@@ -460,9 +539,25 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
             if duration_ms > 0:
                 end_time = (ts + timedelta(milliseconds=duration_ms)).isoformat()
 
+            # Use calendar subject as title when matched (better than .hda filenames
+            # or HiNotes' generic AI titles). Merge attendees from both sources.
+            final_title = title
+            if cal_match and cal_match["subject"]:
+                final_title = cal_match["subject"]
+            # Merge: calendar attendees (real names from email) + transcript/summary
+            # attendees. Calendar attendees go first since they're higher quality.
+            if cal_match and cal_match["attendees"]:
+                seen = {a.lower() for a in attendees}
+                merged = list(attendees)
+                for ca in cal_match["attendees"]:
+                    if ca.lower() not in seen:
+                        seen.add(ca.lower())
+                        merged.append(ca)
+                attendees = merged
+
             row = {
                 "user_id": USER_ID,
-                "title": title,
+                "title": final_title,
                 "start_time": ts.isoformat(),
                 "end_time": end_time,
                 "attendees": attendees,
@@ -492,13 +587,17 @@ def sync(days: int = 7, backfill: bool = False, dry_run: bool = False):
 
             print(f"    Inserted: {meeting_id}")
 
-            # Invoke parser
-            ok = invoke_parser(meeting_id, transcript)
-            if ok:
-                print(f"    Parsed successfully.")
+            # Invoke parser (skip with --no-parse for ingest-only runs)
+            if no_parse:
+                print(f"    Ingested (parser skipped).")
                 synced += 1
             else:
-                errors += 1
+                ok = invoke_parser(meeting_id, transcript)
+                if ok:
+                    print(f"    Parsed successfully.")
+                    synced += 1
+                else:
+                    errors += 1
 
             # Brief pause to avoid hammering APIs
             time.sleep(0.5)
@@ -521,6 +620,7 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=7, help="Sync meetings from the last N days (default: 7)")
     parser.add_argument("--backfill", action="store_true", help="Sync all meetings as archive (no proposals)")
     parser.add_argument("--dry-run", action="store_true", help="Preview what would sync without writing")
+    parser.add_argument("--no-parse", action="store_true", help="Ingest only — skip AI parsing (can parse later)")
     args = parser.parse_args()
 
-    sync(days=args.days, backfill=args.backfill, dry_run=args.dry_run)
+    sync(days=args.days, backfill=args.backfill, dry_run=args.dry_run, no_parse=args.no_parse)

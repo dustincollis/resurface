@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Calendar } from 'lucide-react'
+import { Calendar, FolderTree } from 'lucide-react'
 import StatusBadge from './StatusBadge'
 import { effectiveStalenessLevel, stalenessFillClass } from '../lib/priorityScore'
 import type { Item } from '../lib/types'
@@ -64,6 +64,12 @@ export default function ItemCard({ item }: { item: Item }) {
               no stream
             </span>
           )}
+          {item.open_children_count && item.open_children_count > 0 ? (
+            <span className="flex flex-shrink-0 items-center gap-1 rounded-full border border-purple-900/40 bg-purple-950/30 px-1.5 py-0.5 text-[10px] text-purple-300">
+              <FolderTree size={9} />
+              {item.open_children_count}
+            </span>
+          ) : null}
         </div>
         {item.next_action && (
           <div className="mt-0.5 truncate text-xs text-gray-400">

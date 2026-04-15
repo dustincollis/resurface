@@ -366,39 +366,42 @@ Deno.serve(async (req) => {
       console.warn("[jamie-webhook] identity resolution warning:", linkErr);
     }
 
-    // ----- Invoke parser (awaited) -----
-    // Must await the parser call — Deno.serve kills the isolate once the
-    // Response is returned, so fire-and-forget fetch never completes.
-    // Use AbortSignal.timeout to stay within Supabase's 60s edge function
-    // limit. If the parser fails, compute-staleness will retry later.
-    let parseStatus = "pending";
-    try {
-      const parseRes = await fetch(
-        `${supabaseUrl}/functions/v1/ai-parse-transcript`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${serviceRoleKey}`,
-          },
-          body: JSON.stringify({
-            meeting_id: meetingId,
-            transcript: formattedTranscript,
-          }),
-          signal: AbortSignal.timeout(55000),
-        }
-      );
-      if (parseRes.ok) {
-        parseStatus = "success";
-        console.log("[jamie-webhook] parser succeeded for", meetingId);
-      } else {
-        const detail = await parseRes.text().catch(() => "");
-        parseStatus = "failed";
-        console.error("[jamie-webhook] parser failed:", parseRes.status, detail.substring(0, 500));
+    // ----- Invoke parser (fire-and-forget via waitUntil) -----
+    // Kick off the parser in the background so the parse duration is
+    // independent of this webhook's response time. Transcript size must
+    // NOT constrain ingestion. EdgeRuntime.waitUntil keeps the isolate
+    // alive after the Response is returned so the parse fetch completes.
+    // If the parser fails, retry-unprocessed will catch it later.
+    const parseTask = fetch(
+      `${supabaseUrl}/functions/v1/ai-parse-transcript`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+        body: JSON.stringify({
+          meeting_id: meetingId,
+          transcript: formattedTranscript,
+        }),
       }
-    } catch (err) {
-      parseStatus = "failed";
-      console.error("[jamie-webhook] parser error:", err);
+    )
+      .then(async (parseRes) => {
+        if (parseRes.ok) {
+          console.log("[jamie-webhook] parser succeeded for", meetingId);
+        } else {
+          const detail = await parseRes.text().catch(() => "");
+          console.error("[jamie-webhook] parser failed:", parseRes.status, detail.substring(0, 500));
+        }
+      })
+      .catch((err) => {
+        console.error("[jamie-webhook] parser error:", err);
+      });
+
+    // deno-lint-ignore no-explicit-any
+    const edgeRuntime = (globalThis as any).EdgeRuntime;
+    if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+      edgeRuntime.waitUntil(parseTask);
     }
 
     await finalizeLog(200, meetingId);
@@ -410,7 +413,7 @@ Deno.serve(async (req) => {
         title,
         attendees,
         segments_count: segments.length,
-        parse_status: parseStatus,
+        parse_status: "dispatched",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
