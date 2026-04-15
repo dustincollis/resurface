@@ -81,6 +81,29 @@ export function useProposals(filters?: ProposalFilters) {
         }
       }
 
+      // Same enrichment for review inputs (emails, screenshots, pasted text).
+      const inputIds = Array.from(
+        new Set(
+          proposals
+            .filter((p) => p.source_type === 'input' && p.source_id)
+            .map((p) => p.source_id as string)
+        )
+      )
+      if (inputIds.length > 0) {
+        const { data: inputRows } = await supabase
+          .from('inputs')
+          .select('id, title')
+          .in('id', inputIds)
+        const titleById = new Map(
+          (inputRows ?? []).map((m) => [m.id as string, m.title as string])
+        )
+        for (const p of proposals) {
+          if (p.source_type === 'input' && p.source_id) {
+            p.source_title = titleById.get(p.source_id) ?? null
+          }
+        }
+      }
+
       return proposals
     },
     enabled: !!user,

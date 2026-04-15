@@ -31,6 +31,7 @@ create index if not exists idx_delegated_items_user_created on delegated_items(u
 create index if not exists idx_delegated_items_proposal on delegated_items(proposal_id) where proposal_id is not null;
 
 alter table delegated_items enable row level security;
+drop policy if exists "Users can manage own delegated items" on delegated_items;
 create policy "Users can manage own delegated items"
   on delegated_items for all
   using (auth.uid() = user_id)

@@ -14,6 +14,7 @@ import ItemDetail from './pages/ItemDetail'
 import Meetings from './pages/Meetings'
 import MeetingDetail from './pages/MeetingDetail'
 import Proposals from './pages/Proposals'
+import ReviewInput from './pages/ReviewInput'
 import Commitments from './pages/Commitments'
 import Pursuits from './pages/Pursuits'
 import PursuitDetail from './pages/PursuitDetail'
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="meetings" element={<Meetings />} />
               <Route path="meetings/:id" element={<MeetingDetail />} />
               <Route path="proposals" element={<Proposals />} />
+              <Route path="review-input" element={<ReviewInput />} />
               <Route path="proposals/analytics" element={<ProposalAnalytics />} />
               <Route path="commitments" element={<Commitments />} />
               <Route path="pursuits" element={<Pursuits />} />

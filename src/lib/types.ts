@@ -154,6 +154,7 @@ export type ProposalSourceType =
   | 'chat'
   | 'manual'
   | 'reconciliation'
+  | 'input'
 
 export type ProposalStatus =
   | 'pending'
@@ -449,6 +450,29 @@ export interface Proposal {
   updated_at: string
   // Client-side derived (set by useProposals via a join query, not a column)
   source_title?: string | null
+}
+
+// ============================================================
+// Review Inputs: manually-captured emails, screenshots, pasted text.
+// Same downstream pipeline as meetings -- produces proposals.
+// ============================================================
+
+export type ReviewInputType = 'email' | 'screenshot' | 'pasted_text'
+
+export interface ReviewInput {
+  id: string
+  user_id: string
+  input_type: ReviewInputType
+  title: string
+  user_description: string | null
+  raw_text: string | null
+  storage_path: string | null
+  mime_type: string | null
+  metadata: Record<string, unknown>
+  processed_at: string | null
+  processing_error: string | null
+  created_at: string
+  updated_at: string
 }
 
 // ============================================================
