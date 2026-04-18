@@ -33,7 +33,7 @@ mcp-server/      -- Local MCP server for Claude Desktop/Code
 - `npm run lint` -- run ESLint
 - `supabase functions serve` -- serve Edge Functions locally
 - `supabase db push` -- push migrations to remote
-- `supabase functions deploy <name>` -- deploy a single Edge Function
+- `npm run deploy:functions` -- deploy all edge functions (or pass names: `npm run deploy:functions -- ai-parse-transcript ai-parse-input`). **Use this, not `supabase functions deploy` directly** — the script bakes in `--no-verify-jwt`, which every function in this repo requires (they handle auth in code; without the flag the gateway 401s webhook sources and breaks external integrations).
 
 ## Code Style
 - Functional components only (no class components)
