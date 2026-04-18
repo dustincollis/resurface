@@ -26,9 +26,30 @@ function chunkMarkdown(title: string, markdown: string): Chunk[] {
 
   function flush() {
     const text = buffer.join("\n").trim();
-    if (text.length < 30) return; // Skip near-empty sections
+    if (text.length < 30) return;
     const path = h3 ? `${h2} > ${h3}` : h2;
-    chunks.push({ section_path: path, content: text });
+
+    // Roster detection: if a section is mostly bullet lines (≥6 bullets),
+    // split per-entry so each company/person is individually retrievable.
+    const bulletLines = text.split("\n").filter((l) => /^[-*]\s+/.test(l.trim()));
+    const totalLines = text.split("\n").filter((l) => l.trim()).length;
+    const isRoster = bulletLines.length >= 6 && bulletLines.length / totalLines > 0.5;
+
+    if (isRoster) {
+      // Each bullet becomes its own chunk: "Section > Entry Name"
+      for (const bullet of bulletLines) {
+        const entry = bullet.replace(/^[-*]\s+/, "").trim();
+        if (entry.length < 10) continue;
+        // Derive a short name for the section_path (first bold/company name or first 40 chars)
+        const boldMatch = entry.match(/\*\*([^*]+)\*\*/);
+        const entryName = boldMatch
+          ? boldMatch[1].trim()
+          : entry.replace(/\s*[:\-–].*/s, "").trim().slice(0, 50);
+        chunks.push({ section_path: `${path} > ${entryName}`, content: entry });
+      }
+    } else {
+      chunks.push({ section_path: path, content: text });
+    }
     buffer = [];
   }
 

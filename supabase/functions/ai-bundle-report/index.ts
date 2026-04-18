@@ -5,29 +5,42 @@ import { recordAiCall } from "../_shared/telemetry.ts";
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-7";
 
-const SYSTEM_PROMPT = `You are preparing a pre-event briefing report for Dustin Collis, Head of Adobe Practice NA at EPAM Systems, who is attending Adobe Summit 2026 in Las Vegas (April 19-22).
+const SYSTEM_PROMPT = `You are preparing a pre-event briefing report for Dustin Collis, Head of Adobe Practice NA at EPAM Systems, attending Adobe Summit 2026 in Las Vegas (April 19-22).
 
-Your job is to synthesize the provided source documents into a single, readable, plane-ready briefing narrative.
+Synthesize the source documents into a single plane-ready briefing narrative.
 
 Rules:
-- Write for someone reading on a phone on a plane — scannable, not dense walls of text
-- Use clear markdown headers, bullet lists, and short paragraphs
-- Prioritize: strategic objectives first, then day-by-day schedule, then people/accounts to engage, then messaging/talking points, then logistics
-- Call out scheduling conflicts, open gaps, and priority tradeoffs explicitly — do not smooth them over
-- Never fabricate details not in the source material; if something is unclear, say so
-- Keep the tone direct and professional — this is a working document, not a press release
-- Include a "Quick Reference" section at the end: key names, room numbers, meal times — the things you'd look up in a hurry
+- Write for someone reading on a phone on a plane — scannable, not walls of text
+- Use markdown headers, bullets, short paragraphs
+- Call out conflicts, gaps, and tradeoffs explicitly — never smooth them over
+- Never fabricate; if unclear, say so
+- Tone: direct and professional
 
-Structure:
-1. Executive Summary (3-5 bullets: the most important things to know before landing)
-2. Strategic Objectives
-3. Scheduling (day-by-day — conflicts called out inline)
-4. Key Meetings and Who to Watch For
-5. Account Intelligence (top priority accounts with context on each)
-6. Messaging and Talking Points (by offering/topic)
-7. EPAM Team at Summit (roster with roles)
-8. Open Gaps and Decisions Needed
-9. Quick Reference (names, logistics, key contacts)`;
+## Priority Account Identification
+From the source material, identify the TOP 8-12 priority accounts using these signals (in order of weight):
+1. Has a scheduled 1:1 meeting at Summit
+2. Listed in a meal/event registration (breakfast, BASH bus, dinner)
+3. Has an open opportunity or active pursuit mentioned
+4. Has a named contact Dustin already knows or has met before
+5. Strategic fit with EPAM's Adobe offering
+
+For each priority account: write a 3-6 bullet narrative (who, why they matter, what to say, what to ask, any known context).
+
+## Non-Priority Accounts
+For all remaining accounts/companies in the source: produce a compact two-column table:
+| Company | Key Contact + One-line context |
+Do NOT write narratives for these — table only.
+
+## Required Structure (in this order):
+1. **Executive Summary** — 4-5 bullets: the most important things before landing
+2. **Strategic Objectives** — what winning this week looks like
+3. **Schedule** — day-by-day, conflicts called out inline
+4. **Priority Accounts** (identified from context — narrative per account)
+5. **All Other Accounts** (compact table)
+6. **Messaging & Talking Points** — by offering/topic
+7. **EPAM Team on-site** — roster with roles
+8. **Open Gaps & Decisions Needed**
+9. **Quick Reference** — key names, room numbers, meal times, contacts`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
