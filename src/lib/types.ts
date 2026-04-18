@@ -518,6 +518,73 @@ export interface AiCallTelemetry {
   created_at: string
 }
 
+// ============================================================
+// Context Bundles — queryable event/briefing packs
+// ============================================================
+
+export type BundleKind = 'event' | 'onsite' | 'qbr' | 'other'
+export type BundleStatus = 'draft' | 'ingesting' | 'ready' | 'error'
+export type BundleGapState = 'open' | 'resolved' | 'deferred'
+
+export interface Bundle {
+  id: string
+  user_id: string
+  name: string
+  kind: BundleKind
+  description: string | null
+  starts_at: string | null
+  ends_at: string | null
+  status: BundleStatus
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface BundleDocument {
+  id: string
+  bundle_id: string
+  title: string
+  content_md: string
+  position: number
+  created_at: string
+}
+
+export interface BundleEntity {
+  id: string
+  bundle_id: string
+  entity_type: 'person' | 'company'
+  entity_id: string | null
+  raw_name: string
+  mention_count: number
+  created_at: string
+}
+
+export interface BundleGap {
+  id: string
+  bundle_id: string
+  content: string
+  state: BundleGapState
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+export interface BundleReport {
+  id: string
+  bundle_id: string
+  content_md: string
+  model: string
+  generated_at: string
+}
+
+export interface CreateBundlePayload {
+  name: string
+  kind?: BundleKind
+  description?: string | null
+  starts_at?: string | null
+  ends_at?: string | null
+}
+
 export type IdeaStatus = 'surfaced' | 'exploring' | 'accepted' | 'dismissed' | 'archived'
 
 export type IdeaCategory =

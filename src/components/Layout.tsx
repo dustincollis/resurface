@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, BarChart3, Plus } from 'lucide-react'
+import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, BarChart3, Plus, MapPin } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/goals', icon: Flag, label: 'Goals' },
   { to: '/ideas', icon: Lightbulb, label: 'Ideas' },
   { to: '/meetings', icon: Calendar, label: 'Discussions' },
+  { to: '/events', icon: MapPin, label: 'Events' },
 ]
 
 const directoryItems = [

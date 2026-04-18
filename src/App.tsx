@@ -31,6 +31,9 @@ import CompanyDetail from './pages/CompanyDetail'
 import ProposalAnalytics from './pages/ProposalAnalytics'
 import Settings from './pages/Settings'
 import MicrosoftCallback from './pages/MicrosoftCallback'
+import BundleLayout from './components/BundleLayout'
+import Events from './pages/Events'
+import EventDetail from './pages/EventDetail'
 
 export default function App() {
   return (
@@ -66,6 +69,11 @@ export default function App() {
               <Route path="settings/analytics/landscape" element={<Landscape />} />
               <Route path="settings/analytics/ai-calls" element={<AiCalls />} />
               <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
+            </Route>
+            {/* Bundle routes — no sidebar, full viewport */}
+            <Route element={<BundleLayout />}>
+              <Route path="events" element={<Events />} />
+              <Route path="events/:id" element={<EventDetail />} />
             </Route>
           </Routes>
         </AuthProvider>
