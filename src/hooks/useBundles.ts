@@ -94,6 +94,14 @@ export function useBundleGaps(bundleId: string) {
 // ============================================================
 // Create a bundle (metadata only — ingest happens separately)
 // ============================================================
+function extractError(err: unknown): Error {
+  if (err instanceof Error) return err
+  if (err && typeof err === 'object' && 'message' in err) {
+    return new Error(String((err as { message: unknown }).message))
+  }
+  return new Error(String(err))
+}
+
 export function useCreateBundle() {
   return useMutation({
     mutationFn: async (payload: CreateBundlePayload) => {
@@ -102,7 +110,7 @@ export function useCreateBundle() {
         .insert(payload)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw extractError(error)
       return data as Bundle
     },
     onSuccess: () => {
@@ -126,7 +134,18 @@ export function useIngestBundle() {
       const { data, error } = await supabase.functions.invoke('ai-bundle-ingest', {
         body: { bundle_id: bundleId, documents },
       })
-      if (error) throw error
+      if (error) {
+        const ctx = (error as { context?: Response }).context
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json()
+            throw new Error(body?.error ?? body?.message ?? 'Ingest failed')
+          } catch (e) {
+            if (e instanceof Error) throw e
+          }
+        }
+        throw extractError(error)
+      }
       return data as { ok: boolean; chunks: number; people: number; companies: number; gaps: number }
     },
     onSuccess: (_data, vars) => {
@@ -148,7 +167,7 @@ export function useUpdateBundleGap() {
         .from('bundle_gaps')
         .update({ state, updated_at: new Date().toISOString() })
         .eq('id', gapId)
-      if (error) throw error
+      if (error) throw extractError(error)
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['bundle_gaps', vars.bundleId] })
@@ -163,7 +182,7 @@ export function useDeleteBundle() {
   return useMutation({
     mutationFn: async (bundleId: string) => {
       const { error } = await supabase.from('bundles').delete().eq('id', bundleId)
-      if (error) throw error
+      if (error) throw extractError(error)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bundles'] })
