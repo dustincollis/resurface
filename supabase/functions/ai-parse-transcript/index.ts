@@ -1,9 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
 import {
-  resolvePerson,
-  resolveCompany,
   resolveAttendees,
+  createIdentityResolver,
 } from "../_shared/resolve-identity.ts";
 import { recordAiCall } from "../_shared/telemetry.ts";
 
@@ -715,6 +714,10 @@ async function handleHistoricalMode(
       ? parsed.company.trim()
       : null;
 
+  // One resolver per request — preloads people+companies once so all
+  // per-participant / per-commitment / per-idea resolves run from cache.
+  const resolver = createIdentityResolver(adminClient, userId);
+
   // Update meeting record
   const meetingUpdate: Record<string, unknown> = {
     ...(typeof bodyTranscript === "string" && (bodyTranscript as string).length >= 100
@@ -765,11 +768,11 @@ async function handleHistoricalMode(
       const companyName = p.company ?? discussionCompany;
       if (companyName) {
         try {
-          companyId = await resolveCompany(adminClient, userId, companyName);
+          companyId = await resolver.resolveCompany(companyName);
         } catch { /* non-fatal */ }
       }
 
-      const personId = await resolvePerson(adminClient, userId, {
+      const personId = await resolver.resolvePerson({
         raw: p.name.trim(),
         companyId,
       });
@@ -851,7 +854,7 @@ async function handleHistoricalMode(
     let companyId: string | null = null;
     if (companyName) {
       try {
-        companyId = await resolveCompany(adminClient, userId, companyName);
+        companyId = await resolver.resolveCompany(companyName);
       } catch { /* store name only */ }
     }
 
