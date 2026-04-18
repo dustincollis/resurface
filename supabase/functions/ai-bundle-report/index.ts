@@ -5,43 +5,202 @@ import { recordAiCall } from "../_shared/telemetry.ts";
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-7";
 
-const SYSTEM_PROMPT = `You are preparing a pre-event briefing report for Dustin Collis, Head of Adobe Practice NA at EPAM Systems, attending Adobe Summit 2026 in Las Vegas (April 19-22).
+const SYSTEM_PROMPT = `You are preparing a pre-event briefing report for Dustin Collis, Head of Adobe Practice NA at EPAM Systems.
 
-Synthesize the source documents into a single plane-ready briefing narrative.
+You have two sources:
+1. BUNDLE: the event briefing — who is attending, what meetings are scheduled, what the agenda looks like
+2. RESURFACE CONTEXT: what Dustin's own meeting history and work system already knows about those attendees
+
+Your job is to cross-reference them and produce an actionable engagement plan.
+
+## Priority Ranking Logic
+An attendee or account is PRIORITY if one or more of these is true (ranked by weight):
+- Resurface has meeting transcripts or notes with them (existing relationship)
+- Resurface has open commitments to/from them (something owed or pending)
+- Resurface has an active pursuit for their account
+- They have a scheduled 1:1 meeting at this event
+- They are registered for a meal/event Dustin is also attending (breakfast, BASH, dinners)
+
+An attendee is DE-PRIORITIZED if:
+- No Resurface history at all, and no scheduled touchpoint at this event
+- Listed only in a general attendee roster with no other signal
+
+## Required Report Structure
+
+### 1. Executive Summary (5 bullets max — the most important things before landing)
+
+### 2. Priority Accounts — Full Narratives
+For each priority account: write a focused brief:
+- **Why they're priority** (cite the signal: "3 prior meetings", "open commitment to demo TargetCue", "registered for breakfast")
+- **What you know** from Resurface (key topics discussed, what they care about, any commitments)
+- **What to do** at this event (specific ask, question to raise, or follow-up to close)
+- **Who to find** (name, role, when/where you'll see them)
+
+### 3. Warm Contacts — No Current Action Required
+Accounts where a relationship exists but no immediate action is needed. One line each.
+
+### 4. Cold Contacts — De-prioritized
+Everyone else at the event with no Resurface history and no scheduled touchpoint. Compact table:
+| Company | Contact | Notes from briefing |
+
+### 5. Schedule
+Day-by-day. Conflicts called out inline.
+
+### 6. Messaging & Talking Points
+By EPAM offering/topic. Only what's relevant to the priority accounts.
+
+### 7. Open Gaps
+What's still unresolved that affects planning.
+
+### 8. Quick Reference
+Key names, room numbers, meal times, logistics. The things you look up in a hurry.
 
 Rules:
-- Write for someone reading on a phone on a plane — scannable, not walls of text
-- Use markdown headers, bullets, short paragraphs
-- Call out conflicts, gaps, and tradeoffs explicitly — never smooth them over
-- Never fabricate; if unclear, say so
-- Tone: direct and professional
+- Cite sources: [Briefing] or [Resurface] for every factual claim
+- Never fabricate — if Resurface has nothing on a person, say so
+- Write for mobile reading — short paragraphs, bullets, no walls of text`;
 
-## Priority Account Identification
-From the source material, identify the TOP 8-12 priority accounts using these signals (in order of weight):
-1. Has a scheduled 1:1 meeting at Summit
-2. Listed in a meal/event registration (breakfast, BASH bus, dinner)
-3. Has an open opportunity or active pursuit mentioned
-4. Has a named contact Dustin already knows or has met before
-5. Strategic fit with EPAM's Adobe offering
+// ============================================================
+// Resurface context loader
+// For each bundle entity (person or company), fetch what
+// Resurface knows: meetings, commitments, items, pursuits.
+// Returns a compact text block per entity, capped to avoid
+// blowing out the context window.
+// ============================================================
 
-For each priority account: write a 3-6 bullet narrative (who, why they matter, what to say, what to ask, any known context).
+interface EntityContext {
+  name: string;
+  type: "person" | "company";
+  resurface: string; // compact text summary
+  hasHistory: boolean;
+}
 
-## Non-Priority Accounts
-For all remaining accounts/companies in the source: produce a compact two-column table:
-| Company | Key Contact + One-line context |
-Do NOT write narratives for these — table only.
+async function loadResurfaceContext(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  bundleId: string
+): Promise<EntityContext[]> {
+  // Load all bundle entities
+  const { data: entities } = await adminClient
+    .from("bundle_entities")
+    .select("raw_name, entity_type, entity_id")
+    .eq("bundle_id", bundleId)
+    .order("mention_count", { ascending: false })
+    .limit(200); // cap at 200 entities to avoid runaway queries
 
-## Required Structure (in this order):
-1. **Executive Summary** — 4-5 bullets: the most important things before landing
-2. **Strategic Objectives** — what winning this week looks like
-3. **Schedule** — day-by-day, conflicts called out inline
-4. **Priority Accounts** (identified from context — narrative per account)
-5. **All Other Accounts** (compact table)
-6. **Messaging & Talking Points** — by offering/topic
-7. **EPAM Team on-site** — roster with roles
-8. **Open Gaps & Decisions Needed**
-9. **Quick Reference** — key names, room numbers, meal times, contacts`;
+  if (!entities || entities.length === 0) return [];
 
+  const results: EntityContext[] = [];
+
+  // Process in parallel batches of 20
+  const BATCH = 20;
+  for (let i = 0; i < entities.length; i += BATCH) {
+    const batch = entities.slice(i, i + BATCH);
+    const batchResults = await Promise.all(
+      batch.map(async (entity) => {
+        const name = entity.raw_name as string;
+        const type = entity.entity_type as "person" | "company";
+        const lines: string[] = [];
+
+        try {
+          if (type === "person") {
+            // Search meetings by attendee name (text search on attendees/title)
+            const [meetingsRes, commitmentsRes, memoriesRes] = await Promise.all([
+              adminClient
+                .from("meetings")
+                .select("title, start_time, summary")
+                .eq("user_id", userId)
+                .or(`attendees.ilike.%${name}%,title.ilike.%${name}%`)
+                .order("start_time", { ascending: false })
+                .limit(3),
+              adminClient
+                .from("commitments")
+                .select("title, status, direction, do_by")
+                .eq("user_id", userId)
+                .ilike("counterpart", `%${name}%`)
+                .neq("status", "met")
+                .limit(5),
+              adminClient
+                .from("memories")
+                .select("content")
+                .eq("user_id", userId)
+                .ilike("content", `%${name}%`)
+                .limit(3),
+            ]);
+
+            const meetings = meetingsRes.data ?? [];
+            const commitments = commitmentsRes.data ?? [];
+            const memories = memoriesRes.data ?? [];
+
+            if (meetings.length > 0) {
+              lines.push(`Meetings (${meetings.length}): ${meetings.map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}`).join("; ")}`);
+            }
+            if (commitments.length > 0) {
+              lines.push(`Open commitments: ${commitments.map((c) => `[${c.direction}] ${c.title} (${c.status})`).join("; ")}`);
+            }
+            if (memories.length > 0) {
+              lines.push(`Notes: ${memories.map((m) => m.content).join("; ").slice(0, 300)}`);
+            }
+          } else {
+            // Company lookup
+            const [meetingsRes, pursuitsRes, commitmentsRes] = await Promise.all([
+              adminClient
+                .from("meetings")
+                .select("title, start_time")
+                .eq("user_id", userId)
+                .or(`title.ilike.%${name}%,attendees.ilike.%${name}%`)
+                .order("start_time", { ascending: false })
+                .limit(3),
+              adminClient
+                .from("pursuits")
+                .select("name, stage, status")
+                .eq("user_id", userId)
+                .ilike("name", `%${name}%`)
+                .limit(3),
+              adminClient
+                .from("commitments")
+                .select("title, status, direction")
+                .eq("user_id", userId)
+                .ilike("company", `%${name}%`)
+                .neq("status", "met")
+                .limit(5),
+            ]);
+
+            const meetings = meetingsRes.data ?? [];
+            const pursuits = pursuitsRes.data ?? [];
+            const commitments = commitmentsRes.data ?? [];
+
+            if (meetings.length > 0) {
+              lines.push(`Meetings (${meetings.length}): ${meetings.map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}`).join("; ")}`);
+            }
+            if (pursuits.length > 0) {
+              lines.push(`Pursuits: ${pursuits.map((p) => `${p.name} [${p.stage ?? p.status}]`).join("; ")}`);
+            }
+            if (commitments.length > 0) {
+              lines.push(`Open commitments: ${commitments.map((c) => `${c.title} (${c.status})`).join("; ")}`);
+            }
+          }
+        } catch {
+          // Per-entity failure is non-fatal
+        }
+
+        return {
+          name,
+          type,
+          resurface: lines.join("\n"),
+          hasHistory: lines.length > 0,
+        };
+      })
+    );
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
+// ============================================================
+// Main handler
+// ============================================================
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -105,43 +264,61 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Load all source documents
-    const { data: docs, error: docsError } = await adminClient
-      .from("bundle_documents")
-      .select("title, content_md, position")
-      .eq("bundle_id", bundle_id)
-      .order("position");
+    // Load source docs, gaps, and Resurface context in parallel
+    const [docsRes, gapsRes, entityContexts] = await Promise.all([
+      adminClient
+        .from("bundle_documents")
+        .select("title, content_md, position")
+        .eq("bundle_id", bundle_id)
+        .order("position"),
+      adminClient
+        .from("bundle_gaps")
+        .select("content, state")
+        .eq("bundle_id", bundle_id)
+        .order("position"),
+      loadResurfaceContext(adminClient, userId, bundle_id),
+    ]);
 
-    if (docsError || !docs || docs.length === 0) {
+    if (docsRes.error || !docsRes.data || docsRes.data.length === 0) {
       return new Response(
         JSON.stringify({ error: "No documents found in bundle" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Load gaps for context
-    const { data: gaps } = await adminClient
-      .from("bundle_gaps")
-      .select("content, state")
-      .eq("bundle_id", bundle_id)
-      .order("position");
-
-    // Compose the context block
-    const sourceContent = docs
+    // Build source content block
+    const sourceContent = docsRes.data
       .map((d) => `# ${d.title}\n\n${d.content_md}`)
       .join("\n\n---\n\n");
 
     const gapsBlock =
-      gaps && gaps.length > 0
-        ? `\n\n---\n\n# Open Gaps and Unknowns\n\n${gaps.map((g) => `- ${g.content}`).join("\n")}`
+      gapsRes.data && gapsRes.data.length > 0
+        ? `\n\n---\n\n# Open Gaps\n\n${gapsRes.data.map((g) => `- ${g.content}`).join("\n")}`
         : "";
 
-    const userContent = `Bundle name: ${bundle.name}
+    // Build Resurface context block — with-history entities first, then cold
+    const withHistory = entityContexts.filter((e) => e.hasHistory);
+    const cold = entityContexts.filter((e) => !e.hasHistory);
 
-SOURCE DOCUMENTS:
+    const resurfaceBlock = [
+      `## Resurface: Entities with existing history (${withHistory.length})`,
+      ...withHistory.map((e) => `**${e.name}** (${e.type})\n${e.resurface}`),
+      `\n## Resurface: No history found (${cold.length})`,
+      cold.map((e) => e.name).join(", "),
+    ].join("\n\n");
+
+    const userContent = `Bundle: ${bundle.name}
+
+---
+BRIEFING DOCUMENTS:
 ${sourceContent}${gapsBlock}
 
-Generate the plane-ready briefing report now.`;
+---
+RESURFACE CROSS-REFERENCE:
+${resurfaceBlock}
+
+---
+Generate the engagement report now. Cross-reference the briefing attendee lists against the Resurface context to produce the priority/warm/cold ranking.`;
 
     const t0 = Date.now();
     const res = await fetch(ANTHROPIC_API, {
@@ -162,12 +339,7 @@ Generate the plane-ready briefing report now.`;
             cache_control: { type: "ephemeral" },
           },
         ],
-        messages: [
-          {
-            role: "user",
-            content: userContent,
-          },
-        ],
+        messages: [{ role: "user", content: userContent }],
       }),
     });
 
@@ -180,13 +352,11 @@ Generate the plane-ready briefing report now.`;
 
     const data = await res.json();
 
-    // Extract text blocks (skip thinking blocks)
     const reportText = (data.content as { type: string; text?: string }[])
       .filter((b) => b.type === "text")
       .map((b) => b.text ?? "")
       .join("");
 
-    // Store report (delete prior, insert new — one current report per bundle)
     await adminClient.from("bundle_reports").delete().eq("bundle_id", bundle_id);
     const { data: savedReport, error: saveError } = await adminClient
       .from("bundle_reports")
@@ -210,6 +380,10 @@ Generate the plane-ready briefing report now.`;
       latency_ms: latencyMs,
       source_type: "bundle",
       source_id: bundle_id,
+      metadata: {
+        entities_with_history: withHistory.length,
+        entities_cold: cold.length,
+      },
     });
 
     return new Response(
@@ -217,6 +391,7 @@ Generate the plane-ready briefing report now.`;
         ok: true,
         report_id: savedReport?.id,
         content_md: reportText,
+        stats: { with_history: withHistory.length, cold: cold.length },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
