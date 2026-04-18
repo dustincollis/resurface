@@ -224,9 +224,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Build the prompt based on mode
-    const prompt = parseMode === "historical"
-      ? buildHistoricalPrompt({
+    // Build system (stable, cacheable) + user message (per-call) separately.
+    // The system prompt is marked with cache_control so the ~4-10K tokens of
+    // extraction instructions are served from cache on subsequent calls
+    // (roughly 0.1x the normal input price). See shared/prompt-caching.md.
+    const systemPrompt = parseMode === "historical"
+      ? buildHistoricalSystemPrompt(userDisplayName)
+      : buildActiveSystemPrompt(userDisplayName);
+
+    const userMessage = parseMode === "historical"
+      ? buildHistoricalUserMessage({
           userDisplayName,
           attendees: meeting.attendees as string[] | null,
           userContext: typeof user_context === "string" ? user_context : "",
@@ -236,7 +243,7 @@ Deno.serve(async (req) => {
           transcript,
           topicVocabulary,
         })
-      : buildActivePrompt({
+      : buildActiveUserMessage({
           userDisplayName,
           attendees: meeting.attendees as string[] | null,
           userContext: typeof user_context === "string" ? user_context : "",
@@ -262,7 +269,14 @@ Deno.serve(async (req) => {
         model: parseMode === "historical" ? "claude-sonnet-4-6" : "claude-opus-4-6",
         max_tokens: 16384,
         temperature: 0.3,
-        messages: [{ role: "user", content: prompt }],
+        system: [
+          {
+            type: "text",
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [{ role: "user", content: userMessage }],
       }),
     });
 
@@ -289,6 +303,19 @@ Deno.serve(async (req) => {
     if (stopReason === "max_tokens") {
       console.warn("[ai-parse-transcript] response truncated (max_tokens) for meeting", meeting_id);
     }
+
+    // Cache-usage telemetry. `cache_read_input_tokens` staying at 0 across
+    // calls means a silent invalidator is at work — check that per-call
+    // variables haven't leaked back into the system prompt.
+    const usage = aiResponse.usage ?? {};
+    console.log("[ai-parse-transcript] usage", {
+      meeting_id,
+      mode: parseMode,
+      input_tokens: usage.input_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      output_tokens: usage.output_tokens,
+    });
 
     // Strip any code fence wrapping the model might have added
     let cleanContent = rawContent.trim();
@@ -352,6 +379,12 @@ Deno.serve(async (req) => {
 
 // ============================================================
 // Prompt builders
+//
+// Split into a stable `system` prompt (cacheable via cache_control) and a
+// per-call `user` message (the variable content). The render order is:
+//   tools → system → messages
+// so a cache_control marker on the last system block caches everything
+// that came before it. Keep anything that varies per call OUT of system.
 // ============================================================
 
 interface PromptOpts {
@@ -364,21 +397,14 @@ interface PromptOpts {
   transcript: string;
 }
 
-function buildHistoricalPrompt(opts: PromptOpts & { topicVocabulary: string }): string {
-  const attendeeBlock = opts.attendees && opts.attendees.length > 0
-    ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}\nUse this list as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use this attendee list and contextual cues to attribute statements to specific people where you can.\n`
-    : "";
-
-  const topicHint = opts.topicVocabulary
-    ? `\nPreviously seen topics (prefer reusing these labels where the same subject recurs): ${opts.topicVocabulary}\n`
-    : "";
-
+function buildHistoricalSystemPrompt(userDisplayName: string): string {
   return `You are analyzing a historical meeting transcript. This meeting has already occurred and its outcomes have already played out. Your job is to extract structured information for archival and pattern analysis purposes, not to create actionable tasks.
 
-**The user is ${opts.userDisplayName}.** When you see "${opts.userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user. He works at EPAM in a senior sales/GTM leadership role focused on partner alliances.
-${attendeeBlock}
-${opts.userContext ? opts.userContext + "\n" : ""}
-**This meeting took place on ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}.** When the transcript uses relative date language, resolve against the MEETING date, NOT today's date.
+**The user is ${userDisplayName}.** When you see "${userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user. He works at EPAM in a senior sales/GTM leadership role focused on partner alliances.
+
+**Date resolution**: The user message will specify the meeting date. When the transcript uses relative date language, resolve against that MEETING date, NOT today's date.
+
+**Attendee attribution**: When the user message provides a known attendee list, use it as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), combine the attendee list with contextual cues to attribute statements where you can.
 
 Extract the following:
 
@@ -398,21 +424,21 @@ Extract the following:
 
 4. **OPEN QUESTIONS**: Questions raised but not resolved in this meeting.
 
-5. **COMMITMENTS**: Promises or obligations — both outgoing (${opts.userDisplayName} promised something) and incoming (someone promised something to ${opts.userDisplayName} or his team). For each:
+5. **COMMITMENTS**: Promises or obligations — both outgoing (${userDisplayName} promised something) and incoming (someone promised something to ${userDisplayName} or his team). For each:
    - title: short summary (5-12 words)
    - description: longer context if helpful
-   - direction: "outgoing" if ${opts.userDisplayName} committed, "incoming" if committed TO ${opts.userDisplayName}
+   - direction: "outgoing" if ${userDisplayName} committed, "incoming" if committed TO ${userDisplayName}
    - counterpart: the other party (free text)
    - company: account/client this is about
-   - do_by: YYYY-MM-DD if mentioned (resolve relative dates against meeting date)
+   - do_by: YYYY-MM-DD if mentioned (resolve relative dates against the meeting date in the user message)
    - evidence_quote: verbatim or close paraphrase from transcript (under 200 chars)
    Only extract explicit commitments — someone clearly saying they will do something. Do not infer from general discussion.
 
-6. **KEY TOPICS**: 3-8 short topic labels that characterize what this meeting was about. Examples: "Adobe partnership pricing", "S&P AEM migration timeline", "team hiring Q1". Keep labels concise and reusable across meetings about the same subject.${topicHint}
+6. **KEY TOPICS**: 3-8 short topic labels that characterize what this meeting was about. Examples: "Adobe partnership pricing", "S&P AEM migration timeline", "team hiring Q1". Keep labels concise and reusable across meetings about the same subject. If the user message provides a previously-seen topic vocabulary, prefer reusing those labels where the same subject recurs.
 
-7. **IDEAS — STRICT CRITERIA**: Strategic ideas worth archiving for ${opts.userDisplayName}'s future reference. BE HIGHLY SELECTIVE. Most meetings produce 0-3 real strategic ideas, not 10-20. Err aggressively on the side of extracting fewer.
+7. **IDEAS — STRICT CRITERIA**: Strategic ideas worth archiving for ${userDisplayName}'s future reference. BE HIGHLY SELECTIVE. Most meetings produce 0-3 real strategic ideas, not 10-20. Err aggressively on the side of extracting fewer.
 
-   ${opts.userDisplayName}'s role context: Head of Content Go-to-Market at EPAM. Runs partner alliances (Adobe, Sitecore, ContentStack, Contentful, Microsoft) for content management, DAM, and search. E-commerce is NOT his scope — a counterpart owns commerce.
+   ${userDisplayName}'s role context: Head of Content Go-to-Market at EPAM. Runs partner alliances (Adobe, Sitecore, ContentStack, Contentful, Microsoft) for content management, DAM, and search. E-commerce is NOT his scope — a counterpart owns commerce.
 
    An item COUNTS as an idea ONLY if ALL are true:
    - It proposes a new strategic approach, offering, GTM motion, positioning angle, or partnership play
@@ -443,11 +469,6 @@ Extract the following:
 8. **SUGGESTED TITLE**: 4-10 words, descriptive. Company + topic when both are clear.
 
 9. **DISCUSSION COMPANY**: If the entire discussion is about one company/account, identify it.
-
-Discussion title: "${opts.meetingTitle}"
-
-Content:
-${opts.transcript}
 
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
@@ -488,19 +509,35 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 }`;
 }
 
-function buildActivePrompt(opts: PromptOpts & { itemsSummary: string }): string {
+function buildHistoricalUserMessage(opts: PromptOpts & { topicVocabulary: string }): string {
   const attendeeBlock = opts.attendees && opts.attendees.length > 0
-    ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}\nUse this list as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use this attendee list and contextual cues — names mentioned, people addressed directly, "as you said" references — to attribute statements to specific people where you can. If you cannot tell who said something, mark it as "unknown" rather than guessing.\n`
+    ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}`
     : "";
 
+  const topicHint = opts.topicVocabulary
+    ? `\n**Previously seen topics** (prefer reusing these labels where the same subject recurs): ${opts.topicVocabulary}`
+    : "";
+
+  const userContextBlock = opts.userContext ? `\n${opts.userContext}` : "";
+
+  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${topicHint}${userContextBlock}
+
+Discussion title: "${opts.meetingTitle}"
+
+Content:
+${opts.transcript}`;
+}
+
+function buildActiveSystemPrompt(userDisplayName: string): string {
   return `You are analyzing a discussion transcript or notes. The content may be in any format: raw text, timestamped notes, VTT/SRT subtitles, or structured meeting notes. Handle all formats gracefully.
 
-**The user uploading this transcript is ${opts.userDisplayName}.** When you see "${opts.userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user.
-${attendeeBlock}
-**Extraction philosophy**: Capture ALL real action items regardless of who they belong to. Do NOT drop items just because they're not assigned to ${opts.userDisplayName} — better to surface a few items that turn out to be for someone else than to miss real commitments because attribution was unclear. The user will triage in the review queue.
+**The user uploading this transcript is ${userDisplayName}.** When you see "${userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user.
 
-${opts.userContext ? "\n" + opts.userContext + "\n" : ""}
-**This meeting took place on ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}.** When the transcript uses relative date language ("tomorrow", "next week", "by Friday", "end of month"), resolve it against the MEETING date — NOT against the date you're processing this transcript. "Tomorrow" in a meeting on April 2nd means April 3rd, regardless of when the parse runs.
+**Attendee attribution**: When the user message provides a known attendee list, use it as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use the attendee list and contextual cues — names mentioned, people addressed directly, "as you said" references — to attribute statements to specific people where you can. If you cannot tell who said something, mark it as "unknown" rather than guessing.
+
+**Extraction philosophy**: Capture ALL real action items regardless of who they belong to. Do NOT drop items just because they're not assigned to ${userDisplayName} — better to surface a few items that turn out to be for someone else than to miss real commitments because attribution was unclear. The user will triage in the review queue.
+
+**Date resolution**: The user message will specify the meeting date. When the transcript uses relative date language ("tomorrow", "next week", "by Friday", "end of month"), resolve it against the MEETING date — NOT against the date you're processing this transcript. "Tomorrow" in a meeting on April 2nd means April 3rd, regardless of when the parse runs.
 
 Extract these elements:
 
@@ -537,23 +574,23 @@ Extract these elements:
    For each real action item, return:
    - **commitment_strength**: "explicit" (direct verbal commitment with clear actor and verb) | "implied" (strong implication but not stated directly, e.g. someone restates a plan they're owning). Do NOT return items weaker than "implied" — those are not action items, they are topics.
    - **assignee**: Best-effort attribution. Use one of:
-     - **"user"** — if the action clearly belongs to ${opts.userDisplayName} (e.g. ${opts.userDisplayName} is the speaker stating their own commitment, or someone explicitly hands the task to ${opts.userDisplayName})
+     - **"user"** — if the action clearly belongs to ${userDisplayName} (e.g. ${userDisplayName} is the speaker stating their own commitment, or someone explicitly hands the task to ${userDisplayName})
      - **"<person's name>"** — if you can identify a specific other person who owns the action (use the attendee list when available)
      - **"unknown"** — when you can tell something was committed but you genuinely cannot determine who said it (common when transcripts have no speaker labels)
    - Whatever the assignee, INCLUDE THE ITEM. Do not drop items because attribution is uncertain. The user will triage manually.
    - **evidence_quote**: A short verbatim quote from the transcript (under 200 chars) that directly supports this being a real commitment. This is the actual sentence where the commitment was made. If you cannot point to a quote, the item is not real and you should drop it.
    - Assign urgency (high/medium/low)
-   - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. **Use the meeting date (${opts.meetingDateStr}) as the reference for resolving any relative date language**, NOT today's date. If no due date is implied, use null.
+   - **Suggest a due date** (YYYY-MM-DD format) ONLY if the transcript mentions a specific deadline, timeframe ("by end of week", "next month"), or implies urgency. **Use the meeting date (from the user message) as the reference for resolving any relative date language**, NOT today's date. If no due date is implied, use null.
    - **Identify the company / account / client** this task is about, if applicable. Look at the discussion title (e.g. "S&P pricing call", "Adobe HCLS - Follow up", "Acme Corp standup") and the content for an org name. Use the cleanest short form (e.g. "Adobe", "S&P", "Acme Corp"). If the task is internal-only or no company is mentioned, use null. Do NOT invent company names. **If the discussion is clearly about a single company, set the company field on EVERY action item to that company name** — don't leave action items blank just because the company isn't repeated in that specific bullet.
 
 3. **Decisions**: Things that were decided/agreed upon
 
 4. **Open Questions**: Unresolved items that need follow-up
 
-5. **Commitments — OUTGOING SOFT OBLIGATIONS**: Things ${opts.userDisplayName} acknowledged owing or agreed to do, where the obligation is **relational or social** rather than a clean deliverable. These often slip because they're not formal tasks at the moment they happen.
+5. **Commitments — OUTGOING SOFT OBLIGATIONS**: Things ${userDisplayName} acknowledged owing or agreed to do, where the obligation is **relational or social** rather than a clean deliverable. These often slip because they're not formal tasks at the moment they happen.
 
    Extract a commitment ONLY if ALL of these are true:
-   - ${opts.userDisplayName} is the one making the commitment (it goes FROM the user TO someone else — outgoing only, never incoming)
+   - ${userDisplayName} is the one making the commitment (it goes FROM the user TO someone else — outgoing only, never incoming)
    - The statement is verbatim from the user's mouth or is a clear paraphrase of something the user said
    - It is a real obligation, not banter or hypothetical
 
@@ -578,29 +615,21 @@ Extract these elements:
    For each commitment, return:
    - **title**: short summary of what was committed (5–12 words)
    - **description**: longer context if helpful
-   - **counterpart**: the person ${opts.userDisplayName} made the promise TO (free text — e.g. "Holly", "the procurement team"). null if unclear.
+   - **counterpart**: the person ${userDisplayName} made the promise TO (free text — e.g. "Holly", "the procurement team"). null if unclear.
    - **company**: the account/client this is about, same rules as action items
-   - **do_by**: YYYY-MM-DD if a date is mentioned or strongly implied. **This is the primary date.** Resolve any relative dates ("next week", "by Friday", "tomorrow") against the MEETING date (${opts.meetingDateStr}), NOT today. If only a vague timing is given ("soon", "this week"), still try — be best-effort. null only if there's truly no temporal signal at all.
+   - **do_by**: YYYY-MM-DD if a date is mentioned or strongly implied. **This is the primary date.** Resolve any relative dates ("next week", "by Friday", "tomorrow") against the MEETING date (from the user message), NOT today. If only a vague timing is given ("soon", "this week"), still try — be best-effort. null only if there's truly no temporal signal at all.
    - **promised_by**: usually the same as do_by; only set differently if the user said "I told them by X but I need it ready by Y"
    - **needs_review_by**: only if explicitly mentioned ("I need someone to review it before X")
    - **evidence_quote**: verbatim from the transcript, the line where the user made the commitment
    - **ambiguity_flags**: array, any of: "social_language", "relative_date", "external_dependency", "ambiguous_actionability", "no_counterpart"
 
-6. **Duplicate detection (suggest_merge_item_id)**: For each action item, check against the "Current open items" list below. If the new action item clearly refers to the same underlying work as an existing item (same task, same deliverable, same client context), set suggest_merge_item_id to that item's full UUID (copy it directly from the id= field in the items list). Be conservative — only suggest a merge when you're confident it's the same thing, not just topically related. When in doubt, leave it null.
+6. **Duplicate detection (suggest_merge_item_id)**: For each action item, check against the "Current open items" list in the user message. If the new action item clearly refers to the same underlying work as an existing item (same task, same deliverable, same client context), set suggest_merge_item_id to that item's full UUID (copy it directly from the id= field in the items list). Be conservative — only suggest a merge when you're confident it's the same thing, not just topically related. When in doubt, leave it null.
 
 7. **References**: Match against existing work items where applicable
 
 7. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
 8. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
-
-Current open items for cross-reference:
-${opts.itemsSummary}
-
-Discussion title: "${opts.meetingTitle}"
-
-Content:
-${opts.transcript}
 
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
@@ -641,6 +670,24 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     }
   ]
 }`;
+}
+
+function buildActiveUserMessage(opts: PromptOpts & { itemsSummary: string }): string {
+  const attendeeBlock = opts.attendees && opts.attendees.length > 0
+    ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}`
+    : "";
+
+  const userContextBlock = opts.userContext ? `\n${opts.userContext}` : "";
+
+  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${userContextBlock}
+
+Current open items for cross-reference:
+${opts.itemsSummary}
+
+Discussion title: "${opts.meetingTitle}"
+
+Content:
+${opts.transcript}`;
 }
 
 // ============================================================

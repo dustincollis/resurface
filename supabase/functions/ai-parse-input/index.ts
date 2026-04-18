@@ -110,17 +110,20 @@ Deno.serve(async (req) => {
     const todayStr = today.toISOString().split("T")[0];
     const dayOfWeek = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(today);
 
-    // Build the shared prompt. The content blocks vary per type.
-    const basePrompt = buildPrompt({
+    // Split system (stable, cacheable) from user message (per-call).
+    // NOTE: the current system prompt is ~3K tokens, below Opus 4.6's 4096
+    // minimum cacheable prefix — cache won't fire yet, but the structure is
+    // in place so it will activate automatically if the prompt grows.
+    const systemPrompt = buildInputSystemPrompt(userDisplayName);
+    const userText = buildInputUserText({
       input,
-      userDisplayName,
       userContext: typeof user_context === "string" ? user_context : "",
       todayStr,
       dayOfWeek,
     });
 
-    // Assemble Claude content blocks. For screenshots, the image goes
-    // first and the text prompt references it.
+    // Assemble the user-message content blocks. For screenshots, the image
+    // goes first and the text prompt references it.
     const contentBlocks: Array<Record<string, unknown>> = [];
 
     if (input.input_type === "screenshot") {
@@ -152,7 +155,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    contentBlocks.push({ type: "text", text: basePrompt });
+    contentBlocks.push({ type: "text", text: userText });
 
     // Call Claude.
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -166,6 +169,13 @@ Deno.serve(async (req) => {
         model: CLAUDE_MODEL,
         max_tokens: 4096,
         temperature: 0.3,
+        system: [
+          {
+            type: "text",
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
         messages: [{ role: "user", content: contentBlocks }],
       }),
     });
@@ -186,6 +196,18 @@ Deno.serve(async (req) => {
     const aiJson = await response.json();
     const raw = (aiJson.content?.[0]?.text ?? "").trim();
     const cleaned = raw.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+
+    // Cache-usage telemetry. If cache_read stays at 0 across calls, check
+    // for silent invalidators in the system prompt.
+    const usage = aiJson.usage ?? {};
+    console.log("[ai-parse-input] usage", {
+      input_id: input.id,
+      input_type: input.input_type,
+      input_tokens: usage.input_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      output_tokens: usage.output_tokens,
+    });
 
     let parsed: {
       action_items?: Array<Record<string, unknown>>;
@@ -294,30 +316,29 @@ Deno.serve(async (req) => {
 
 // ---------------------------------------------------------------------------
 
-interface PromptArgs {
+// ---------------------------------------------------------------------------
+// Prompt builders — split into a stable `system` prompt (cacheable) and a
+// per-call `user` text block. The render order is tools → system → messages,
+// so a cache_control marker on the system block caches everything before the
+// per-call variables.
+// ---------------------------------------------------------------------------
+
+interface UserTextArgs {
   input: InputRow;
-  userDisplayName: string;
   userContext: string;
   todayStr: string;
   dayOfWeek: string;
 }
 
-function buildPrompt({ input, userDisplayName, userContext, todayStr, dayOfWeek }: PromptArgs): string {
-  const typeSpecific = inputTypeInstruction(input);
-  const descriptionBlock = input.user_description
-    ? `\nUSER DESCRIPTION (context the user typed when sharing this):\n${input.user_description}\n`
-    : "";
-  const contentBlock = input.input_type === "screenshot"
-    ? "\nThe image above is the content to analyze."
-    : `\nCONTENT:\n${input.raw_text ?? ""}\n`;
-
+function buildInputSystemPrompt(userDisplayName: string): string {
   return `You are extracting action items and commitments from content ${userDisplayName} captured for review. Treat this the way you would a meeting transcript: identify specific things ${userDisplayName} needs to do, or things they promised to do, or things others promised them.
 
-${userContext ? userContext + "\n" : ""}TODAY: ${dayOfWeek}, ${todayStr}
-USER: ${userDisplayName}
-
-${typeSpecific}
-${descriptionBlock}${contentBlock}
+The user message will provide:
+- TODAY's date (for resolving relative dates like "by Friday", "next week")
+- The user's bio/context (optional)
+- INPUT TYPE (email / screenshot / pasted_text) with type-specific guidance
+- Any user-supplied description of the content
+- The content itself (as text, or as an image preceding the text block)
 
 Return a JSON object with two arrays: "action_items" (things the user needs to do) and "commitments" (promises -- either the user's outgoing, or incoming from others).
 
@@ -350,9 +371,24 @@ Rules:
 - Only include action items for ${userDisplayName} -- things THEY need to do. Things only other people need to do are not action items for this user.
 - Do include incoming commitments (things others promised the user), so the user can track what they're waiting on.
 - Be willing to identify implied action items -- things that would obviously need to happen next even if not stated verbatim. Mark them commitment_strength="implied".
-- Resolve relative dates ("by Friday", "next week") against TODAY above.
+- Resolve relative dates ("by Friday", "next week") against the TODAY date in the user message.
 - If nothing actionable is in the content, return empty arrays. Do not invent.
 - Return ONLY the JSON object. No prose, no code fences.`;
+}
+
+function buildInputUserText({ input, userContext, todayStr, dayOfWeek }: UserTextArgs): string {
+  const typeSpecific = inputTypeInstruction(input);
+  const descriptionBlock = input.user_description
+    ? `\nUSER DESCRIPTION (context the user typed when sharing this):\n${input.user_description}\n`
+    : "";
+  const contentBlock = input.input_type === "screenshot"
+    ? "\nThe image above is the content to analyze."
+    : `\nCONTENT:\n${input.raw_text ?? ""}\n`;
+
+  return `TODAY: ${dayOfWeek}, ${todayStr}
+${userContext ? "\n" + userContext + "\n" : ""}
+${typeSpecific}
+${descriptionBlock}${contentBlock}`;
 }
 
 function inputTypeInstruction(input: InputRow): string {

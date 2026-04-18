@@ -7,6 +7,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Focus from './pages/Focus'
+import Add from './pages/Add'
 import Analytics from './pages/Analytics'
 import Landscape from './pages/Landscape'
 import DashRiver from './pages/DashRiver'
@@ -16,7 +17,6 @@ import ItemDetail from './pages/ItemDetail'
 import Meetings from './pages/Meetings'
 import MeetingDetail from './pages/MeetingDetail'
 import Proposals from './pages/Proposals'
-import ReviewInput from './pages/ReviewInput'
 import Commitments from './pages/Commitments'
 import Pursuits from './pages/Pursuits'
 import PursuitDetail from './pages/PursuitDetail'
@@ -41,6 +41,7 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="focus" element={<Focus />} />
+              <Route path="add" element={<Add />} />
               <Route path="river" element={<DashRiver />} />
               <Route path="streams" element={<Streams />} />
               <Route path="stream/:id" element={<StreamDetail />} />
@@ -48,7 +49,6 @@ export default function App() {
               <Route path="meetings" element={<Meetings />} />
               <Route path="meetings/:id" element={<MeetingDetail />} />
               <Route path="proposals" element={<Proposals />} />
-              <Route path="review-input" element={<ReviewInput />} />
               <Route path="proposals/analytics" element={<ProposalAnalytics />} />
               <Route path="commitments" element={<Commitments />} />
               <Route path="pursuits" element={<Pursuits />} />

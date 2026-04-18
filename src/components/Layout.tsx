@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, FileInput, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, BarChart3, Plus } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
 import { useIdeaCounts } from '../hooks/useIdeas'
 import SearchModal from './SearchModal'
+import AddMenu from './AddMenu'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/focus', icon: Crosshair, label: 'Focus' },
   { to: '/proposals', icon: Inbox, label: 'Proposals' },
-  { to: '/review-input', icon: FileInput, label: 'Review Input' },
   { to: '/commitments', icon: Handshake, label: 'Commitments' },
   { to: '/pursuits', icon: Target, label: 'Pursuits' },
   { to: '/goals', icon: Flag, label: 'Goals' },
@@ -71,6 +71,27 @@ export default function Layout() {
           >
             <Search size={15} />
           </button>
+        </div>
+
+        {/* Add — opens popover with Task / File / Paste options */}
+        <div className="px-2 pt-1">
+          <AddMenu
+            align="right"
+            order="capture"
+            trigger={({ onClick, open }) => (
+              <button
+                onClick={onClick}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  open
+                    ? 'bg-purple-700 text-white'
+                    : 'bg-purple-600 text-white hover:bg-purple-500'
+                }`}
+              >
+                <Plus size={16} />
+                Add
+              </button>
+            )}
+          />
         </div>
 
         {/* Main nav */}

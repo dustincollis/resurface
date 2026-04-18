@@ -213,6 +213,8 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- AUTO:routes -->
 ## 11. Routes (26)
 
+> Note: ReviewInput has been folded into the unified `/add` page. The `/add` route opens a three-option wizard (File / Paste / Task) that replaces both `/review-input` and the old inline QuickAddBar flow.
+
 | Route | Page | Purpose |
 |-------|------|---------|
 | `/` | Dashboard | Stats, stale items, upcoming meetings, pending proposals |
@@ -223,9 +225,9 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | `/items/:id` | ItemDetail | Full item: edit, chat, decompose, links, notes, assists |
 | `/meetings` | Meetings | Meeting list + add discussion form |
 | `/meetings/:id` | MeetingDetail | Transcript, synopsis, decisions, questions, linked items |
+| `/add` | Add | Unified capture wizard: File / Paste / Task (replaces Review Input + QuickAddBar) |
 | `/proposals` | Proposals | Triage queue for AI-extracted proposals |
 | `/proposals/analytics` | ProposalAnalytics | Accept rates, sources, types |
-| `/review-input` | ReviewInput | Email/screenshot/pasted-text capture → proposals via ai-parse-input |
 | `/commitments` | Commitments | Outgoing/incoming obligations tracker |
 | `/pursuits` | Pursuits | Pursuit threads grouped by status |
 | `/pursuits/:id` | PursuitDetail | Pursuit context, linked items, playbook, team |
@@ -244,10 +246,11 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:routes -->
 
 <!-- AUTO:components -->
-## 12. Components (24)
+## 12. Components (25)
 
 | Component | Purpose |
 |-----------|---------|
+| AddMenu |  |
 | AddToPursuit | Modal to add items/commitments to pursuits |
 | ChatPanel | Main chat interface (global scope) |
 | DecomposeSection | AI decomposition into subtasks |
@@ -480,3 +483,5 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 
 - **2026-04-16**: Consolidated docs/system-overview.md + docs/project-state.md into this single SPEC.md. Added AUTO fences for refresh-script-maintained sections. Created scripts/refresh-spec.mjs and weekly drift-check scheduled task.
 - **2026-04-17**: New Landscape page at `/settings/analytics/landscape` — strategic 2D canvas plotting items (circles) and commitments (diamonds) on Effort × Urgency axes, with pursuit convex hulls (mid layer) and goal territories (back layer). Size = stakes, opacity = freshness, pulsing ring = Focus 10, dot color = pursuit color. Click pursuit/goal to filter canvas. New hook `useLandscape` bundles items + commitments + pursuits + goals + pursuit_members + linked goal_tasks into a single query. Lives under a new `/settings/analytics` index page (sidebar entry next to Settings) so future analytics views can slot in alongside.
+- **2026-04-18**: Unified capture at `/add` — three-option wizard (File / Paste / Task) replaces both `/review-input` and QuickAddBar's inline-expand behavior. New `AddMenu` popover component in the sidebar (File/Paste/Task order, "capture" bias) and Focus toolbar (Task/File/Paste order, "task" bias); each option deep-links to `/add?mode=X` to skip the picker. File/Paste routes go through the existing `ai-parse-input` → proposals pipeline (preserves source context for multi-item drops); Task goes directly to item creation. Deleted `ReviewInput.tsx`; `useReviewInputs` hook retained and reused by the File/Paste lanes.
+- **2026-04-18**: Prompt caching enabled on `ai-parse-transcript` and `ai-parse-input`. Prompts split into a stable `system` block (extraction philosophy, strict criteria, output schema, `userDisplayName`) marked with `cache_control: {type: "ephemeral"}`, and a per-call `user` message (meeting date, attendees, user bio, items summary, transcript). Expected ~90% cost reduction on the instruction prefix after the first call in each 5-min window. Cache-usage fields (`cache_read_input_tokens`, `cache_creation_input_tokens`) logged per request for monitoring. Note: `ai-parse-input`'s system prompt is currently ~3K tokens, below Opus 4.6's 4096-token minimum — caching structure is in place but won't fire until the prompt grows.

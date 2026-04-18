@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff, FolderTree } from 'lucide-react'
+import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff, FolderTree, Plus } from 'lucide-react'
 import { useItems, useTouchItem, useUpdateItem, useUnsnoozeItem } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
 // ItemCard removed — focus mode uses compact FocusCards only
-import QuickAddBar from '../components/QuickAddBar'
+import AddMenu from '../components/AddMenu'
 import OnboardingWizard from '../components/OnboardingWizard'
 import EasyButtonModal from '../components/EasyButtonModal'
 import {
@@ -330,7 +330,21 @@ export default function Focus() {
             <Zap size={12} />
             Easy Win
           </button>
-          <QuickAddBar compact />
+          <AddMenu
+            align="bottom-right"
+            order="task"
+            trigger={({ onClick, open }) => (
+              <button
+                onClick={onClick}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-white ${
+                  open ? 'bg-purple-700' : 'bg-purple-600 hover:bg-purple-500'
+                }`}
+              >
+                <Plus size={12} />
+                Add
+              </button>
+            )}
+          />
         </div>
       </div>
 
