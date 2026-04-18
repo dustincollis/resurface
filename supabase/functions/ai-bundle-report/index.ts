@@ -80,20 +80,18 @@ async function loadResurfaceContext(
   userId: string,
   bundleId: string
 ): Promise<EntityContext[]> {
-  // Load all bundle entities
   const { data: entities } = await adminClient
     .from("bundle_entities")
     .select("raw_name, entity_type, entity_id")
     .eq("bundle_id", bundleId)
     .order("mention_count", { ascending: false })
-    .limit(200); // cap at 200 entities to avoid runaway queries
+    .limit(200);
 
   if (!entities || entities.length === 0) return [];
 
   const results: EntityContext[] = [];
+  const BATCH = 10; // smaller batches — each entity now runs more queries
 
-  // Process in parallel batches of 20
-  const BATCH = 20;
   for (let i = 0; i < entities.length; i += BATCH) {
     const batch = entities.slice(i, i + BATCH);
     const batchResults = await Promise.all(
@@ -102,86 +100,101 @@ async function loadResurfaceContext(
         const type = entity.entity_type as "person" | "company";
         const lines: string[] = [];
 
+        // Build a tsquery-safe search term (strip special chars)
+        const tsQuery = name.replace(/[^a-zA-Z0-9\s]/g, " ").trim();
+
         try {
-          if (type === "person") {
-            // Search meetings by attendee name (text search on attendees/title)
-            const [meetingsRes, commitmentsRes, memoriesRes] = await Promise.all([
-              adminClient
-                .from("meetings")
-                .select("title, start_time, summary")
-                .eq("user_id", userId)
-                .or(`attendees.ilike.%${name}%,title.ilike.%${name}%`)
-                .order("start_time", { ascending: false })
-                .limit(3),
-              adminClient
-                .from("commitments")
-                .select("title, status, direction, do_by")
-                .eq("user_id", userId)
-                .ilike("counterpart", `%${name}%`)
-                .neq("status", "met")
-                .limit(5),
-              adminClient
-                .from("memories")
-                .select("content")
-                .eq("user_id", userId)
-                .ilike("content", `%${name}%`)
-                .limit(3),
-            ]);
+          // ── Meetings: search_vector covers title + summary + full transcript ──
+          const meetingsRes = await adminClient
+            .from("meetings")
+            .select("title, start_time, transcript_summary")
+            .eq("user_id", userId)
+            .textSearch("search_vector", tsQuery, { config: "english" })
+            .order("start_time", { ascending: false })
+            .limit(4);
 
-            const meetings = meetingsRes.data ?? [];
-            const commitments = commitmentsRes.data ?? [];
-            const memories = memoriesRes.data ?? [];
+          const meetings = meetingsRes.data ?? [];
+          if (meetings.length > 0) {
+            lines.push(
+              `Meetings (${meetings.length}): ${meetings
+                .map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}${m.transcript_summary ? " — " + m.transcript_summary.slice(0, 120) : ""}`)
+                .join(" | ")}`
+            );
+          }
 
-            if (meetings.length > 0) {
-              lines.push(`Meetings (${meetings.length}): ${meetings.map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}`).join("; ")}`);
-            }
-            if (commitments.length > 0) {
-              lines.push(`Open commitments: ${commitments.map((c) => `[${c.direction}] ${c.title} (${c.status})`).join("; ")}`);
-            }
-            if (memories.length > 0) {
-              lines.push(`Notes: ${memories.map((m) => m.content).join("; ").slice(0, 300)}`);
-            }
-          } else {
-            // Company lookup
-            const [meetingsRes, pursuitsRes, commitmentsRes] = await Promise.all([
-              adminClient
-                .from("meetings")
-                .select("title, start_time")
-                .eq("user_id", userId)
-                .or(`title.ilike.%${name}%,attendees.ilike.%${name}%`)
-                .order("start_time", { ascending: false })
-                .limit(3),
-              adminClient
-                .from("pursuits")
-                .select("name, stage, status")
-                .eq("user_id", userId)
-                .ilike("name", `%${name}%`)
-                .limit(3),
-              adminClient
-                .from("commitments")
-                .select("title, status, direction")
-                .eq("user_id", userId)
-                .ilike("company", `%${name}%`)
-                .neq("status", "met")
-                .limit(5),
-            ]);
+          // ── Meeting chunks: richer transcript excerpts ──
+          const chunksRes = await adminClient
+            .from("meeting_chunks")
+            .select("chunk_text, topic_label")
+            .eq("user_id", userId)
+            .textSearch("chunk_text", tsQuery, { config: "english" })
+            .limit(3);
 
-            const meetings = meetingsRes.data ?? [];
+          const chunks = chunksRes.data ?? [];
+          if (chunks.length > 0 && meetings.length === 0) {
+            // Only show chunk excerpts if no full meeting matched (avoids duplication)
+            lines.push(
+              `Transcript mentions: ${chunks
+                .map((c) => `[${c.topic_label}] ${c.chunk_text.slice(0, 150)}`)
+                .join(" | ")}`
+            );
+          }
+
+          // ── Commitments ──
+          const commitmentsRes = await adminClient
+            .from("commitments")
+            .select("title, status, direction, do_by")
+            .eq("user_id", userId)
+            .or(
+              type === "person"
+                ? `counterpart.ilike.%${name}%`
+                : `company.ilike.%${name}%,title.ilike.%${name}%`
+            )
+            .neq("status", "met")
+            .limit(5);
+
+          const commitments = commitmentsRes.data ?? [];
+          if (commitments.length > 0) {
+            lines.push(
+              `Open commitments: ${commitments
+                .map((c) => `[${c.direction}] ${c.title} (${c.status})`)
+                .join("; ")}`
+            );
+          }
+
+          // ── Pursuits (companies only) ──
+          if (type === "company") {
+            const pursuitsRes = await adminClient
+              .from("pursuits")
+              .select("name, stage, status")
+              .eq("user_id", userId)
+              .or(`name.ilike.%${name}%,company.ilike.%${name}%`)
+              .limit(3);
+
             const pursuits = pursuitsRes.data ?? [];
-            const commitments = commitmentsRes.data ?? [];
-
-            if (meetings.length > 0) {
-              lines.push(`Meetings (${meetings.length}): ${meetings.map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}`).join("; ")}`);
-            }
             if (pursuits.length > 0) {
-              lines.push(`Pursuits: ${pursuits.map((p) => `${p.name} [${p.stage ?? p.status}]`).join("; ")}`);
-            }
-            if (commitments.length > 0) {
-              lines.push(`Open commitments: ${commitments.map((c) => `${c.title} (${c.status})`).join("; ")}`);
+              lines.push(
+                `Pursuits: ${pursuits.map((p) => `${p.name} [${p.stage ?? p.status}]`).join("; ")}`
+              );
             }
           }
-        } catch {
-          // Per-entity failure is non-fatal
+
+          // ── Memories ──
+          const memoriesRes = await adminClient
+            .from("memories")
+            .select("content")
+            .eq("user_id", userId)
+            .ilike("content", `%${name}%`)
+            .limit(3);
+
+          const memories = memoriesRes.data ?? [];
+          if (memories.length > 0) {
+            lines.push(
+              `Notes: ${memories.map((m) => m.content).join("; ").slice(0, 300)}`
+            );
+          }
+        } catch (err) {
+          console.error(`[report] entity lookup failed for "${name}":`, err);
         }
 
         return {
