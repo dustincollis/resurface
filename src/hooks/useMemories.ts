@@ -32,3 +32,29 @@ export function useDeleteMemory() {
     },
   })
 }
+
+// Manual memory entry — the user is trusted, so we write directly to the
+// table instead of routing through a proposal.
+export function useAddMemory() {
+  const { user } = useAuth()
+  return useMutation({
+    mutationFn: async (content: string) => {
+      const trimmed = content.trim()
+      if (!trimmed) throw new Error('Memory cannot be empty')
+      const { data, error } = await supabase
+        .from('memories')
+        .insert({
+          user_id: user!.id,
+          content: trimmed,
+          source: 'user_added',
+        })
+        .select()
+        .single()
+      if (error) throw error
+      return data as Memory
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['memories'] })
+    },
+  })
+}

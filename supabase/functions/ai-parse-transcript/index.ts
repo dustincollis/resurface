@@ -200,6 +200,23 @@ Deno.serve(async (req) => {
         .join("\n") ?? "No existing items.";
     }
 
+    // Existing memories — passed to the parser so it doesn't re-propose
+    // facts it already knows. Cap at 100 to keep the prompt bounded.
+    let existingMemories = "";
+    {
+      const { data: memRows } = await adminClient
+        .from("memories")
+        .select("content")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (memRows && memRows.length > 0) {
+        existingMemories = memRows
+          .map((m) => `- ${m.content}`)
+          .join("\n");
+      }
+    }
+
     // For historical mode, fetch existing topic vocabulary for consistency
     let topicVocabulary = "";
     if (parseMode === "historical") {
@@ -242,6 +259,7 @@ Deno.serve(async (req) => {
           meetingTitle: meeting.title as string,
           transcript,
           topicVocabulary,
+          existingMemories,
         })
       : buildActiveUserMessage({
           userDisplayName,
@@ -252,6 +270,7 @@ Deno.serve(async (req) => {
           meetingTitle: meeting.title as string,
           transcript,
           itemsSummary,
+          existingMemories,
         });
 
     // Call Claude to parse the transcript
@@ -474,6 +493,30 @@ Extract the following:
 
 9. **DISCUSSION COMPANY**: If the entire discussion is about one company/account, identify it.
 
+10. **MEMORIES — STRICT CRITERIA**: Durable facts worth writing to long-term memory so future AI calls know them without re-discovery. BE CONSERVATIVE — 0-3 memories per meeting is typical.
+
+    A memory COUNTS only if ALL are true:
+    - It's a stable fact likely to still be true in 3 months (role, relationship, preference, responsibility, team membership, stated opinion on recurring topic).
+    - It's about a named person, company, or ${userDisplayName} personally.
+    - It's novel — not already in the "Existing memories" list in the user message. Do NOT re-emit facts already there (even if worded differently).
+    - It's one atomic sentence (under 140 chars).
+
+    A memory does NOT count and MUST be skipped if:
+    - It's a one-off event from this meeting ("Holly was out sick"). Those are transient.
+    - It's an action item, decision, or commitment — those go in their own fields.
+    - It's a "could / might / thinking about" — memories are asserted facts, not possibilities.
+    - It's generic ("Chanel is a company", "Holly is a person").
+    - It's speculative or unverified from the transcript.
+
+    Examples:
+    - ✓ COUNT — "Holly Quinones is the procurement contact at Chanel"
+    - ✓ COUNT — "${userDisplayName} prefers morning meetings before 11am ET"
+    - ✓ COUNT — "S&P requires a 2-week lead for any SOW amendment"
+    - ✗ SKIP — "Discussed pricing with Holly today" (event, not fact)
+    - ✗ SKIP — "Might follow up next week" (speculative)
+
+    For each memory return: { "content": "the atomic fact sentence" }
+
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
   "summary": "string (markdown synopsis)",
@@ -509,11 +552,14 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       "category": "string",
       "evidence_quote": "string"
     }
+  ],
+  "memories": [
+    {"content": "atomic durable fact, under 140 chars"}
   ]
 }`;
 }
 
-function buildHistoricalUserMessage(opts: PromptOpts & { topicVocabulary: string }): string {
+function buildHistoricalUserMessage(opts: PromptOpts & { topicVocabulary: string; existingMemories: string }): string {
   const attendeeBlock = opts.attendees && opts.attendees.length > 0
     ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}`
     : "";
@@ -522,9 +568,13 @@ function buildHistoricalUserMessage(opts: PromptOpts & { topicVocabulary: string
     ? `\n**Previously seen topics** (prefer reusing these labels where the same subject recurs): ${opts.topicVocabulary}`
     : "";
 
+  const memoriesBlock = opts.existingMemories
+    ? `\n**Existing memories** (do NOT re-emit these or rewordings of them):\n${opts.existingMemories}`
+    : "";
+
   const userContextBlock = opts.userContext ? `\n${opts.userContext}` : "";
 
-  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${topicHint}${userContextBlock}
+  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${topicHint}${memoriesBlock}${userContextBlock}
 
 Discussion title: "${opts.meetingTitle}"
 
@@ -635,6 +685,23 @@ Extract these elements:
 
 8. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
 
+9. **Memories — STRICT CRITERIA**: Durable facts worth persisting to long-term memory so future AI calls know them without re-discovery. BE CONSERVATIVE — 0-3 memories per meeting is typical.
+
+   A memory COUNTS only if ALL are true:
+   - It's a stable fact likely to still be true in 3 months (role, relationship, preference, responsibility, team membership, stated opinion on recurring topic).
+   - It's about a named person, company, or ${userDisplayName} personally.
+   - It's novel — not already in the "Existing memories" list in the user message. Do NOT re-emit facts already there (even if worded differently).
+   - It's one atomic sentence (under 140 chars).
+
+   A memory does NOT count and MUST be skipped if:
+   - It's a one-off event from this meeting ("Holly was out sick"). Those are transient.
+   - It's an action item, decision, or commitment — those go in their own fields.
+   - It's a "could / might / thinking about" — memories are asserted facts, not possibilities.
+   - It's generic ("Chanel is a company", "Holly is a person").
+   - It's speculative or unverified from the transcript.
+
+   For each memory return: { "content": "the atomic fact sentence" }
+
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
   "summary": "<the markdown synopsis as a single string>",
@@ -672,18 +739,25 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
       "evidence_quote": "string (verbatim, under 200 chars)",
       "ambiguity_flags": ["string"]
     }
+  ],
+  "memories": [
+    {"content": "atomic durable fact, under 140 chars"}
   ]
 }`;
 }
 
-function buildActiveUserMessage(opts: PromptOpts & { itemsSummary: string }): string {
+function buildActiveUserMessage(opts: PromptOpts & { itemsSummary: string; existingMemories: string }): string {
   const attendeeBlock = opts.attendees && opts.attendees.length > 0
     ? `\n**Known meeting attendees**: ${opts.attendees.join(", ")}`
     : "";
 
+  const memoriesBlock = opts.existingMemories
+    ? `\n**Existing memories** (do NOT re-emit these or rewordings of them):\n${opts.existingMemories}`
+    : "";
+
   const userContextBlock = opts.userContext ? `\n${opts.userContext}` : "";
 
-  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${userContextBlock}
+  return `**Meeting date**: ${opts.meetingDateStr}${opts.meetingDayOfWeek ? ` (a ${opts.meetingDayOfWeek})` : ""}${attendeeBlock}${memoriesBlock}${userContextBlock}
 
 Current open items for cross-reference:
 ${opts.itemsSummary}
@@ -877,6 +951,14 @@ async function handleHistoricalMode(
     }
   }
 
+  // Memories — parser-extracted durable facts, written directly to the
+  // memories table (no proposal-queue round trip). Dedupes case-insensitively.
+  const memoriesCreated = await insertExtractedMemories(
+    adminClient,
+    userId,
+    (parsed as { memories?: unknown }).memories
+  );
+
   return new Response(
     JSON.stringify({
       ...parsed,
@@ -885,6 +967,7 @@ async function handleHistoricalMode(
       proposals_created: 0,
       commitments_created: commitmentsCreated,
       ideas_created: ideasCreated,
+      memories_created: memoriesCreated,
       participants_linked: participantsLinked,
       topics: parsed.topics ?? [],
     }),
@@ -1146,6 +1229,14 @@ async function handleActiveMode(
     }
   }
 
+  // Memories — parser-extracted durable facts, written directly to the
+  // memories table (no proposal-queue round trip). Dedupes case-insensitively.
+  const memoriesCreated = await insertExtractedMemories(
+    adminClient,
+    userId,
+    (parsed as { memories?: unknown }).memories
+  );
+
   // Cluster detection: if this meeting produced 3+ task proposals, ask the
   // model whether any of them belong to a single named deliverable (e.g.
   // "the S&P deck"). Clusters land in proposal_groups as pending suggestions
@@ -1166,6 +1257,7 @@ async function handleActiveMode(
       title: meetingUpdate.title ?? currentTitle,
       proposals_created: proposalRows.length,
       commitments_created: commitmentRows.length,
+      memories_created: memoriesCreated,
       groups_created: groupsCreated,
       not_for_user: notForUser,
       skipped_speculative: skippedSpeculative,
@@ -1188,6 +1280,54 @@ async function handleActiveMode(
 // artifact, human-sayable parent title. The model is told to return an empty
 // clusters array when in doubt.
 // ----------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------
+// Memory insert — writes parser-extracted memories directly to the memories
+// table with source='extracted_from_transcript'. Dedupes case-insensitively
+// against existing memories as a safety belt (the parser is told not to
+// re-emit, but we double-check).
+// ----------------------------------------------------------------------------
+
+// deno-lint-ignore no-explicit-any
+async function insertExtractedMemories(adminClient: any, userId: string, raw: unknown): Promise<number> {
+  if (!Array.isArray(raw)) return 0;
+  const candidates: string[] = [];
+  for (const m of raw) {
+    if (m && typeof m === "object" && typeof (m as { content?: unknown }).content === "string") {
+      const c = (m as { content: string }).content.trim();
+      if (c && c.length <= 300) candidates.push(c);
+    }
+  }
+  if (candidates.length === 0) return 0;
+
+  // Load existing memories for this user so we can skip duplicates (case
+  // insensitive exact-content match). Small table, cheap to scan.
+  const { data: existing } = await adminClient
+    .from("memories")
+    .select("content")
+    .eq("user_id", userId);
+  const known = new Set(
+    (existing ?? []).map((r: { content: string }) => r.content.trim().toLowerCase())
+  );
+
+  const toInsert: Array<{ user_id: string; content: string; source: string }> = [];
+  const seenThisCall = new Set<string>();
+  for (const c of candidates) {
+    const key = c.toLowerCase();
+    if (known.has(key) || seenThisCall.has(key)) continue;
+    seenThisCall.add(key);
+    toInsert.push({ user_id: userId, content: c, source: "extracted_from_transcript" });
+  }
+
+  if (toInsert.length === 0) return 0;
+
+  const { error } = await adminClient.from("memories").insert(toInsert);
+  if (error) {
+    console.error("[ai-parse-transcript] memory insert error:", error);
+    return 0;
+  }
+  return toInsert.length;
+}
 
 interface ClusterDetectionArgs {
   anthropicKey: string;

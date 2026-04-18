@@ -3,7 +3,7 @@ import { Save, RefreshCw, Download, CheckCircle, LogOut, Trash2, Brain } from 'l
 import TemplateEditor from '../components/TemplateEditor'
 import { useProfile, useUpdateProfile, useDistillProfile } from '../hooks/useProfile'
 import { useSyncCalendar } from '../hooks/useMeetings'
-import { useMemories, useDeleteMemory } from '../hooks/useMemories'
+import { useMemories, useDeleteMemory, useAddMemory } from '../hooks/useMemories'
 import {
   getMicrosoftAuthorizeUrl,
   useSyncMicrosoft,
@@ -52,6 +52,8 @@ export default function Settings() {
   const disconnectMicrosoft = useDisconnectMicrosoft()
   const { data: memories } = useMemories()
   const deleteMemory = useDeleteMemory()
+  const addMemory = useAddMemory()
+  const [newMemory, setNewMemory] = useState('')
 
   const settings = (profile?.settings as Record<string, unknown>) ?? {}
 
@@ -255,7 +257,7 @@ export default function Settings() {
             Memories
           </h2>
           <p className="mb-3 text-xs text-gray-500">
-            Facts the AI has learned about you over time. You can delete any memory but can&apos;t edit them directly.
+            Persistent facts the AI uses on every call — who people are, what companies you're working with, your preferences. Add ones you want remembered; the parser also writes new ones from meeting transcripts as it learns.
           </p>
 
           {memories && memories.length > 0 ? (
@@ -265,7 +267,20 @@ export default function Settings() {
                   key={memory.id}
                   className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2"
                 >
-                  <span className="flex-1 text-sm text-gray-300">{memory.content}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-gray-300">{memory.content}</div>
+                    <div className="mt-0.5 text-[10px] uppercase tracking-wider text-gray-600">
+                      {memory.source === 'user_added'
+                        ? 'added by you'
+                        : memory.source === 'extracted_from_transcript'
+                        ? 'from a meeting'
+                        : memory.source === 'extracted_from_chat'
+                        ? 'from chat'
+                        : memory.source === 'extracted_from_item'
+                        ? 'from a task'
+                        : memory.source}
+                    </div>
+                  </div>
                   <button
                     onClick={() => deleteMemory.mutate(memory.id)}
                     className="flex-shrink-0 text-gray-600 hover:text-red-400"
@@ -278,9 +293,35 @@ export default function Settings() {
             </div>
           ) : (
             <p className="mb-3 text-xs text-gray-600 italic">
-              No memories yet. As you interact with the AI assistant, it will note things worth remembering.
+              No memories yet. Add one below, or let the parser propose them from your next meeting.
             </p>
           )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!newMemory.trim()) return
+              addMemory.mutate(newMemory, {
+                onSuccess: () => setNewMemory(''),
+              })
+            }}
+            className="mb-3 flex gap-2"
+          >
+            <input
+              type="text"
+              value={newMemory}
+              onChange={(e) => setNewMemory(e.target.value)}
+              placeholder='e.g. "Holly is the procurement lead at Chanel"'
+              className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!newMemory.trim() || addMemory.isPending}
+              className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {addMemory.isPending ? 'Adding…' : 'Add memory'}
+            </button>
+          </form>
 
           <label className="flex items-center gap-2 text-sm text-gray-300">
             <input
