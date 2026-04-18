@@ -7,6 +7,8 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Focus from './pages/Focus'
+import Analytics from './pages/Analytics'
+import Landscape from './pages/Landscape'
 import DashRiver from './pages/DashRiver'
 import Streams from './pages/Streams'
 import StreamDetail from './pages/StreamDetail'
@@ -59,6 +61,8 @@ export default function App() {
               <Route path="companies" element={<Companies />} />
               <Route path="companies/:id" element={<CompanyDetail />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="settings/analytics" element={<Analytics />} />
+              <Route path="settings/analytics/landscape" element={<Landscape />} />
               <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
             </Route>
           </Routes>

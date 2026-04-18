@@ -1,41 +1,30 @@
 # Resurface -- Claude Code Instructions
 
-## Project Overview
-Resurface is a multi-stream, AI-powered task management system.
-See `docs/streamline-spec-v2.md` for the full technical specification.
-Note: The spec and setup guide use the name "Streamline" throughout. The project has been renamed to "Resurface". Use "Resurface" in all UI text, branding, and user-facing strings.
+## Start Here
+Read `docs/SPEC.md` first. It is the single source of truth for what Resurface is, what's built, and how it works. This file (`CLAUDE.md`) covers conventions, constraints, and dev commands only.
 
-## Tech Stack
+## Tech Stack (quick ref)
 - Frontend: React 19 (Vite 8) + TypeScript 6 + TanStack Query 5 + React Router 7
-- Backend: Supabase (Postgres, Auth, Edge Functions, Storage, Realtime)
-- AI: Claude API (claude-sonnet-4-20250514) via Supabase Edge Functions
+- Backend: Supabase (Postgres 17, Auth, Edge Functions, Realtime)
+- AI: Claude API (Opus 4.6 interactive, Sonnet 4.6 batch) via Supabase Edge Functions
 - Hosting: Vercel (frontend), Supabase (backend)
-- Styling: Tailwind CSS v4 (via @tailwindcss/vite plugin)
+- Styling: Tailwind CSS v4 (dark theme only, via @tailwindcss/vite plugin)
 - Icons: lucide-react
 - Drag and drop: @dnd-kit/core, @dnd-kit/sortable
-
-## What Is Already Configured
-- Supabase project is provisioned and linked (`supabase/` directory exists)
-- Extensions enabled: pg_trgm, pgcrypto, vector (pgvector — enabled for semantic search over meeting chunks)
-- Supabase Auth configured: Email provider enabled, Site URL and redirects set for both localhost:5173 and the Vercel production URL
-- Storage bucket `transcripts` created (private, with RLS policy for user-owned folders)
-- Edge Function secrets are set: ANTHROPIC_API_KEY, SB_SERVICE_ROLE_KEY, VOYAGE_API_KEY (note: the service role key uses the name SB_SERVICE_ROLE_KEY because Supabase reserves the SUPABASE_ prefix for secrets)
-- Vercel project is connected to this repo with env vars configured (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
-- Frontend scaffold: Vite + React + TypeScript initialized, all dependencies installed
-- Frontend env vars are in `.env.local` (not committed)
 
 ## Project Structure
 ```
 src/
   lib/           -- Supabase client, QueryClient, shared utilities
   contexts/      -- React contexts (AuthContext)
-  hooks/         -- Custom hooks (useAuth, useRealtimeSubscription)
-  components/    -- Shared components (Layout)
+  hooks/         -- Custom hooks (data layer, all TanStack Query)
+  components/    -- Shared components
   pages/         -- Route-level page components
 supabase/
   migrations/    -- SQL migration files
   functions/     -- Edge Functions (Deno/TypeScript)
-docs/            -- Spec and setup guide
+docs/            -- SPEC.md (canonical), legacy docs
+mcp-server/      -- Local MCP server for Claude Desktop/Code
 ```
 
 ## Development Commands
@@ -46,36 +35,36 @@ docs/            -- Spec and setup guide
 - `supabase db push` -- push migrations to remote
 - `supabase functions deploy <name>` -- deploy a single Edge Function
 
-## Build Order (from spec Section 11)
-Follow the phase order strictly: 1A (foundation) through 1F (polish).
-
-### Phase 1A -- Foundation (Days 1-3)
-1. Database tables, RLS policies, indexes, search function (search_everything)
-2. Auth flow (sign up, sign in, profile creation)
-3. Frontend scaffold with routing and Supabase client
-4. Realtime subscriptions for items, meetings, chat_messages
-5. Deploy pipeline confirmed working
-
-### Phase 1B -- Core Item Management (Days 4-7)
-### Phase 1C -- Views & Visual Layer (Days 8-11)
-### Phase 1D -- AI Chat (Days 12-14)
-### Phase 1E -- Calendar & Transcripts (Days 15-18)
-### Phase 1F -- Polish & Launch (Days 19-21)
-
-See the spec for full details on each phase.
-
 ## Code Style
 - Functional components only (no class components)
 - Tailwind CSS for all styling (no CSS modules, no inline style objects)
 - TypeScript strict mode
 - Use lucide-react for icons
+- Use "Resurface" in all UI text, branding, and user-facing strings
 
 ## Key Constraints
 - All AI calls go through Edge Functions. The Anthropic API key is never in the frontend.
 - Reference the Anthropic key in Edge Functions via `Deno.env.get('ANTHROPIC_API_KEY')`.
-- Reference the service role key via `Deno.env.get('SB_SERVICE_ROLE_KEY')`.
+- Reference the service role key via `Deno.env.get('SB_SERVICE_ROLE_KEY')` (SB_ prefix because Supabase reserves SUPABASE_).
 - All tables use RLS. Users can only see their own data.
 - The search function uses `security definer` with explicit user_id parameter.
 - Edge Functions are Deno (TypeScript). Use Deno-compatible imports.
+- Edge Functions that serve AI features need `--no-verify-jwt` flag; they verify JWTs in-code.
 - ICS feed URL is sensitive (treat like a bearer token).
-- Railway setup is deferred. Only needed if Edge Functions hit time limits on long transcripts.
+
+## What Is Already Configured
+- Supabase project provisioned and linked (`supabase/` directory)
+- Extensions: pg_trgm, pgcrypto, pg_cron, pg_net, vector (pgvector — enabled for semantic search over meeting chunks)
+- Supabase Auth: email provider, site URL + redirects for localhost:5173 and Vercel prod
+- Storage bucket `transcripts` (private, RLS)
+- Edge Function secrets set: ANTHROPIC_API_KEY, SB_SERVICE_ROLE_KEY, JAMIE_WEBHOOK_API_KEY, RESURFACE_DEFAULT_USER_ID, VOYAGE_API_KEY
+- Vercel connected with env vars (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
+- Frontend env vars in `.env.local` (not committed)
+
+## Maintaining the Spec
+**At the end of any session that ships a feature, migration, new page, new hook, or new Edge Function**:
+1. Append a dated bullet to `docs/SPEC.md` > `## Changelog` describing what changed
+2. If you added/removed routes, components, hooks, or Edge Functions, update the corresponding `<!-- AUTO:section -->` table in SPEC.md
+3. If you changed the data model, update `## 15. Database Tables`
+4. If you added a new AI capability, update `## 9. Item Intelligence`
+5. Run `node scripts/refresh-spec.mjs` to verify AUTO sections are in sync (optional but recommended)

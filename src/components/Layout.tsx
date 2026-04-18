@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, FileInput } from 'lucide-react'
+import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, FileInput, BarChart3 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -175,6 +175,7 @@ export default function Layout() {
         <div className="border-t border-gray-800 px-2 py-2">
           <NavLink
             to="/settings"
+            end
             className={({ isActive }) =>
               `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 isActive
@@ -185,6 +186,19 @@ export default function Layout() {
           >
             <Settings size={16} />
             Settings
+          </NavLink>
+          <NavLink
+            to="/settings/analytics"
+            className={({ isActive }) =>
+              `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                isActive
+                  ? 'bg-gray-800 text-white'
+                  : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+              }`
+            }
+          >
+            <BarChart3 size={16} />
+            Analytics
           </NavLink>
           <div className="mt-1 flex items-center justify-between px-3 py-1">
             <span className="truncate text-xs text-gray-500">
