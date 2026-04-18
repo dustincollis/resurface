@@ -68,147 +68,130 @@ Rules:
 // blowing out the context window.
 // ============================================================
 
-interface EntityContext {
-  name: string;
-  type: "person" | "company";
-  resurface: string; // compact text summary
-  hasHistory: boolean;
-}
-
-async function loadResurfaceContext(
+// Load the full Resurface catalog in one shot and return as a structured
+// text block. Claude cross-references this against the bundle attendee
+// lists — catches name variations, abbreviations, and fuzzy matches that
+// per-entity query-by-query search misses.
+async function loadResurfaceCatalog(
   adminClient: ReturnType<typeof createClient>,
-  userId: string,
-  bundleId: string
-): Promise<EntityContext[]> {
-  const { data: entities } = await adminClient
-    .from("bundle_entities")
-    .select("raw_name, entity_type, entity_id")
-    .eq("bundle_id", bundleId)
-    .order("mention_count", { ascending: false })
-    .limit(200);
+  userId: string
+): Promise<string> {
+  const [meetingsRes, commitmentsRes, pursuitsRes, memoriesRes, itemsRes] =
+    await Promise.all([
+      // Meeting titles + dates + summaries (no full transcripts — too large)
+      adminClient
+        .from("meetings")
+        .select("title, start_time, attendees, transcript_summary")
+        .eq("user_id", userId)
+        .order("start_time", { ascending: false })
+        .limit(300),
 
-  if (!entities || entities.length === 0) return [];
+      // All open commitments
+      adminClient
+        .from("commitments")
+        .select("title, counterpart, company, status, direction, do_by")
+        .eq("user_id", userId)
+        .neq("status", "met")
+        .limit(100),
 
-  const results: EntityContext[] = [];
-  const BATCH = 10; // smaller batches — each entity now runs more queries
+      // All active pursuits
+      adminClient
+        .from("pursuits")
+        .select("name, company, status, stage")
+        .eq("user_id", userId)
+        .neq("status", "archived")
+        .limit(50),
 
-  for (let i = 0; i < entities.length; i += BATCH) {
-    const batch = entities.slice(i, i + BATCH);
-    const batchResults = await Promise.all(
-      batch.map(async (entity) => {
-        const name = entity.raw_name as string;
-        const type = entity.entity_type as "person" | "company";
-        const lines: string[] = [];
+      // All memories
+      adminClient
+        .from("memories")
+        .select("content, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(100),
 
-        // Build a tsquery-safe search term (strip special chars)
-        const tsQuery = name.replace(/[^a-zA-Z0-9\s]/g, " ").trim();
+      // Open items with company tags
+      adminClient
+        .from("items")
+        .select("title, status, custom_fields")
+        .eq("user_id", userId)
+        .neq("status", "done")
+        .not("custom_fields->company", "is", null)
+        .limit(100),
+    ]);
 
-        try {
-          // ── Meetings: search_vector covers title + summary + full transcript ──
-          const meetingsRes = await adminClient
-            .from("meetings")
-            .select("title, start_time, transcript_summary")
-            .eq("user_id", userId)
-            .textSearch("search_vector", tsQuery, { config: "english" })
-            .order("start_time", { ascending: false })
-            .limit(4);
+  const parts: string[] = [];
 
-          const meetings = meetingsRes.data ?? [];
-          if (meetings.length > 0) {
-            lines.push(
-              `Meetings (${meetings.length}): ${meetings
-                .map((m) => `"${m.title}" ${m.start_time?.slice(0, 10) ?? ""}${m.transcript_summary ? " — " + m.transcript_summary.slice(0, 120) : ""}`)
-                .join(" | ")}`
-            );
-          }
-
-          // ── Meeting chunks: richer transcript excerpts ──
-          const chunksRes = await adminClient
-            .from("meeting_chunks")
-            .select("chunk_text, topic_label")
-            .eq("user_id", userId)
-            .textSearch("chunk_text", tsQuery, { config: "english" })
-            .limit(3);
-
-          const chunks = chunksRes.data ?? [];
-          if (chunks.length > 0 && meetings.length === 0) {
-            // Only show chunk excerpts if no full meeting matched (avoids duplication)
-            lines.push(
-              `Transcript mentions: ${chunks
-                .map((c) => `[${c.topic_label}] ${c.chunk_text.slice(0, 150)}`)
-                .join(" | ")}`
-            );
-          }
-
-          // ── Commitments ──
-          const commitmentsRes = await adminClient
-            .from("commitments")
-            .select("title, status, direction, do_by")
-            .eq("user_id", userId)
-            .or(
-              type === "person"
-                ? `counterpart.ilike.%${name}%`
-                : `company.ilike.%${name}%,title.ilike.%${name}%`
-            )
-            .neq("status", "met")
-            .limit(5);
-
-          const commitments = commitmentsRes.data ?? [];
-          if (commitments.length > 0) {
-            lines.push(
-              `Open commitments: ${commitments
-                .map((c) => `[${c.direction}] ${c.title} (${c.status})`)
-                .join("; ")}`
-            );
-          }
-
-          // ── Pursuits (companies only) ──
-          if (type === "company") {
-            const pursuitsRes = await adminClient
-              .from("pursuits")
-              .select("name, stage, status")
-              .eq("user_id", userId)
-              .or(`name.ilike.%${name}%,company.ilike.%${name}%`)
-              .limit(3);
-
-            const pursuits = pursuitsRes.data ?? [];
-            if (pursuits.length > 0) {
-              lines.push(
-                `Pursuits: ${pursuits.map((p) => `${p.name} [${p.stage ?? p.status}]`).join("; ")}`
-              );
-            }
-          }
-
-          // ── Memories ──
-          const memoriesRes = await adminClient
-            .from("memories")
-            .select("content")
-            .eq("user_id", userId)
-            .ilike("content", `%${name}%`)
-            .limit(3);
-
-          const memories = memoriesRes.data ?? [];
-          if (memories.length > 0) {
-            lines.push(
-              `Notes: ${memories.map((m) => m.content).join("; ").slice(0, 300)}`
-            );
-          }
-        } catch (err) {
-          console.error(`[report] entity lookup failed for "${name}":`, err);
-        }
-
-        return {
-          name,
-          type,
-          resurface: lines.join("\n"),
-          hasHistory: lines.length > 0,
-        };
-      })
+  const meetings = meetingsRes.data ?? [];
+  if (meetings.length > 0) {
+    parts.push(
+      `## Your Meetings (${meetings.length} most recent)\n` +
+        meetings
+          .map((m) => {
+            const attendeeStr = Array.isArray(m.attendees) && m.attendees.length
+              ? ` | Attendees: ${(m.attendees as string[]).join(", ")}`
+              : "";
+            const summary = m.transcript_summary
+              ? ` | Summary: ${m.transcript_summary.slice(0, 150)}`
+              : "";
+            return `- "${m.title}" (${m.start_time?.slice(0, 10) ?? "no date"})${attendeeStr}${summary}`;
+          })
+          .join("\n")
     );
-    results.push(...batchResults);
   }
 
-  return results;
+  const commitments = commitmentsRes.data ?? [];
+  if (commitments.length > 0) {
+    parts.push(
+      `## Open Commitments (${commitments.length})\n` +
+        commitments
+          .map(
+            (c) =>
+              `- [${c.direction}] "${c.title}"${c.counterpart ? ` | Person: ${c.counterpart}` : ""}${c.company ? ` | Company: ${c.company}` : ""} | Status: ${c.status}${c.do_by ? ` | Due: ${c.do_by}` : ""}`
+          )
+          .join("\n")
+    );
+  }
+
+  const pursuits = pursuitsRes.data ?? [];
+  if (pursuits.length > 0) {
+    parts.push(
+      `## Active Pursuits (${pursuits.length})\n` +
+        pursuits
+          .map(
+            (p) =>
+              `- "${p.name}"${p.company ? ` | Company: ${p.company}` : ""} | Status: ${p.stage ?? p.status}`
+          )
+          .join("\n")
+    );
+  }
+
+  const memories = memoriesRes.data ?? [];
+  if (memories.length > 0) {
+    parts.push(
+      `## Memories / Saved Notes (${memories.length})\n` +
+        memories.map((m) => `- ${m.content}`).join("\n")
+    );
+  }
+
+  const items = itemsRes.data ?? [];
+  if (items.length > 0) {
+    parts.push(
+      `## Open Items with Company Tags (${items.length})\n` +
+        items
+          .map(
+            (i) =>
+              `- "${i.title}" | Company: ${(i.custom_fields as Record<string, unknown>)?.company ?? "?"} | Status: ${i.status}`
+          )
+          .join("\n")
+    );
+  }
+
+  if (parts.length === 0) {
+    return "No Resurface data found (meetings, commitments, pursuits, or memories).";
+  }
+
+  return parts.join("\n\n");
 }
 
 // ============================================================
@@ -277,8 +260,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Load source docs, gaps, and Resurface context in parallel
-    const [docsRes, gapsRes, entityContexts] = await Promise.all([
+    // Load source docs, gaps, and full Resurface catalog in parallel
+    const [docsRes, gapsRes, resurfaceCatalog] = await Promise.all([
       adminClient
         .from("bundle_documents")
         .select("title, content_md, position")
@@ -289,7 +272,7 @@ Deno.serve(async (req) => {
         .select("content, state")
         .eq("bundle_id", bundle_id)
         .order("position"),
-      loadResurfaceContext(adminClient, userId, bundle_id),
+      loadResurfaceCatalog(adminClient, userId),
     ]);
 
     if (docsRes.error || !docsRes.data || docsRes.data.length === 0) {
@@ -299,7 +282,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build source content block
     const sourceContent = docsRes.data
       .map((d) => `# ${d.title}\n\n${d.content_md}`)
       .join("\n\n---\n\n");
@@ -309,29 +291,20 @@ Deno.serve(async (req) => {
         ? `\n\n---\n\n# Open Gaps\n\n${gapsRes.data.map((g) => `- ${g.content}`).join("\n")}`
         : "";
 
-    // Build Resurface context block — with-history entities first, then cold
-    const withHistory = entityContexts.filter((e) => e.hasHistory);
-    const cold = entityContexts.filter((e) => !e.hasHistory);
-
-    const resurfaceBlock = [
-      `## Resurface: Entities with existing history (${withHistory.length})`,
-      ...withHistory.map((e) => `**${e.name}** (${e.type})\n${e.resurface}`),
-      `\n## Resurface: No history found (${cold.length})`,
-      cold.map((e) => e.name).join(", "),
-    ].join("\n\n");
-
     const userContent = `Bundle: ${bundle.name}
 
 ---
-BRIEFING DOCUMENTS:
+BRIEFING DOCUMENTS (who is at the event, what is scheduled):
 ${sourceContent}${gapsBlock}
 
 ---
-RESURFACE CROSS-REFERENCE:
-${resurfaceBlock}
+RESURFACE DATABASE (your full history — meetings, commitments, pursuits, memories, open items):
+${resurfaceCatalog}
 
 ---
-Generate the engagement report now. Cross-reference the briefing attendee lists against the Resurface context to produce the priority/warm/cold ranking.`;
+Cross-reference every person and company in the briefing attendee lists against the Resurface database above.
+Look for name matches, company matches, abbreviations, and partial matches (e.g. "WK" = "Wolters Kluwer").
+Use that cross-reference to produce the priority/warm/cold engagement plan.`;
 
     const t0 = Date.now();
     const res = await fetch(ANTHROPIC_API, {
@@ -393,10 +366,7 @@ Generate the engagement report now. Cross-reference the briefing attendee lists 
       latency_ms: latencyMs,
       source_type: "bundle",
       source_id: bundle_id,
-      metadata: {
-        entities_with_history: withHistory.length,
-        entities_cold: cold.length,
-      },
+      metadata: { approach: "full_catalog" },
     });
 
     return new Response(
@@ -404,7 +374,7 @@ Generate the engagement report now. Cross-reference the briefing attendee lists 
         ok: true,
         report_id: savedReport?.id,
         content_md: reportText,
-        stats: { with_history: withHistory.length, cold: cold.length },
+        stats: { approach: "full_catalog" },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
