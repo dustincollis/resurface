@@ -13,7 +13,7 @@ declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void };
 // ============================================================
 
 const PASS1_SYSTEM = `You cross-reference event briefings against a user's work history database.
-Return ONLY valid JSON — no markdown fences, no explanation, no preamble.`;
+You will be required to call the return_rankings tool with the structured result — do not respond in free text.`;
 
 const PASS1_USER_TEMPLATE = (bundleName: string, briefing: string, catalog: string) => `
 Event: ${bundleName}
@@ -27,39 +27,14 @@ ${catalog}
 Cross-reference every person and company in the briefing against the Resurface catalog.
 Use fuzzy matching: abbreviations ("WK" = "Wolters Kluwer"), partial names, related entities.
 
-Return this exact JSON shape:
-{
-  "priority": [
-    {
-      "display_name": "Company or person name as it appears in the briefing",
-      "type": "company or person",
-      "signals": ["scheduled 1:1", "BASH bus", "open commitment", "prior meeting — 3 meetings found"],
-      "matched_meeting_ids": ["uuid1", "uuid2"],
-      "matched_commitment_ids": ["uuid1"],
-      "matched_pursuit_ids": ["uuid1"],
-      "briefing_context": "Key facts from the briefing: who to find, when/where, why they matter",
-      "resurface_summary": "What Resurface shows: meeting titles, dates, key topics, open items"
-    }
-  ],
-  "warm": [
-    {
-      "display_name": "string",
-      "type": "company or person",
-      "matched_meeting_ids": ["uuid1"],
-      "resurface_summary": "Brief: X meetings, last contact YYYY-MM-DD"
-    }
-  ],
-  "cold": ["Company A", "Person B"]
-}
-
 Rules:
 - PRIORITY = has Resurface history OR has a scheduled 1:1/meal/event touchpoint at Summit
 - WARM = Resurface history exists but no specific Summit touchpoint
 - COLD = no Resurface history, no scheduled touchpoint
-- Max 20 priority, 25 warm, 40 cold
 - Include every named person and company from the briefing in one of the three buckets
-- matched_meeting_ids: only include IDs that clearly match — no guessing
-- IMPORTANT: escape any double-quotes or newlines inside string values so the JSON parses`;
+- matched_meeting_ids: only include IDs that clearly match — no guessing; empty array if no match
+
+Call the return_rankings tool with your answer.`;
 
 // ============================================================
 // Pass 2: write the full deep report
@@ -259,7 +234,7 @@ async function loadMeetingChunks(
 }
 
 // ============================================================
-// Claude caller
+// Claude callers — free text (Pass 2) and forced tool use (Pass 1)
 // ============================================================
 async function callClaude(
   anthropicKey: string,
@@ -298,6 +273,59 @@ async function callClaude(
     .join("");
 
   return { text, usage: data.usage ?? {} };
+}
+
+// Forces Claude to return structured data by requiring a specific tool_use call.
+// The API validates the input against the provided JSON schema — the response
+// cannot be malformed. Returns the parsed input object directly.
+async function callClaudeWithTool<T>(
+  anthropicKey: string,
+  system: string,
+  userContent: string,
+  toolName: string,
+  toolDescription: string,
+  inputSchema: Record<string, unknown>,
+  maxTokens: number
+): Promise<{ input: T; usage: Record<string, number> }> {
+  const body: Record<string, unknown> = {
+    model: MODEL,
+    max_tokens: maxTokens,
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    tools: [
+      {
+        name: toolName,
+        description: toolDescription,
+        input_schema: inputSchema,
+      },
+    ],
+    tool_choice: { type: "tool", name: toolName },
+    messages: [{ role: "user", content: userContent }],
+  };
+
+  const res = await fetch(ANTHROPIC_API, {
+    method: "POST",
+    headers: {
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Claude API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const toolBlock = (data.content as { type: string; name?: string; input?: unknown }[])
+    .find((b) => b.type === "tool_use" && b.name === toolName);
+
+  if (!toolBlock || typeof toolBlock.input !== "object") {
+    throw new Error(`Expected tool_use block '${toolName}' not found in response`);
+  }
+
+  return { input: toolBlock.input as T, usage: data.usage ?? {} };
 }
 
 // ============================================================
@@ -340,20 +368,8 @@ async function generateReport(
       .map((g) => `- ${g.content}`)
       .join("\n");
 
-    // ── Pass 1 ─────────────────────────────────────────────
-    console.log("[report] Pass 1: cross-referencing...");
-    const pass1 = await callClaude(
-      anthropicKey,
-      PASS1_SYSTEM,
-      PASS1_USER_TEMPLATE(bundleName, briefingText, catalog),
-      8192,
-      false
-    );
-    for (const [k, v] of Object.entries(pass1.usage)) {
-      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
-    }
-
-    let rankings: {
+    // ── Pass 1: forced tool use — API validates schema, no parsing needed ──
+    type Rankings = {
       priority: {
         display_name: string;
         type: string;
@@ -373,19 +389,87 @@ async function generateReport(
       cold: string[];
     };
 
-    try {
-      const stripped = pass1.text
-        .replace(/^```(?:json)?\s*/m, "")
-        .replace(/\s*```$/m, "")
-        .trim();
-      const start = stripped.indexOf("{");
-      const end = stripped.lastIndexOf("}");
-      if (start === -1 || end === -1) throw new Error("No JSON object found");
-      rankings = JSON.parse(stripped.slice(start, end + 1));
-    } catch (e) {
-      console.error("[report] Pass 1 JSON parse failed. Raw:", pass1.text.slice(0, 800));
-      throw new Error(`Pass 1 JSON parse failed: ${e}`);
+    const rankingsSchema = {
+      type: "object",
+      required: ["priority", "warm", "cold"],
+      properties: {
+        priority: {
+          type: "array",
+          description: "Accounts with Resurface history OR a scheduled touchpoint at the event. Max 20.",
+          items: {
+            type: "object",
+            required: [
+              "display_name",
+              "type",
+              "signals",
+              "matched_meeting_ids",
+              "matched_commitment_ids",
+              "matched_pursuit_ids",
+              "briefing_context",
+              "resurface_summary",
+            ],
+            properties: {
+              display_name: { type: "string", description: "Name as it appears in the briefing" },
+              type: { type: "string", enum: ["company", "person"] },
+              signals: {
+                type: "array",
+                items: { type: "string" },
+                description: "Why this is priority — e.g. 'BASH bus', 'Monday dinner', 'prior meeting'",
+              },
+              matched_meeting_ids: {
+                type: "array",
+                items: { type: "string" },
+                description: "UUIDs from the MEETINGS catalog. Only include clear matches. Empty array if none.",
+              },
+              matched_commitment_ids: { type: "array", items: { type: "string" } },
+              matched_pursuit_ids: { type: "array", items: { type: "string" } },
+              briefing_context: {
+                type: "string",
+                description: "Key facts from the briefing: who to find, when/where, why they matter",
+              },
+              resurface_summary: {
+                type: "string",
+                description: "What Resurface shows: meeting titles, dates, key topics, open items. 'No history' if none.",
+              },
+            },
+          },
+        },
+        warm: {
+          type: "array",
+          description: "Resurface history exists but no scheduled touchpoint. Max 25.",
+          items: {
+            type: "object",
+            required: ["display_name", "type", "matched_meeting_ids", "resurface_summary"],
+            properties: {
+              display_name: { type: "string" },
+              type: { type: "string", enum: ["company", "person"] },
+              matched_meeting_ids: { type: "array", items: { type: "string" } },
+              resurface_summary: { type: "string" },
+            },
+          },
+        },
+        cold: {
+          type: "array",
+          description: "No history, no touchpoint. Max 40 names.",
+          items: { type: "string" },
+        },
+      },
+    };
+
+    console.log("[report] Pass 1: cross-referencing via tool use...");
+    const pass1 = await callClaudeWithTool<Rankings>(
+      anthropicKey,
+      PASS1_SYSTEM,
+      PASS1_USER_TEMPLATE(bundleName, briefingText, catalog),
+      "return_rankings",
+      "Return the cross-reference rankings for every person and company in the briefing",
+      rankingsSchema,
+      8192
+    );
+    for (const [k, v] of Object.entries(pass1.usage)) {
+      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
     }
+    const rankings = pass1.input;
 
     console.log(
       `[report] Pass 1 done: ${rankings.priority.length} priority, ${rankings.warm.length} warm, ${(rankings.cold ?? []).length} cold`
