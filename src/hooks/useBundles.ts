@@ -105,9 +105,11 @@ function extractError(err: unknown): Error {
 export function useCreateBundle() {
   return useMutation({
     mutationFn: async (payload: CreateBundlePayload) => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
       const { data, error } = await supabase
         .from('bundles')
-        .insert(payload)
+        .insert({ ...payload, user_id: user.id })
         .select()
         .single()
       if (error) throw extractError(error)
