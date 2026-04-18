@@ -37,8 +37,11 @@ export function useBundle(bundleId: string) {
     },
     enabled: !!bundleId,
     refetchInterval: (query) => {
-      // Poll while ingesting so status updates show in real time
-      return query.state.data?.status === 'ingesting' ? 2000 : false
+      // Poll while ingesting OR while the background report worker is running
+      const d = query.state.data
+      if (d?.status === 'ingesting') return 2000
+      if (d?.report_status === 'generating') return 3000
+      return false
     },
   })
 }

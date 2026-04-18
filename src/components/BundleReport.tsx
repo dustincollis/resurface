@@ -1,13 +1,30 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Loader2, RefreshCw, Printer, WifiOff } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useBundleReport, useGenerateBundleReport } from '../hooks/useBundleReport'
+import { useBundle } from '../hooks/useBundles'
 
 const OFFLINE_KEY = (bundleId: string) => `resurface_bundle_report_${bundleId}`
 
 export default function BundleReport({ bundleId }: { bundleId: string }) {
   const { data: report, isLoading } = useBundleReport(bundleId)
+  const { data: bundle } = useBundle(bundleId)
   const generate = useGenerateBundleReport()
+  const qc = useQueryClient()
   const isOffline = !navigator.onLine
+
+  const reportStatus = bundle?.report_status ?? 'idle'
+  const isGenerating = reportStatus === 'generating' || generate.isPending
+
+  // When background worker flips status from 'generating' to 'ready',
+  // refetch the report content so it renders without a manual reload.
+  const prevStatus = useRef(reportStatus)
+  useEffect(() => {
+    if (prevStatus.current === 'generating' && reportStatus === 'ready') {
+      qc.invalidateQueries({ queryKey: ['bundle_report', bundleId] })
+    }
+    prevStatus.current = reportStatus
+  }, [reportStatus, bundleId, qc])
 
   // Persist report to localStorage for offline access
   useEffect(() => {
@@ -62,15 +79,15 @@ export default function BundleReport({ bundleId }: { bundleId: string }) {
           </button>
           <button
             onClick={handleGenerate}
-            disabled={generate.isPending}
+            disabled={isGenerating}
             className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs text-white hover:bg-purple-500 disabled:opacity-50"
           >
-            {generate.isPending ? (
+            {isGenerating ? (
               <Loader2 size={12} className="animate-spin" />
             ) : (
               <RefreshCw size={12} />
             )}
-            {displayReport ? 'Regenerate' : 'Generate Report'}
+            {isGenerating ? 'Generating…' : displayReport ? 'Regenerate' : 'Generate Report'}
           </button>
         </div>
       </div>
@@ -78,6 +95,11 @@ export default function BundleReport({ bundleId }: { bundleId: string }) {
       {generate.error && (
         <div className="border-b border-red-900/40 bg-red-950/30 px-4 py-2 text-xs text-red-300">
           {generate.error instanceof Error ? generate.error.message : String(generate.error)}
+        </div>
+      )}
+      {reportStatus === 'failed' && bundle?.report_error && (
+        <div className="border-b border-red-900/40 bg-red-950/30 px-4 py-2 text-xs text-red-300">
+          Last generation failed: {bundle.report_error}
         </div>
       )}
 
@@ -89,7 +111,7 @@ export default function BundleReport({ bundleId }: { bundleId: string }) {
             Reading offline — saved version from {new Date(offlineFallback.generated_at).toLocaleString()}
           </div>
         )}
-        {!displayReport && !generate.isPending && (
+        {!displayReport && !isGenerating && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="mb-4 text-gray-400">Generate a plane-ready AI briefing from your source documents.</p>
             <button
@@ -100,14 +122,16 @@ export default function BundleReport({ bundleId }: { bundleId: string }) {
             </button>
           </div>
         )}
-        {generate.isPending && (
+        {isGenerating && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Loader2 size={24} className="mb-3 animate-spin text-purple-400" />
-            <p className="text-sm text-gray-400">Synthesizing briefing report...</p>
-            <p className="mt-1 text-xs text-gray-600">This takes 20-40 seconds.</p>
+            <p className="text-sm text-gray-400">Synthesizing briefing report…</p>
+            <p className="mt-1 text-xs text-gray-600">
+              Runs in the background — typically 3–5 minutes. Safe to close this tab; come back any time.
+            </p>
           </div>
         )}
-        {displayReport && !generate.isPending && (
+        {displayReport && !isGenerating && (
           <div className="mx-auto max-w-3xl">
             <ReportRenderer markdown={displayReport.content_md} />
           </div>

@@ -526,6 +526,8 @@ export type BundleKind = 'event' | 'onsite' | 'qbr' | 'other'
 export type BundleStatus = 'draft' | 'ingesting' | 'ready' | 'error'
 export type BundleGapState = 'open' | 'resolved' | 'deferred'
 
+export type BundleReportStatus = 'idle' | 'generating' | 'ready' | 'failed'
+
 export interface Bundle {
   id: string
   user_id: string
@@ -536,6 +538,9 @@ export interface Bundle {
   ends_at: string | null
   status: BundleStatus
   metadata: Record<string, unknown>
+  report_status: BundleReportStatus
+  report_error: string | null
+  report_started_at: string | null
   created_at: string
   updated_at: string
 }

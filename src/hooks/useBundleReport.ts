@@ -39,10 +39,11 @@ export function useGenerateBundleReport() {
         }
         throw error
       }
-      return data as { ok: boolean; report_id: string; content_md: string }
+      return data as { ok: boolean; status: 'generating'; already_running?: boolean }
     },
     onSuccess: (_data, bundleId) => {
-      queryClient.invalidateQueries({ queryKey: ['bundle_report', bundleId] })
+      // Refetch the bundle so its report_status flips to 'generating' and polling starts
+      queryClient.invalidateQueries({ queryKey: ['bundle', bundleId] })
     },
   })
 }

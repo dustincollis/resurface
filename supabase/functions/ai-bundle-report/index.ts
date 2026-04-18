@@ -5,8 +5,11 @@ import { recordAiCall } from "../_shared/telemetry.ts";
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-7";
 
+// EdgeRuntime.waitUntil exists in Supabase's Deno runtime
+declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void };
+
 // ============================================================
-// Pass 1: identify priority accounts and matched Resurface IDs
+// Pass 1: cross-reference + priority ranking (returns JSON)
 // ============================================================
 
 const PASS1_SYSTEM = `You cross-reference event briefings against a user's work history database.
@@ -18,11 +21,11 @@ Event: ${bundleName}
 BRIEFING (who is at the event, what is scheduled):
 ${briefing}
 
-RESURFACE CATALOG (meeting history, commitments, pursuits — includes meeting UUIDs):
+RESURFACE CATALOG (meeting history, commitments, pursuits — with UUIDs):
 ${catalog}
 
 Cross-reference every person and company in the briefing against the Resurface catalog.
-Look for exact matches, abbreviations (e.g. "WK" = "Wolters Kluwer"), partial names, and related entities.
+Use fuzzy matching: abbreviations ("WK" = "Wolters Kluwer"), partial names, related entities.
 
 Return this exact JSON shape:
 {
@@ -30,12 +33,12 @@ Return this exact JSON shape:
     {
       "display_name": "Company or person name as it appears in the briefing",
       "type": "company or person",
-      "signals": ["scheduled 1:1", "BASH bus", "open commitment", "prior meeting — 3 meetings found", etc.],
+      "signals": ["scheduled 1:1", "BASH bus", "open commitment", "prior meeting — 3 meetings found"],
       "matched_meeting_ids": ["uuid1", "uuid2"],
       "matched_commitment_ids": ["uuid1"],
       "matched_pursuit_ids": ["uuid1"],
       "briefing_context": "Key facts from the briefing: who to find, when/where, why they matter",
-      "resurface_summary": "What Resurface shows: meeting titles, dates, key topics, open items. 'No history' if none found."
+      "resurface_summary": "What Resurface shows: meeting titles, dates, key topics, open items"
     }
   ],
   "warm": [
@@ -49,13 +52,14 @@ Return this exact JSON shape:
   "cold": ["Company A", "Person B"]
 }
 
-Priority rules:
+Rules:
 - PRIORITY = has Resurface history OR has a scheduled 1:1/meal/event touchpoint at Summit
 - WARM = Resurface history exists but no specific Summit touchpoint
 - COLD = no Resurface history, no scheduled touchpoint
-- Max 20 priority accounts
+- Max 20 priority, 25 warm, 40 cold
 - Include every named person and company from the briefing in one of the three buckets
-- matched_meeting_ids: only include IDs that clearly match — no guessing`;
+- matched_meeting_ids: only include IDs that clearly match — no guessing
+- IMPORTANT: escape any double-quotes or newlines inside string values so the JSON parses`;
 
 // ============================================================
 // Pass 2: write the full deep report
@@ -131,7 +135,7 @@ By offering. Only relevant to the priority accounts above.
 Key names, times, locations — the things you look up in a hurry.`;
 
 // ============================================================
-// Resurface catalog loader (includes IDs for pass 1 matching)
+// Resurface catalog loader (includes IDs + summaries for matching)
 // ============================================================
 async function loadResurfaceCatalog(
   adminClient: ReturnType<typeof createClient>,
@@ -176,7 +180,7 @@ async function loadResurfaceCatalog(
               ? ` | Attendees: ${(m.attendees as string[]).slice(0, 10).join(", ")}`
               : "";
             const summary = m.transcript_summary
-              ? ` | Summary: ${m.transcript_summary.slice(0, 200)}`
+              ? ` | Summary: ${String(m.transcript_summary).slice(0, 200)}`
               : "";
             return `[ID:${m.id}] "${m.title}" (${m.start_time?.slice(0, 10) ?? "no date"})${att}${summary}`;
           })
@@ -217,24 +221,20 @@ async function loadResurfaceCatalog(
     );
   }
 
-  return parts.length > 0
-    ? parts.join("\n\n")
-    : "No Resurface data found.";
+  return parts.length > 0 ? parts.join("\n\n") : "No Resurface data found.";
 }
 
 // ============================================================
-// Chunk loader for matched meetings (pass 2 enrichment)
+// Transcript chunk loader (pass 2 enrichment)
 // ============================================================
 async function loadMeetingChunks(
   adminClient: ReturnType<typeof createClient>,
   meetingIds: string[],
-  maxChunksPerMeeting = 5
+  maxChunksPerMeeting = 6
 ): Promise<Map<string, string>> {
   if (meetingIds.length === 0) return new Map();
 
   const result = new Map<string, string>();
-
-  // Load chunks in batches to avoid URL length limits
   const BATCH = 10;
   for (let i = 0; i < meetingIds.length; i += BATCH) {
     const batch = meetingIds.slice(i, i + BATCH);
@@ -246,7 +246,6 @@ async function loadMeetingChunks(
 
     for (const chunk of chunks ?? []) {
       const existing = result.get(chunk.meeting_id) ?? "";
-      // Cap at maxChunksPerMeeting per meeting
       const count = (existing.match(/\[Topic:/g) ?? []).length;
       if (count >= maxChunksPerMeeting) continue;
       result.set(
@@ -302,7 +301,221 @@ async function callClaude(
 }
 
 // ============================================================
-// Main handler
+// Background worker — runs after the HTTP response returns
+// ============================================================
+async function generateReport(
+  adminClient: ReturnType<typeof createClient>,
+  anthropicKey: string,
+  userId: string,
+  bundleId: string,
+  bundleName: string
+) {
+  const t0 = Date.now();
+  const totalUsage: Record<string, number> = {};
+
+  try {
+    const [docsRes, gapsRes, catalog] = await Promise.all([
+      adminClient
+        .from("bundle_documents")
+        .select("title, content_md, position")
+        .eq("bundle_id", bundleId)
+        .order("position"),
+      adminClient
+        .from("bundle_gaps")
+        .select("content, state")
+        .eq("bundle_id", bundleId)
+        .order("position"),
+      loadResurfaceCatalog(adminClient, userId),
+    ]);
+
+    if (!docsRes.data || docsRes.data.length === 0) {
+      throw new Error("No documents found in bundle");
+    }
+
+    const briefingText = docsRes.data
+      .map((d) => `# ${d.title}\n\n${d.content_md}`)
+      .join("\n\n---\n\n");
+
+    const gapsText = (gapsRes.data ?? [])
+      .map((g) => `- ${g.content}`)
+      .join("\n");
+
+    // ── Pass 1 ─────────────────────────────────────────────
+    console.log("[report] Pass 1: cross-referencing...");
+    const pass1 = await callClaude(
+      anthropicKey,
+      PASS1_SYSTEM,
+      PASS1_USER_TEMPLATE(bundleName, briefingText, catalog),
+      8192,
+      false
+    );
+    for (const [k, v] of Object.entries(pass1.usage)) {
+      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
+    }
+
+    let rankings: {
+      priority: {
+        display_name: string;
+        type: string;
+        signals: string[];
+        matched_meeting_ids: string[];
+        matched_commitment_ids: string[];
+        matched_pursuit_ids: string[];
+        briefing_context: string;
+        resurface_summary: string;
+      }[];
+      warm: {
+        display_name: string;
+        type: string;
+        matched_meeting_ids: string[];
+        resurface_summary: string;
+      }[];
+      cold: string[];
+    };
+
+    try {
+      const stripped = pass1.text
+        .replace(/^```(?:json)?\s*/m, "")
+        .replace(/\s*```$/m, "")
+        .trim();
+      const start = stripped.indexOf("{");
+      const end = stripped.lastIndexOf("}");
+      if (start === -1 || end === -1) throw new Error("No JSON object found");
+      rankings = JSON.parse(stripped.slice(start, end + 1));
+    } catch (e) {
+      console.error("[report] Pass 1 JSON parse failed. Raw:", pass1.text.slice(0, 800));
+      throw new Error(`Pass 1 JSON parse failed: ${e}`);
+    }
+
+    console.log(
+      `[report] Pass 1 done: ${rankings.priority.length} priority, ${rankings.warm.length} warm, ${(rankings.cold ?? []).length} cold`
+    );
+
+    // ── Load transcript chunks for matched meetings ───────
+    const allMatchedMeetingIds = [
+      ...rankings.priority.flatMap((p) => p.matched_meeting_ids ?? []),
+      ...rankings.warm.flatMap((w) => w.matched_meeting_ids ?? []),
+    ].filter(Boolean);
+    const uniqueMeetingIds = [...new Set(allMatchedMeetingIds)];
+    console.log(`[report] Loading chunks for ${uniqueMeetingIds.length} meetings...`);
+
+    const chunksByMeeting = await loadMeetingChunks(adminClient, uniqueMeetingIds, 6);
+
+    const meetingTitles = new Map<string, string>();
+    if (uniqueMeetingIds.length > 0) {
+      const { data: meetingRows } = await adminClient
+        .from("meetings")
+        .select("id, title, start_time")
+        .in("id", uniqueMeetingIds);
+      for (const m of meetingRows ?? []) {
+        meetingTitles.set(m.id, `${m.title} (${m.start_time?.slice(0, 10) ?? ""})`);
+      }
+    }
+
+    // ── Build enriched priority blocks for Pass 2 ─────────
+    const priorityBlocks = rankings.priority
+      .map((account) => {
+        const meetingContent = (account.matched_meeting_ids ?? [])
+          .map((id) => {
+            const chunks = chunksByMeeting.get(id);
+            if (!chunks) return null;
+            const title = meetingTitles.get(id) ?? id;
+            return `  Meeting: ${title}\n${chunks
+              .split("\n")
+              .map((l) => `    ${l}`)
+              .join("\n")}`;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+
+        return [
+          `### ${account.display_name} (${account.type})`,
+          `**Signals:** ${(account.signals ?? []).join(", ")}`,
+          `**Briefing:** ${account.briefing_context}`,
+          `**Resurface summary:** ${account.resurface_summary}`,
+          meetingContent
+            ? `**Transcript excerpts:**\n${meetingContent}`
+            : "**Transcript excerpts:** None — no matched meetings in Resurface.",
+        ].join("\n");
+      })
+      .join("\n\n---\n\n");
+
+    const warmList = rankings.warm
+      .map((w) => `- **${w.display_name}**: ${w.resurface_summary}`)
+      .join("\n");
+
+    const coldList = (rankings.cold ?? []).join(", ");
+
+    // ── Pass 2 ─────────────────────────────────────────────
+    console.log("[report] Pass 2: writing full report...");
+    const pass2 = await callClaude(
+      anthropicKey,
+      PASS2_SYSTEM,
+      PASS2_USER_TEMPLATE(bundleName, priorityBlocks, warmList, coldList, briefingText, gapsText),
+      8192,
+      true
+    );
+    for (const [k, v] of Object.entries(pass2.usage)) {
+      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
+    }
+
+    const latencyMs = Date.now() - t0;
+    const reportText = pass2.text;
+
+    // ── Save report + flip status ─────────────────────────
+    await adminClient.from("bundle_reports").delete().eq("bundle_id", bundleId);
+    const { error: saveError } = await adminClient
+      .from("bundle_reports")
+      .insert({
+        bundle_id: bundleId,
+        content_md: reportText,
+        model: MODEL,
+        generated_at: new Date().toISOString(),
+      });
+    if (saveError) throw new Error(`Failed to save report: ${saveError.message}`);
+
+    await adminClient
+      .from("bundles")
+      .update({
+        report_status: "ready",
+        report_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", bundleId);
+
+    await recordAiCall(adminClient, {
+      user_id: userId,
+      function_name: "ai-bundle-report",
+      model: MODEL,
+      usage: totalUsage,
+      latency_ms: latencyMs,
+      source_type: "bundle",
+      source_id: bundleId,
+      metadata: {
+        passes: 2,
+        priority_accounts: rankings.priority.length,
+        warm_accounts: rankings.warm.length,
+        cold_accounts: (rankings.cold ?? []).length,
+        matched_meetings: uniqueMeetingIds.length,
+      },
+    });
+
+    console.log(`[report] Done in ${latencyMs}ms`);
+  } catch (err) {
+    console.error("[ai-bundle-report] background error:", err);
+    await adminClient
+      .from("bundles")
+      .update({
+        report_status: "failed",
+        report_error: String(err).slice(0, 500),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", bundleId);
+  }
+}
+
+// ============================================================
+// HTTP handler — returns 202 immediately, work continues in bg
 // ============================================================
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -334,21 +547,20 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const userId = user.id;
 
     const { bundle_id } = await req.json() as { bundle_id: string };
     if (!bundle_id) {
-      return new Response(
-        JSON.stringify({ error: "bundle_id required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "bundle_id required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const { data: bundle } = await adminClient
       .from("bundles")
-      .select("id, name, status")
+      .select("id, name, status, report_status")
       .eq("id", bundle_id)
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .single();
 
     if (!bundle) {
@@ -365,215 +577,35 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Load bundle docs, gaps, and Resurface catalog in parallel
-    const [docsRes, gapsRes, catalog] = await Promise.all([
-      adminClient
-        .from("bundle_documents")
-        .select("title, content_md, position")
-        .eq("bundle_id", bundle_id)
-        .order("position"),
-      adminClient
-        .from("bundle_gaps")
-        .select("content, state")
-        .eq("bundle_id", bundle_id)
-        .order("position"),
-      loadResurfaceCatalog(adminClient, userId),
-    ]);
-
-    if (!docsRes.data || docsRes.data.length === 0) {
+    if (bundle.report_status === "generating") {
       return new Response(
-        JSON.stringify({ error: "No documents found in bundle" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ ok: true, status: "generating", already_running: true }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const briefingText = docsRes.data
-      .map((d) => `# ${d.title}\n\n${d.content_md}`)
-      .join("\n\n---\n\n");
-
-    const gapsText = (gapsRes.data ?? []).map((g) => `- ${g.content}`).join("\n");
-
-    const t0 = Date.now();
-    let totalUsage: Record<string, number> = {};
-
-    // ──────────────────────────────────────────────
-    // PASS 1: cross-reference + priority ranking
-    // ──────────────────────────────────────────────
-    console.log("[report] Pass 1: cross-referencing...");
-    const pass1 = await callClaude(
-      anthropicKey,
-      PASS1_SYSTEM,
-      PASS1_USER_TEMPLATE(bundle.name, briefingText, catalog),
-      4096,
-      false
-    );
-
-    // Accumulate usage
-    for (const [k, v] of Object.entries(pass1.usage)) {
-      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
-    }
-
-    // Parse pass 1 JSON
-    let rankings: {
-      priority: {
-        display_name: string;
-        type: string;
-        signals: string[];
-        matched_meeting_ids: string[];
-        matched_commitment_ids: string[];
-        matched_pursuit_ids: string[];
-        briefing_context: string;
-        resurface_summary: string;
-      }[];
-      warm: {
-        display_name: string;
-        type: string;
-        matched_meeting_ids: string[];
-        resurface_summary: string;
-      }[];
-      cold: string[];
-    };
-
-    try {
-      const jsonStr = pass1.text
-        .replace(/^```(?:json)?\s*/m, "")
-        .replace(/\s*```$/m, "")
-        .trim();
-      rankings = JSON.parse(jsonStr);
-    } catch (e) {
-      console.error("[report] Pass 1 JSON parse failed:", pass1.text.slice(0, 500));
-      throw new Error(`Pass 1 JSON parse failed: ${e}`);
-    }
-
-    // ──────────────────────────────────────────────
-    // Between passes: load transcript chunks for all matched meetings
-    // ──────────────────────────────────────────────
-    const allMatchedMeetingIds = [
-      ...rankings.priority.flatMap((p) => p.matched_meeting_ids ?? []),
-      ...rankings.warm.flatMap((w) => w.matched_meeting_ids ?? []),
-    ].filter(Boolean);
-
-    const uniqueMeetingIds = [...new Set(allMatchedMeetingIds)];
-    console.log(`[report] Loading chunks for ${uniqueMeetingIds.length} matched meetings...`);
-
-    const chunksByMeeting = await loadMeetingChunks(adminClient, uniqueMeetingIds, 6);
-
-    // Also load meeting titles for matched IDs (to label the chunks)
-    const meetingTitles = new Map<string, string>();
-    if (uniqueMeetingIds.length > 0) {
-      const { data: meetingRows } = await adminClient
-        .from("meetings")
-        .select("id, title, start_time")
-        .in("id", uniqueMeetingIds);
-      for (const m of meetingRows ?? []) {
-        meetingTitles.set(m.id, `${m.title} (${m.start_time?.slice(0, 10) ?? ""})`);
-      }
-    }
-
-    // Build enriched priority blocks for pass 2
-    const priorityBlocks = rankings.priority
-      .map((account) => {
-        const meetingContent = (account.matched_meeting_ids ?? [])
-          .map((id) => {
-            const chunks = chunksByMeeting.get(id);
-            if (!chunks) return null;
-            const title = meetingTitles.get(id) ?? id;
-            return `  Meeting: ${title}\n${chunks
-              .split("\n")
-              .map((l) => `    ${l}`)
-              .join("\n")}`;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-
-        return [
-          `### ${account.display_name} (${account.type})`,
-          `**Signals:** ${(account.signals ?? []).join(", ")}`,
-          `**Briefing:** ${account.briefing_context}`,
-          `**Resurface summary:** ${account.resurface_summary}`,
-          meetingContent
-            ? `**Transcript excerpts:**\n${meetingContent}`
-            : "**Transcript excerpts:** None — no matched meetings in Resurface.",
-        ].join("\n");
+    // Mark as generating and return 202 immediately
+    await adminClient
+      .from("bundles")
+      .update({
+        report_status: "generating",
+        report_error: null,
+        report_started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
-      .join("\n\n---\n\n");
+      .eq("id", bundle_id);
 
-    const warmList = rankings.warm
-      .map(
-        (w) =>
-          `- **${w.display_name}**: ${w.resurface_summary}`
-      )
-      .join("\n");
-
-    const coldList = (rankings.cold ?? []).join(", ");
-
-    // ──────────────────────────────────────────────
-    // PASS 2: write the full deep report
-    // ──────────────────────────────────────────────
-    console.log("[report] Pass 2: writing full report...");
-    const pass2 = await callClaude(
-      anthropicKey,
-      PASS2_SYSTEM,
-      PASS2_USER_TEMPLATE(bundle.name, priorityBlocks, warmList, coldList, briefingText, gapsText),
-      8192,
-      true
+    // Kick off background work — function returns without awaiting
+    EdgeRuntime.waitUntil(
+      generateReport(adminClient, anthropicKey, user.id, bundle_id, bundle.name)
     );
-
-    for (const [k, v] of Object.entries(pass2.usage)) {
-      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
-    }
-
-    const latencyMs = Date.now() - t0;
-    const reportText = pass2.text;
-
-    // Save report
-    await adminClient.from("bundle_reports").delete().eq("bundle_id", bundle_id);
-    const { data: savedReport, error: saveError } = await adminClient
-      .from("bundle_reports")
-      .insert({
-        bundle_id,
-        content_md: reportText,
-        model: MODEL,
-        generated_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    if (saveError) throw new Error(`Failed to save report: ${saveError.message}`);
-
-    await recordAiCall(adminClient, {
-      user_id: userId,
-      function_name: "ai-bundle-report",
-      model: MODEL,
-      usage: totalUsage,
-      latency_ms: latencyMs,
-      source_type: "bundle",
-      source_id: bundle_id,
-      metadata: {
-        passes: 2,
-        priority_accounts: rankings.priority.length,
-        warm_accounts: rankings.warm.length,
-        cold_accounts: (rankings.cold ?? []).length,
-        matched_meetings: uniqueMeetingIds.length,
-      },
-    });
 
     return new Response(
-      JSON.stringify({
-        ok: true,
-        report_id: savedReport?.id,
-        content_md: reportText,
-        stats: {
-          priority: rankings.priority.length,
-          warm: rankings.warm.length,
-          cold: (rankings.cold ?? []).length,
-          matched_meetings: uniqueMeetingIds.length,
-        },
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ ok: true, status: "generating" }),
+      { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
-    console.error("[ai-bundle-report] error:", err);
+    console.error("[ai-bundle-report] handler error:", err);
     return new Response(
       JSON.stringify({ error: String(err) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
