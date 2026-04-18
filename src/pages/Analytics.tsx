@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Map } from 'lucide-react'
+import { Map, Zap } from 'lucide-react'
 
 interface AnalyticsTile {
   to: string
@@ -15,6 +15,13 @@ const tiles: AnalyticsTile[] = [
     title: 'Landscape',
     description:
       '2D canvas of tasks and commitments plotted on Effort × Urgency, with pursuit hulls and goal territories.',
+  },
+  {
+    to: '/settings/analytics/ai-calls',
+    icon: Zap,
+    title: 'AI calls',
+    description:
+      'Every Claude API call with token usage, cache hit rate, latency, and estimated cost. Durable beyond Supabase log retention.',
   },
 ]
 

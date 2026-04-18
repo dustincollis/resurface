@@ -11,6 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
+import { recordAiCall } from "../_shared/telemetry.ts";
 
 const STORAGE_BUCKET = "transcripts";
 const CLAUDE_MODEL = "claude-opus-4-6";
@@ -158,6 +159,7 @@ Deno.serve(async (req) => {
     contentBlocks.push({ type: "text", text: userText });
 
     // Call Claude.
+    const claudeStart = Date.now();
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -196,17 +198,19 @@ Deno.serve(async (req) => {
     const aiJson = await response.json();
     const raw = (aiJson.content?.[0]?.text ?? "").trim();
     const cleaned = raw.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+    const claudeLatencyMs = Date.now() - claudeStart;
 
-    // Cache-usage telemetry. If cache_read stays at 0 across calls, check
-    // for silent invalidators in the system prompt.
-    const usage = aiJson.usage ?? {};
-    console.log("[ai-parse-input] usage", {
-      input_id: input.id,
-      input_type: input.input_type,
-      input_tokens: usage.input_tokens,
-      cache_read_input_tokens: usage.cache_read_input_tokens,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens,
-      output_tokens: usage.output_tokens,
+    // Durable telemetry — see ai_call_telemetry table.
+    await recordAiCall(adminClient, {
+      user_id: user.id,
+      function_name: "ai-parse-input",
+      model: CLAUDE_MODEL,
+      usage: aiJson.usage,
+      stop_reason: aiJson.stop_reason ?? null,
+      latency_ms: claudeLatencyMs,
+      source_type: "input",
+      source_id: input.id,
+      metadata: { input_type: input.input_type },
     });
 
     let parsed: {

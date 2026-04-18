@@ -497,6 +497,27 @@ export interface ProposalGroup {
   updated_at: string
 }
 
+// ============================================================
+// AI call telemetry — one row per Claude API call from any edge function
+// ============================================================
+
+export interface AiCallTelemetry {
+  id: string
+  user_id: string | null
+  function_name: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  stop_reason: string | null
+  latency_ms: number | null
+  source_type: string | null
+  source_id: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
 export type IdeaStatus = 'surfaced' | 'exploring' | 'accepted' | 'dismissed' | 'archived'
 
 export type IdeaCategory =

@@ -211,7 +211,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 ---
 
 <!-- AUTO:routes -->
-## 11. Routes (26)
+## 11. Routes (27)
 
 > Note: ReviewInput has been folded into the unified `/add` page. The `/add` route opens a three-option wizard (File / Paste / Task) that replaces both `/review-input` and the old inline QuickAddBar flow.
 
@@ -241,6 +241,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | `/settings` | Settings | Profile, timezone, bio, integrations |
 | `/settings/analytics` | Analytics | Index of analytics pages |
 | `/settings/analytics/landscape` | Landscape | 2D strategic canvas: items+commitments on Effort×Urgency, pursuit hulls, goal territories |
+| `/settings/analytics/ai-calls` | AiCalls | Per-call Claude telemetry: tokens, cache hit rate, latency, cost estimate |
 | `/login` | Login | Email/password auth |
 | `/auth/microsoft/callback` | MicrosoftCallback | OAuth2 redirect handler |
 <!-- /AUTO:routes -->
@@ -278,11 +279,12 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (28)
+## 13. Hooks (29)
 
 | Hook | Purpose |
 |------|---------|
 | useActivityLog | Per-item activity history |
+| useAiTelemetry |  |
 | useAuth | Session, user, signOut |
 | useChat | Send messages to ai-chat |
 | useClusterReports | Generate and fetch cluster reports |
@@ -361,11 +363,12 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (31 migrations, 29 tables)
+## 15. Database Tables (32 migrations, 30 tables)
 
 | Table | Source migration |
 |-------|-----------------|
 | activity_log | 20260407000000_initial_schema |
+| ai_call_telemetry | 20260418000000_ai_call_telemetry |
 | chat_messages | 20260407000000_initial_schema |
 | cluster_reports | 20260411010000_cluster_reports |
 | commitments | 20260409030000_commitments |
@@ -485,3 +488,4 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-17**: New Landscape page at `/settings/analytics/landscape` — strategic 2D canvas plotting items (circles) and commitments (diamonds) on Effort × Urgency axes, with pursuit convex hulls (mid layer) and goal territories (back layer). Size = stakes, opacity = freshness, pulsing ring = Focus 10, dot color = pursuit color. Click pursuit/goal to filter canvas. New hook `useLandscape` bundles items + commitments + pursuits + goals + pursuit_members + linked goal_tasks into a single query. Lives under a new `/settings/analytics` index page (sidebar entry next to Settings) so future analytics views can slot in alongside.
 - **2026-04-18**: Unified capture at `/add` — three-option wizard (File / Paste / Task) replaces both `/review-input` and QuickAddBar's inline-expand behavior. New `AddMenu` popover component in the sidebar (File/Paste/Task order, "capture" bias) and Focus toolbar (Task/File/Paste order, "task" bias); each option deep-links to `/add?mode=X` to skip the picker. File/Paste routes go through the existing `ai-parse-input` → proposals pipeline (preserves source context for multi-item drops); Task goes directly to item creation. Deleted `ReviewInput.tsx`; `useReviewInputs` hook retained and reused by the File/Paste lanes.
 - **2026-04-18**: Prompt caching enabled on `ai-parse-transcript` and `ai-parse-input`. Prompts split into a stable `system` block (extraction philosophy, strict criteria, output schema, `userDisplayName`) marked with `cache_control: {type: "ephemeral"}`, and a per-call `user` message (meeting date, attendees, user bio, items summary, transcript). Expected ~90% cost reduction on the instruction prefix after the first call in each 5-min window. Cache-usage fields (`cache_read_input_tokens`, `cache_creation_input_tokens`) logged per request for monitoring. Note: `ai-parse-input`'s system prompt is currently ~3K tokens, below Opus 4.6's 4096-token minimum — caching structure is in place but won't fire until the prompt grows.
+- **2026-04-18**: Durable AI call telemetry. New `ai_call_telemetry` table (migration `20260418000000`) records one row per Claude API call with per-model token breakdown (input/output/cache read/cache write), stop reason, latency, and source linkage. Shared helper `supabase/functions/_shared/telemetry.ts` exposes `recordAiCall()` — wired into `ai-parse-transcript` and `ai-parse-input` (remaining AI functions are a follow-up). New page at `/settings/analytics/ai-calls` shows the last 200 calls with estimated cost, cache hit rate, and cached-vs-uncached savings. RLS restricts reads to the row owner. Motivation: Supabase's Management API log retention is too sparse to see cache behavior; this is durable and queryable from the app.

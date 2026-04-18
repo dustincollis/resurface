@@ -5,6 +5,7 @@ import {
   resolveCompany,
   resolveAttendees,
 } from "../_shared/resolve-identity.ts";
+import { recordAiCall } from "../_shared/telemetry.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -255,6 +256,8 @@ Deno.serve(async (req) => {
         });
 
     // Call Claude to parse the transcript
+    const claudeStart = Date.now();
+    const claudeModel = parseMode === "historical" ? "claude-sonnet-4-6" : "claude-opus-4-6";
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -266,7 +269,7 @@ Deno.serve(async (req) => {
         // Active/real-time parses go to Opus for sharper extraction on a
         // small volume of live meetings. Historical batch stays on Sonnet
         // to keep backfill cost reasonable (770+ meetings × 6x cost).
-        model: parseMode === "historical" ? "claude-sonnet-4-6" : "claude-opus-4-6",
+        model: claudeModel,
         max_tokens: 16384,
         temperature: 0.3,
         system: [
@@ -299,22 +302,24 @@ Deno.serve(async (req) => {
     const aiResponse = await response.json();
     const rawContent = aiResponse.content?.[0]?.text ?? "";
     const stopReason = aiResponse.stop_reason;
+    const claudeLatencyMs = Date.now() - claudeStart;
 
     if (stopReason === "max_tokens") {
       console.warn("[ai-parse-transcript] response truncated (max_tokens) for meeting", meeting_id);
     }
 
-    // Cache-usage telemetry. `cache_read_input_tokens` staying at 0 across
-    // calls means a silent invalidator is at work — check that per-call
-    // variables haven't leaked back into the system prompt.
-    const usage = aiResponse.usage ?? {};
-    console.log("[ai-parse-transcript] usage", {
-      meeting_id,
-      mode: parseMode,
-      input_tokens: usage.input_tokens,
-      cache_read_input_tokens: usage.cache_read_input_tokens,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens,
-      output_tokens: usage.output_tokens,
+    // Durable telemetry — survives Supabase's short log retention so we
+    // can actually see cache hit rates and cost over time.
+    await recordAiCall(adminClient, {
+      user_id: userId,
+      function_name: "ai-parse-transcript",
+      model: claudeModel,
+      usage: aiResponse.usage,
+      stop_reason: stopReason ?? null,
+      latency_ms: claudeLatencyMs,
+      source_type: "meeting",
+      source_id: meeting_id,
+      metadata: { mode: parseMode },
     });
 
     // Strip any code fence wrapping the model might have added

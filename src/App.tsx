@@ -10,6 +10,7 @@ import Focus from './pages/Focus'
 import Add from './pages/Add'
 import Analytics from './pages/Analytics'
 import Landscape from './pages/Landscape'
+import AiCalls from './pages/AiCalls'
 import DashRiver from './pages/DashRiver'
 import Streams from './pages/Streams'
 import StreamDetail from './pages/StreamDetail'
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="settings" element={<Settings />} />
               <Route path="settings/analytics" element={<Analytics />} />
               <Route path="settings/analytics/landscape" element={<Landscape />} />
+              <Route path="settings/analytics/ai-calls" element={<AiCalls />} />
               <Route path="auth/microsoft/callback" element={<MicrosoftCallback />} />
             </Route>
           </Routes>
