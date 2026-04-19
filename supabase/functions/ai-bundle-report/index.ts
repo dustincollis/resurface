@@ -610,7 +610,7 @@ async function generateReport(
       anthropicKey,
       STAGE4_SYSTEM,
       STAGE4_USER(bundleName, briefingText, dossierText, coldList, gapsText),
-      12000,
+      32000,
       true
     );
     for (const [k, v] of Object.entries(stage4.usage)) {
