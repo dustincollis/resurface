@@ -457,7 +457,7 @@ async function generateReport(
     };
 
     console.log("[report] Pass 1: cross-referencing via tool use...");
-    const pass1 = await callClaudeWithTool<Rankings>(
+    const pass1 = await callClaudeWithTool<Partial<Rankings>>(
       anthropicKey,
       PASS1_SYSTEM,
       PASS1_USER_TEMPLATE(bundleName, briefingText, catalog),
@@ -469,7 +469,19 @@ async function generateReport(
     for (const [k, v] of Object.entries(pass1.usage)) {
       totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
     }
-    const rankings = pass1.input;
+
+    // Anthropic tool use doesn't strictly enforce `required` — Claude may
+    // omit fields entirely. Coerce missing/wrong-typed fields to safe defaults.
+    const raw = pass1.input ?? {};
+    const rankings: Rankings = {
+      priority: Array.isArray(raw.priority) ? raw.priority : [],
+      warm: Array.isArray(raw.warm) ? raw.warm : [],
+      cold: Array.isArray(raw.cold) ? raw.cold : [],
+    };
+
+    if (rankings.priority.length === 0 && rankings.warm.length === 0) {
+      console.error("[report] Pass 1 returned no priority or warm accounts. Raw input:", JSON.stringify(raw).slice(0, 1000));
+    }
 
     console.log(
       `[report] Pass 1 done: ${rankings.priority.length} priority, ${rankings.warm.length} warm, ${(rankings.cold ?? []).length} cold`
