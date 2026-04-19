@@ -42,7 +42,7 @@ export default function EventDetail() {
   return (
     <div className="flex h-screen flex-col bg-gray-950">
       {/* Top bar */}
-      <div className="flex items-center gap-3 border-b border-gray-800 px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-gray-800 px-4 py-3 print:hidden">
         <NavLink to="/events" className="flex-shrink-0 text-gray-500 hover:text-gray-300">
           <ChevronLeft size={16} />
         </NavLink>
@@ -65,14 +65,14 @@ export default function EventDetail() {
 
       {/* Offline banner (only on query tab) */}
       {isOffline && tab === 'query' && (
-        <div className="flex items-center gap-2 border-b border-yellow-900/40 bg-yellow-950/30 px-4 py-2">
+        <div className="flex items-center gap-2 border-b border-yellow-900/40 bg-yellow-950/30 px-4 py-2 print:hidden">
           <WifiOff size={13} className="text-yellow-400" />
           <span className="text-xs text-yellow-300">Reading offline — query unavailable</span>
         </div>
       )}
 
       {/* Content area */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden print:overflow-visible">
         {tab === 'report' && <BundleReport bundleId={bundle.id} />}
         {tab === 'query' && (
           isOffline ? (
@@ -89,7 +89,7 @@ export default function EventDetail() {
       </div>
 
       {/* Bottom tab bar — mobile-first */}
-      <div className="flex border-t border-gray-800 bg-gray-900">
+      <div className="flex border-t border-gray-800 bg-gray-900 print:hidden">
         {TABS.map(({ id: tabId, label, icon: Icon }) => (
           <button
             key={tabId}

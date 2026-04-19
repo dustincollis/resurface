@@ -1,1 +1,38 @@
 @import "tailwindcss";
+
+@media print {
+  /* Reset dark-theme background and let content flow naturally */
+  html,
+  body,
+  #root {
+    background: white !important;
+    color: black !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Break the fixed-viewport flex layout used in-app */
+  .h-screen,
+  .min-h-screen,
+  .h-full,
+  .flex-1 {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Avoid splitting a section header or a priority-account block across pages */
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Hide everything marked non-printable */
+  .no-print,
+  [data-print-hide="true"] {
+    display: none !important;
+  }
+}
