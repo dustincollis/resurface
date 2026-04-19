@@ -8,14 +8,102 @@ const MODEL = "claude-opus-4-7";
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void };
 
 // ============================================================
-// STAGE 1 — Read pre-extracted entities from bundle_entities
-// (ingest already ran entity extraction and stored the results;
-//  no need to re-run it at report time)
+// STAGE 1 — Read pre-extracted entities from bundle_entities.
+// Ingest is supposed to populate this. If ingest's entity extraction
+// failed silently (JSON parse error → empty arrays), we do a one-off
+// tool-use extraction here and cache it back.
 // ============================================================
 
 interface ExtractedEntity {
   name: string;
   type: "person" | "company";
+}
+
+const FALLBACK_EXTRACTION_SYSTEM = `You extract every named person and company from a document.
+You will be required to call the return_entities tool with the structured result.`;
+
+const FALLBACK_EXTRACTION_USER = (briefing: string) => `
+Read this document and list every named person and every named company.
+
+Rules:
+- Prefer full "First Last" names over just first names
+- Dedupe by canonical name
+- Max 150 entities total — if a list is very long, include the most significant
+
+Document:
+${briefing.slice(0, 40000)}
+
+Call return_entities.`;
+
+const fallbackEntitiesSchema = {
+  type: "object",
+  required: ["entities"],
+  properties: {
+    entities: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["name", "type"],
+        properties: {
+          name: { type: "string" },
+          type: { type: "string", enum: ["person", "company"] },
+        },
+      },
+    },
+  },
+};
+
+// Extract with Sonnet 4.6 — faster and more reliable for mechanical
+// structured-output tasks than Opus, which keeps hitting token walls.
+async function fallbackExtractEntities(
+  anthropicKey: string,
+  briefing: string
+): Promise<{ entities: ExtractedEntity[]; usage: Record<string, number> }> {
+  const body = {
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    system: FALLBACK_EXTRACTION_SYSTEM,
+    tools: [
+      {
+        name: "return_entities",
+        description: "Return every named person and company found in the document",
+        input_schema: fallbackEntitiesSchema,
+      },
+    ],
+    tool_choice: { type: "tool", name: "return_entities" },
+    messages: [{ role: "user", content: FALLBACK_EXTRACTION_USER(briefing) }],
+  };
+
+  const res = await fetch(ANTHROPIC_API, {
+    method: "POST",
+    headers: {
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Fallback extraction failed ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const toolBlock = (data.content as { type: string; name?: string; input?: unknown }[])
+    .find((b) => b.type === "tool_use" && b.name === "return_entities");
+
+  const rawEntities = (toolBlock?.input as { entities?: unknown })?.entities;
+  const entities: ExtractedEntity[] = Array.isArray(rawEntities)
+    ? (rawEntities as { name?: unknown; type?: unknown }[])
+        .filter((e) => !!e && typeof e.name === "string" && (e.name as string).trim().length > 1)
+        .map((e) => ({
+          name: (e.name as string).trim(),
+          type: e.type === "person" ? "person" : "company",
+        }))
+    : [];
+
+  return { entities, usage: data.usage ?? {} };
 }
 
 // ============================================================
@@ -438,19 +526,53 @@ async function generateReport(
 
     const gapsText = (gapsRes.data ?? []).map((g) => `- ${g.content}`).join("\n");
 
-    // ── STAGE 1: read entities from bundle_entities (already populated by ingest) ──
+    // ── STAGE 1: read entities from bundle_entities (populated by ingest) ──
     console.log("[report] Stage 1: loading entities from bundle_entities...");
     const { data: entityRows } = await adminClient
       .from("bundle_entities")
       .select("raw_name, entity_type")
       .eq("bundle_id", bundleId);
 
-    const entities: ExtractedEntity[] = (entityRows ?? [])
+    let entities: ExtractedEntity[] = (entityRows ?? [])
       .filter((r) => typeof r.raw_name === "string" && r.raw_name.trim().length > 1)
       .map((r) => ({
         name: r.raw_name.trim(),
         type: r.entity_type === "person" ? "person" : "company",
       }));
+
+    // Fallback: if ingest's entity extraction failed silently and the table
+    // is empty, do a one-off tool-use extraction here with Sonnet and cache it back.
+    if (entities.length === 0) {
+      console.warn("[report] bundle_entities empty — running fallback extraction (Sonnet tool_use)");
+      const fallback = await fallbackExtractEntities(anthropicKey, briefingText);
+      for (const [k, v] of Object.entries(fallback.usage)) {
+        totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
+      }
+      entities = fallback.entities;
+      console.log(`[report] Fallback extraction returned ${entities.length} entities`);
+
+      if (entities.length > 0) {
+        // Cache back so the next regenerate reads from the table
+        const rows = entities.map((e) => ({
+          bundle_id: bundleId,
+          entity_type: e.type,
+          entity_id: null as string | null,
+          raw_name: e.name,
+          mention_count: 1,
+        }));
+        const { error: cacheError } = await adminClient
+          .from("bundle_entities")
+          .upsert(rows, {
+            onConflict: "bundle_id,entity_type,raw_name",
+            ignoreDuplicates: true,
+          });
+        if (cacheError) {
+          console.warn("[report] Failed to cache fallback entities:", cacheError.message);
+        } else {
+          console.log(`[report] Cached ${rows.length} entities to bundle_entities`);
+        }
+      }
+    }
 
     console.log(
       `[report] Stage 1 done: ${entities.length} entities (${
