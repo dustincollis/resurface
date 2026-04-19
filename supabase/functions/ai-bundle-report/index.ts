@@ -8,57 +8,15 @@ const MODEL = "claude-opus-4-7";
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void };
 
 // ============================================================
-// STAGE 1 — Extract entities from the briefing only (no catalog)
+// STAGE 1 — Read pre-extracted entities from bundle_entities
+// (ingest already ran entity extraction and stored the results;
+//  no need to re-run it at report time)
 // ============================================================
-
-const STAGE1_SYSTEM = `You read event briefings and extract every named person and company mentioned.
-You will be required to call the return_entities tool with the structured result.`;
-
-const STAGE1_USER = (bundleName: string, briefing: string) => `
-Event: ${bundleName}
-
-BRIEFING:
-${briefing}
-
-List every named person and every named company/organization in the briefing.
-
-For each entity:
-- name: full name as it appears (prefer "First Last" over just "First" when both are available)
-- type: "person" or "company"
-- role_at_event: one short line capturing why they're in the briefing (e.g. "Bouchon dinner Monday", "BASH bus attendee", "Kickoff breakfast", "partner meeting Monday 11 AM", "target account — booth drop-in", "cold list — Adobe App contacts")
-
-Rules:
-- Include everyone and every organization, even cold-list ones
-- Do not invent entities — only include those explicitly named in the briefing text
-- Deduplicate: one entry per unique person and per unique company
-- If a person's name appears in multiple roles, pick the most important role
-
-Call the return_entities tool.`;
 
 interface ExtractedEntity {
   name: string;
   type: "person" | "company";
-  role_at_event: string;
 }
-
-const entitiesSchema = {
-  type: "object",
-  required: ["entities"],
-  properties: {
-    entities: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["name", "type", "role_at_event"],
-        properties: {
-          name: { type: "string" },
-          type: { type: "string", enum: ["person", "company"] },
-          role_at_event: { type: "string" },
-        },
-      },
-    },
-  },
-};
 
 // ============================================================
 // STAGE 2 — Per-entity deterministic lookup (SQL, parallel)
@@ -225,7 +183,6 @@ async function buildAllDossiers(
 function formatDossier(d: EntityDossier): string {
   const parts: string[] = [];
   parts.push(`### ${d.entity.name} (${d.entity.type})`);
-  parts.push(`Event role: ${d.entity.role_at_event}`);
 
   if (d.meetings.length) {
     parts.push(`\n**Meetings (${d.meetings.length}):**`);
@@ -481,26 +438,19 @@ async function generateReport(
 
     const gapsText = (gapsRes.data ?? []).map((g) => `- ${g.content}`).join("\n");
 
-    // ── STAGE 1: extract entities from the briefing ──
-    console.log("[report] Stage 1: extracting entities from briefing...");
-    const stage1 = await callClaudeWithTool<{ entities: ExtractedEntity[] }>(
-      anthropicKey,
-      STAGE1_SYSTEM,
-      STAGE1_USER(bundleName, briefingText),
-      "return_entities",
-      "Return every person and company named in the briefing",
-      entitiesSchema,
-      8192
-    );
-    for (const [k, v] of Object.entries(stage1.usage)) {
-      totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
-    }
-    const entities = Array.isArray(stage1.input?.entities)
-      ? stage1.input.entities.filter(
-          (e): e is ExtractedEntity =>
-            !!e && typeof e.name === "string" && e.name.trim().length > 1
-        )
-      : [];
+    // ── STAGE 1: read entities from bundle_entities (already populated by ingest) ──
+    console.log("[report] Stage 1: loading entities from bundle_entities...");
+    const { data: entityRows } = await adminClient
+      .from("bundle_entities")
+      .select("raw_name, entity_type")
+      .eq("bundle_id", bundleId);
+
+    const entities: ExtractedEntity[] = (entityRows ?? [])
+      .filter((r) => typeof r.raw_name === "string" && r.raw_name.trim().length > 1)
+      .map((r) => ({
+        name: r.raw_name.trim(),
+        type: r.entity_type === "person" ? "person" : "company",
+      }));
 
     console.log(
       `[report] Stage 1 done: ${entities.length} entities (${
@@ -508,18 +458,20 @@ async function generateReport(
       } people, ${entities.filter((e) => e.type === "company").length} companies)`
     );
 
-    if (entities.length === 0) {
-      throw new Error("Stage 1 returned no entities — cannot build dossiers");
-    }
-
     // ── STAGE 2: per-entity dossier lookup (parallel SQL) ──
-    console.log("[report] Stage 2: fetching per-entity dossiers...");
-    const dossiers = await buildAllDossiers(entities, adminClient, userId);
-    const withHits = dossiers.filter((d) => d.totalHits > 0);
-    const withoutHits = dossiers.filter((d) => d.totalHits === 0);
-    console.log(
-      `[report] Stage 2 done: ${withHits.length} entities with history, ${withoutHits.length} cold`
-    );
+    let withHits: EntityDossier[] = [];
+    let withoutHits: EntityDossier[] = [];
+    if (entities.length > 0) {
+      console.log("[report] Stage 2: fetching per-entity dossiers...");
+      const dossiers = await buildAllDossiers(entities, adminClient, userId);
+      withHits = dossiers.filter((d) => d.totalHits > 0);
+      withoutHits = dossiers.filter((d) => d.totalHits === 0);
+      console.log(
+        `[report] Stage 2 done: ${withHits.length} entities with history, ${withoutHits.length} cold`
+      );
+    } else {
+      console.warn("[report] Stage 1 returned no entities; Stage 4 will synthesize from briefing alone");
+    }
 
     // ── STAGE 3: format dossiers ──
     // Sort: most hits first, so Claude reads the richest ones when token-limited
@@ -527,7 +479,7 @@ async function generateReport(
     const dossierText = withHits.map(formatDossier).join("\n\n---\n\n");
 
     const coldList = withoutHits
-      .map((d) => `${d.entity.name} (${d.entity.type}) — ${d.entity.role_at_event}`)
+      .map((d) => `${d.entity.name} (${d.entity.type})`)
       .join("\n");
 
     // ── STAGE 4: synthesize the report ──
