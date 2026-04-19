@@ -5,237 +5,360 @@ import { recordAiCall } from "../_shared/telemetry.ts";
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-opus-4-7";
 
-// EdgeRuntime.waitUntil exists in Supabase's Deno runtime
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void };
 
 // ============================================================
-// Pass 1: cross-reference + priority ranking (returns JSON)
+// STAGE 1 — Extract entities from the briefing only (no catalog)
 // ============================================================
 
-const PASS1_SYSTEM = `You cross-reference event briefings against a user's work history database.
-You will be required to call the return_rankings tool with the structured result — do not respond in free text.`;
+const STAGE1_SYSTEM = `You read event briefings and extract every named person and company mentioned.
+You will be required to call the return_entities tool with the structured result.`;
 
-const PASS1_USER_TEMPLATE = (bundleName: string, briefing: string, catalog: string) => `
+const STAGE1_USER = (bundleName: string, briefing: string) => `
 Event: ${bundleName}
 
-BRIEFING (who is at the event, what is scheduled):
+BRIEFING:
 ${briefing}
 
-RESURFACE CATALOG (meeting history, commitments, pursuits — with UUIDs):
-${catalog}
+List every named person and every named company/organization in the briefing.
 
-Cross-reference every person and company in the briefing against the Resurface catalog.
-Use fuzzy matching: abbreviations ("WK" = "Wolters Kluwer"), partial names, related entities.
+For each entity:
+- name: full name as it appears (prefer "First Last" over just "First" when both are available)
+- type: "person" or "company"
+- role_at_event: one short line capturing why they're in the briefing (e.g. "Bouchon dinner Monday", "BASH bus attendee", "Kickoff breakfast", "partner meeting Monday 11 AM", "target account — booth drop-in", "cold list — Adobe App contacts")
 
 Rules:
-- PRIORITY = has Resurface history OR has a scheduled 1:1/meal/event touchpoint at Summit
-- WARM = Resurface history exists but no specific Summit touchpoint
-- COLD = no Resurface history, no scheduled touchpoint
-- Include every named person and company from the briefing in one of the three buckets
-- matched_meeting_ids: only include IDs that clearly match — no guessing; empty array if no match
+- Include everyone and every organization, even cold-list ones
+- Do not invent entities — only include those explicitly named in the briefing text
+- Deduplicate: one entry per unique person and per unique company
+- If a person's name appears in multiple roles, pick the most important role
 
-Call the return_rankings tool with your answer.`;
+Call the return_entities tool.`;
+
+interface ExtractedEntity {
+  name: string;
+  type: "person" | "company";
+  role_at_event: string;
+}
+
+const entitiesSchema = {
+  type: "object",
+  required: ["entities"],
+  properties: {
+    entities: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["name", "type", "role_at_event"],
+        properties: {
+          name: { type: "string" },
+          type: { type: "string", enum: ["person", "company"] },
+          role_at_event: { type: "string" },
+        },
+      },
+    },
+  },
+};
 
 // ============================================================
-// Pass 2: write the full deep report
+// STAGE 2 — Per-entity deterministic lookup (SQL, parallel)
 // ============================================================
 
-const PASS2_SYSTEM = `You are writing a detailed pre-event engagement briefing for Dustin Collis,
-Head of Adobe Practice NA at EPAM Systems, attending Adobe Summit 2026 in Las Vegas (April 19-22).
+interface MeetingRow {
+  id: string;
+  title: string;
+  start_time: string | null;
+  attendees: string[] | null;
+  transcript_summary: string | null;
+}
+interface ChunkRow {
+  meeting_id: string;
+  topic_label: string | null;
+  chunk_text: string;
+  speakers: string[] | null;
+}
+interface CommitmentRow {
+  title: string;
+  counterpart: string | null;
+  company: string | null;
+  status: string;
+  direction: string;
+  do_by: string | null;
+}
+interface PursuitRow {
+  name: string;
+  company: string | null;
+  status: string;
+  stage: string | null;
+}
+interface MemoryRow {
+  content: string;
+  created_at: string;
+}
 
-Write for someone reading on a phone on a plane. Scannable, not walls of text.
-Cite every fact as [Briefing] or [Resurface]. Never fabricate.`;
+interface EntityDossier {
+  entity: ExtractedEntity;
+  meetings: MeetingRow[];
+  chunks: ChunkRow[];
+  commitments: CommitmentRow[];
+  pursuits: PursuitRow[];
+  memories: MemoryRow[];
+  totalHits: number;
+}
 
-const PASS2_USER_TEMPLATE = (
+// Escape a name for safe use inside a PostgREST .or() filter value.
+// PostgREST parses commas and parens in .or() so we strip them; the
+// name also can't contain unescaped %.
+function safeForFilter(name: string): string {
+  return name.replace(/[%(),]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function fetchEntityDossier(
+  entity: ExtractedEntity,
+  adminClient: ReturnType<typeof createClient>,
+  userId: string
+): Promise<EntityDossier> {
+  const safe = safeForFilter(entity.name);
+  const pattern = `%${safe}%`;
+  const isPerson = entity.type === "person";
+
+  // Meetings: match on title (trigram-indexed), plus attendees array contains
+  // the exact name for person entities.
+  const meetingsQuery = isPerson
+    ? adminClient
+        .from("meetings")
+        .select("id, title, start_time, attendees, transcript_summary")
+        .eq("user_id", userId)
+        .or(`title.ilike.${pattern},attendees.cs.{"${safe}"}`)
+        .order("start_time", { ascending: false })
+        .limit(10)
+    : adminClient
+        .from("meetings")
+        .select("id, title, start_time, attendees, transcript_summary")
+        .eq("user_id", userId)
+        .ilike("title", pattern)
+        .order("start_time", { ascending: false })
+        .limit(10);
+
+  const [meetingsRes, chunksRes, commitmentsRes, pursuitsRes, memoriesRes] =
+    await Promise.all([
+      meetingsQuery,
+      adminClient
+        .from("meeting_chunks")
+        .select("meeting_id, topic_label, chunk_text, speakers")
+        .eq("user_id", userId)
+        .ilike("chunk_text", pattern)
+        .limit(8),
+      isPerson
+        ? adminClient
+            .from("commitments")
+            .select("title, counterpart, company, status, direction, do_by")
+            .eq("user_id", userId)
+            .ilike("counterpart", pattern)
+            .limit(10)
+        : adminClient
+            .from("commitments")
+            .select("title, counterpart, company, status, direction, do_by")
+            .eq("user_id", userId)
+            .ilike("company", pattern)
+            .limit(10),
+      isPerson
+        ? Promise.resolve({ data: [] as PursuitRow[] })
+        : adminClient
+            .from("pursuits")
+            .select("name, company, status, stage")
+            .eq("user_id", userId)
+            .ilike("company", pattern)
+            .limit(5),
+      adminClient
+        .from("memories")
+        .select("content, created_at")
+        .eq("user_id", userId)
+        .ilike("content", pattern)
+        .order("created_at", { ascending: false })
+        .limit(5),
+    ]);
+
+  const meetings = (meetingsRes.data ?? []) as MeetingRow[];
+  const chunks = (chunksRes.data ?? []) as ChunkRow[];
+  const commitments = (commitmentsRes.data ?? []) as CommitmentRow[];
+  const pursuits = (pursuitsRes.data ?? []) as PursuitRow[];
+  const memories = (memoriesRes.data ?? []) as MemoryRow[];
+
+  return {
+    entity,
+    meetings,
+    chunks,
+    commitments,
+    pursuits,
+    memories,
+    totalHits:
+      meetings.length +
+      chunks.length +
+      commitments.length +
+      pursuits.length +
+      memories.length,
+  };
+}
+
+async function buildAllDossiers(
+  entities: ExtractedEntity[],
+  adminClient: ReturnType<typeof createClient>,
+  userId: string
+): Promise<EntityDossier[]> {
+  const CONCURRENCY = 8;
+  const results: EntityDossier[] = [];
+  for (let i = 0; i < entities.length; i += CONCURRENCY) {
+    const batch = entities.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((e) => fetchEntityDossier(e, adminClient, userId))
+    );
+    results.push(...batchResults);
+  }
+  return results;
+}
+
+// ============================================================
+// STAGE 3 — Format dossiers as markdown for synthesis input
+// ============================================================
+
+function formatDossier(d: EntityDossier): string {
+  const parts: string[] = [];
+  parts.push(`### ${d.entity.name} (${d.entity.type})`);
+  parts.push(`Event role: ${d.entity.role_at_event}`);
+
+  if (d.meetings.length) {
+    parts.push(`\n**Meetings (${d.meetings.length}):**`);
+    for (const m of d.meetings) {
+      const date = m.start_time?.slice(0, 10) ?? "no date";
+      const att = Array.isArray(m.attendees) && m.attendees.length
+        ? ` — with ${m.attendees.slice(0, 6).join(", ")}`
+        : "";
+      const summary = m.transcript_summary
+        ? `\n  Summary: ${m.transcript_summary.slice(0, 400)}`
+        : "";
+      parts.push(`- [${date}] "${m.title}"${att}${summary}`);
+    }
+  }
+
+  if (d.chunks.length) {
+    parts.push(`\n**Transcript excerpts mentioning "${d.entity.name}" (${d.chunks.length}):**`);
+    for (const c of d.chunks) {
+      const label = c.topic_label ? `[${c.topic_label}]` : "";
+      parts.push(`${label} ${c.chunk_text.slice(0, 600)}`);
+    }
+  }
+
+  if (d.commitments.length) {
+    parts.push(`\n**Open commitments (${d.commitments.length}):**`);
+    for (const c of d.commitments) {
+      const who =
+        c.direction === "user_owes"
+          ? "I owe"
+          : c.direction === "counterpart_owes"
+          ? "They owe"
+          : "mutual";
+      const due = c.do_by ? ` | due ${c.do_by}` : "";
+      const cp = c.counterpart ? ` | ${c.counterpart}` : "";
+      const co = c.company ? ` | ${c.company}` : "";
+      parts.push(`- [${who}] "${c.title}" | ${c.status}${due}${cp}${co}`);
+    }
+  }
+
+  if (d.pursuits.length) {
+    parts.push(`\n**Pursuits (${d.pursuits.length}):**`);
+    for (const p of d.pursuits) {
+      parts.push(`- "${p.name}"${p.company ? ` | ${p.company}` : ""} | ${p.stage ?? p.status}`);
+    }
+  }
+
+  if (d.memories.length) {
+    parts.push(`\n**Memories (${d.memories.length}):**`);
+    for (const m of d.memories) {
+      parts.push(`- ${m.content}`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
+// ============================================================
+// STAGE 4 — Synthesize the report
+// ============================================================
+
+const STAGE4_SYSTEM = `You are writing a detailed pre-event engagement briefing for Dustin Collis,
+Head of Adobe Practice NA at EPAM Systems.
+
+Write for someone reading on a phone on a plane. Scannable sections, concrete specifics, not walls of text.
+Cite every fact as [Briefing] or [Resurface]. Never fabricate.
+
+When a dossier provides transcript excerpts, commitments, or memories, USE THEM. Quote specifics.
+Do not summarize the dossier — mine it for the exact detail that makes this person or company
+different from everyone else in the room. Names, dates, dollar amounts, who said what.`;
+
+const STAGE4_USER = (
   bundleName: string,
-  priorityBlocks: string,
-  warmList: string,
+  briefing: string,
+  dossiers: string,
   coldList: string,
-  schedule: string,
-  gaps: string
+  gapsText: string
 ) => `
 Event: ${bundleName}
 
-You have already completed a cross-reference pass. Here are the results with full Resurface context:
-
-${priorityBlocks}
-
----
-WARM CONTACTS (relationship exists, no immediate action needed):
-${warmList || "None identified."}
+BRIEFING (scheduling, logistics, named attendees):
+${briefing}
 
 ---
-COLD CONTACTS (no history, no scheduled touchpoint — for awareness only):
+DOSSIERS — every entity below has Resurface history. Use all of it.
+${dossiers}
+
+---
+COLD CONTACTS (named in briefing, no Resurface history found):
 ${coldList || "None."}
 
 ---
-SCHEDULE CONTEXT:
-${schedule}
-
----
 OPEN GAPS:
-${gaps || "None."}
+${gapsText || "None."}
 
 ---
-Now write the full engagement briefing report. Structure:
+Now write the engagement briefing report:
 
 # [Event Name] — Engagement Briefing
 
 ## Executive Summary
-5 bullets. Most important things before landing. Be specific — name names, cite signals.
+5-7 bullets. The most important moments of the week, each with a name and a specific action.
 
 ## Priority Accounts
-One section per priority account. For each, write:
+One section per priority account (entities with the strongest Resurface dossiers + scheduled touchpoints).
+For each, write:
 **[Account Name]**
-- **Why priority:** [signals]
-- **Resurface history:** [what transcripts/commitments actually show — specific topics, promises, context]
-- **At this event:** [who to find, when, where]
-- **Your move:** [specific ask or action — not generic]
+- **Why priority:** [signals — be specific about the event touchpoint]
+- **Resurface history:** Mine the dossier. Cite specific meeting dates, commitments, transcript quotes. What did they say? What's outstanding? What changed?
+- **At this event:** Who to find, when, where (from briefing)
+- **Your move:** A concrete ask or action grounded in the history above — not a generic "build relationship" line
 
 ## Warm Contacts
-One line each. Name, why warm, one suggested action if any.
+One line each: name, one-sentence history hook, one suggested moment to engage.
 
 ## Cold Contacts — Awareness Only
-Compact table: Company | Key Contact | Briefing signal
+Bullet list (NOT a markdown table): Company — key contact — briefing signal.
 
 ## Schedule
-Day-by-day with conflicts called out.
+Day-by-day. Call out overlaps and conflicts explicitly.
 
 ## Messaging & Talking Points
-By offering. Only relevant to the priority accounts above.
+By offering, tied back to the priority accounts that care about each.
 
 ## Open Gaps & Decisions Needed
+Numbered.
 
 ## Quick Reference
-Key names, times, locations — the things you look up in a hurry.`;
+The names/times/locations/rooms you'll look up in a hurry on your phone.`;
 
 // ============================================================
-// Resurface catalog loader (includes IDs + summaries for matching)
+// Claude callers
 // ============================================================
-async function loadResurfaceCatalog(
-  adminClient: ReturnType<typeof createClient>,
-  userId: string
-): Promise<string> {
-  const [meetingsRes, commitmentsRes, pursuitsRes, memoriesRes] = await Promise.all([
-    adminClient
-      .from("meetings")
-      .select("id, title, start_time, attendees, transcript_summary")
-      .eq("user_id", userId)
-      .order("start_time", { ascending: false })
-      .limit(300),
-    adminClient
-      .from("commitments")
-      .select("id, title, counterpart, company, status, direction, do_by")
-      .eq("user_id", userId)
-      .neq("status", "met")
-      .limit(100),
-    adminClient
-      .from("pursuits")
-      .select("id, name, company, status, stage")
-      .eq("user_id", userId)
-      .neq("status", "archived")
-      .limit(50),
-    adminClient
-      .from("memories")
-      .select("content, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(100),
-  ]);
 
-  const parts: string[] = [];
-
-  const meetings = meetingsRes.data ?? [];
-  if (meetings.length > 0) {
-    parts.push(
-      `## MEETINGS (${meetings.length}) — include IDs in matched_meeting_ids when they match\n` +
-        meetings
-          .map((m) => {
-            const att = Array.isArray(m.attendees) && m.attendees.length
-              ? ` | Attendees: ${(m.attendees as string[]).slice(0, 10).join(", ")}`
-              : "";
-            const summary = m.transcript_summary
-              ? ` | Summary: ${String(m.transcript_summary).slice(0, 200)}`
-              : "";
-            return `[ID:${m.id}] "${m.title}" (${m.start_time?.slice(0, 10) ?? "no date"})${att}${summary}`;
-          })
-          .join("\n")
-    );
-  }
-
-  const commitments = commitmentsRes.data ?? [];
-  if (commitments.length > 0) {
-    parts.push(
-      `## COMMITMENTS (${commitments.length})\n` +
-        commitments
-          .map(
-            (c) =>
-              `[ID:${c.id}] [${c.direction}] "${c.title}"${c.counterpart ? ` | Person: ${c.counterpart}` : ""}${c.company ? ` | Company: ${c.company}` : ""} | Status: ${c.status}${c.do_by ? ` | Due: ${c.do_by}` : ""}`
-          )
-          .join("\n")
-    );
-  }
-
-  const pursuits = pursuitsRes.data ?? [];
-  if (pursuits.length > 0) {
-    parts.push(
-      `## PURSUITS (${pursuits.length})\n` +
-        pursuits
-          .map(
-            (p) =>
-              `[ID:${p.id}] "${p.name}"${p.company ? ` | Company: ${p.company}` : ""} | ${p.stage ?? p.status}`
-          )
-          .join("\n")
-    );
-  }
-
-  const memories = memoriesRes.data ?? [];
-  if (memories.length > 0) {
-    parts.push(
-      `## MEMORIES\n` + memories.map((m) => `- ${m.content}`).join("\n")
-    );
-  }
-
-  return parts.length > 0 ? parts.join("\n\n") : "No Resurface data found.";
-}
-
-// ============================================================
-// Transcript chunk loader (pass 2 enrichment)
-// ============================================================
-async function loadMeetingChunks(
-  adminClient: ReturnType<typeof createClient>,
-  meetingIds: string[],
-  maxChunksPerMeeting = 6
-): Promise<Map<string, string>> {
-  if (meetingIds.length === 0) return new Map();
-
-  const result = new Map<string, string>();
-  const BATCH = 10;
-  for (let i = 0; i < meetingIds.length; i += BATCH) {
-    const batch = meetingIds.slice(i, i + BATCH);
-    const { data: chunks } = await adminClient
-      .from("meeting_chunks")
-      .select("meeting_id, topic_label, chunk_text")
-      .in("meeting_id", batch)
-      .order("chunk_index");
-
-    for (const chunk of chunks ?? []) {
-      const existing = result.get(chunk.meeting_id) ?? "";
-      const count = (existing.match(/\[Topic:/g) ?? []).length;
-      if (count >= maxChunksPerMeeting) continue;
-      result.set(
-        chunk.meeting_id,
-        existing + `[Topic: ${chunk.topic_label}]\n${chunk.chunk_text}\n\n`
-      );
-    }
-  }
-
-  return result;
-}
-
-// ============================================================
-// Claude callers — free text (Pass 2) and forced tool use (Pass 1)
-// ============================================================
 async function callClaude(
   anthropicKey: string,
   system: string,
@@ -275,9 +398,6 @@ async function callClaude(
   return { text, usage: data.usage ?? {} };
 }
 
-// Forces Claude to return structured data by requiring a specific tool_use call.
-// The API validates the input against the provided JSON schema — the response
-// cannot be malformed. Returns the parsed input object directly.
 async function callClaudeWithTool<T>(
   anthropicKey: string,
   system: string,
@@ -291,13 +411,7 @@ async function callClaudeWithTool<T>(
     model: MODEL,
     max_tokens: maxTokens,
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    tools: [
-      {
-        name: toolName,
-        description: toolDescription,
-        input_schema: inputSchema,
-      },
-    ],
+    tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
     tool_choice: { type: "tool", name: toolName },
     messages: [{ role: "user", content: userContent }],
   };
@@ -321,16 +435,17 @@ async function callClaudeWithTool<T>(
   const toolBlock = (data.content as { type: string; name?: string; input?: unknown }[])
     .find((b) => b.type === "tool_use" && b.name === toolName);
 
-  if (!toolBlock || typeof toolBlock.input !== "object") {
-    throw new Error(`Expected tool_use block '${toolName}' not found in response`);
+  if (!toolBlock || typeof toolBlock.input !== "object" || toolBlock.input === null) {
+    throw new Error(`Expected tool_use block '${toolName}' not found`);
   }
 
   return { input: toolBlock.input as T, usage: data.usage ?? {} };
 }
 
 // ============================================================
-// Background worker — runs after the HTTP response returns
+// Background worker
 // ============================================================
+
 async function generateReport(
   adminClient: ReturnType<typeof createClient>,
   anthropicKey: string,
@@ -342,7 +457,8 @@ async function generateReport(
   const totalUsage: Record<string, number> = {};
 
   try {
-    const [docsRes, gapsRes, catalog] = await Promise.all([
+    // Load briefing + gaps
+    const [docsRes, gapsRes] = await Promise.all([
       adminClient
         .from("bundle_documents")
         .select("title, content_md, position")
@@ -353,7 +469,6 @@ async function generateReport(
         .select("content, state")
         .eq("bundle_id", bundleId)
         .order("position"),
-      loadResurfaceCatalog(adminClient, userId),
     ]);
 
     if (!docsRes.data || docsRes.data.length === 0) {
@@ -364,210 +479,81 @@ async function generateReport(
       .map((d) => `# ${d.title}\n\n${d.content_md}`)
       .join("\n\n---\n\n");
 
-    const gapsText = (gapsRes.data ?? [])
-      .map((g) => `- ${g.content}`)
-      .join("\n");
+    const gapsText = (gapsRes.data ?? []).map((g) => `- ${g.content}`).join("\n");
 
-    // ── Pass 1: forced tool use — API validates schema, no parsing needed ──
-    type Rankings = {
-      priority: {
-        display_name: string;
-        type: string;
-        signals: string[];
-        matched_meeting_ids: string[];
-        matched_commitment_ids: string[];
-        matched_pursuit_ids: string[];
-        briefing_context: string;
-        resurface_summary: string;
-      }[];
-      warm: {
-        display_name: string;
-        type: string;
-        matched_meeting_ids: string[];
-        resurface_summary: string;
-      }[];
-      cold: string[];
-    };
-
-    const rankingsSchema = {
-      type: "object",
-      required: ["priority", "warm", "cold"],
-      properties: {
-        priority: {
-          type: "array",
-          description: "Accounts with Resurface history OR a scheduled touchpoint at the event. Max 20.",
-          items: {
-            type: "object",
-            required: [
-              "display_name",
-              "type",
-              "signals",
-              "matched_meeting_ids",
-              "matched_commitment_ids",
-              "matched_pursuit_ids",
-              "briefing_context",
-              "resurface_summary",
-            ],
-            properties: {
-              display_name: { type: "string", description: "Name as it appears in the briefing" },
-              type: { type: "string", enum: ["company", "person"] },
-              signals: {
-                type: "array",
-                items: { type: "string" },
-                description: "Why this is priority — e.g. 'BASH bus', 'Monday dinner', 'prior meeting'",
-              },
-              matched_meeting_ids: {
-                type: "array",
-                items: { type: "string" },
-                description: "UUIDs from the MEETINGS catalog. Only include clear matches. Empty array if none.",
-              },
-              matched_commitment_ids: { type: "array", items: { type: "string" } },
-              matched_pursuit_ids: { type: "array", items: { type: "string" } },
-              briefing_context: {
-                type: "string",
-                description: "Key facts from the briefing: who to find, when/where, why they matter",
-              },
-              resurface_summary: {
-                type: "string",
-                description: "What Resurface shows: meeting titles, dates, key topics, open items. 'No history' if none.",
-              },
-            },
-          },
-        },
-        warm: {
-          type: "array",
-          description: "Resurface history exists but no scheduled touchpoint. Max 25.",
-          items: {
-            type: "object",
-            required: ["display_name", "type", "matched_meeting_ids", "resurface_summary"],
-            properties: {
-              display_name: { type: "string" },
-              type: { type: "string", enum: ["company", "person"] },
-              matched_meeting_ids: { type: "array", items: { type: "string" } },
-              resurface_summary: { type: "string" },
-            },
-          },
-        },
-        cold: {
-          type: "array",
-          description: "No history, no touchpoint. Max 40 names.",
-          items: { type: "string" },
-        },
-      },
-    };
-
-    console.log("[report] Pass 1: cross-referencing via tool use...");
-    const pass1 = await callClaudeWithTool<Partial<Rankings>>(
+    // ── STAGE 1: extract entities from the briefing ──
+    console.log("[report] Stage 1: extracting entities from briefing...");
+    const stage1 = await callClaudeWithTool<{ entities: ExtractedEntity[] }>(
       anthropicKey,
-      PASS1_SYSTEM,
-      PASS1_USER_TEMPLATE(bundleName, briefingText, catalog),
-      "return_rankings",
-      "Return the cross-reference rankings for every person and company in the briefing",
-      rankingsSchema,
+      STAGE1_SYSTEM,
+      STAGE1_USER(bundleName, briefingText),
+      "return_entities",
+      "Return every person and company named in the briefing",
+      entitiesSchema,
       8192
     );
-    for (const [k, v] of Object.entries(pass1.usage)) {
+    for (const [k, v] of Object.entries(stage1.usage)) {
       totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
     }
-
-    // Anthropic tool use doesn't strictly enforce `required` — Claude may
-    // omit fields entirely. Coerce missing/wrong-typed fields to safe defaults.
-    const raw = pass1.input ?? {};
-    const rankings: Rankings = {
-      priority: Array.isArray(raw.priority) ? raw.priority : [],
-      warm: Array.isArray(raw.warm) ? raw.warm : [],
-      cold: Array.isArray(raw.cold) ? raw.cold : [],
-    };
-
-    if (rankings.priority.length === 0 && rankings.warm.length === 0) {
-      console.error("[report] Pass 1 returned no priority or warm accounts. Raw input:", JSON.stringify(raw).slice(0, 1000));
-    }
+    const entities = Array.isArray(stage1.input?.entities)
+      ? stage1.input.entities.filter(
+          (e): e is ExtractedEntity =>
+            !!e && typeof e.name === "string" && e.name.trim().length > 1
+        )
+      : [];
 
     console.log(
-      `[report] Pass 1 done: ${rankings.priority.length} priority, ${rankings.warm.length} warm, ${(rankings.cold ?? []).length} cold`
+      `[report] Stage 1 done: ${entities.length} entities (${
+        entities.filter((e) => e.type === "person").length
+      } people, ${entities.filter((e) => e.type === "company").length} companies)`
     );
 
-    // ── Load transcript chunks for matched meetings ───────
-    const allMatchedMeetingIds = [
-      ...rankings.priority.flatMap((p) => p.matched_meeting_ids ?? []),
-      ...rankings.warm.flatMap((w) => w.matched_meeting_ids ?? []),
-    ].filter(Boolean);
-    const uniqueMeetingIds = [...new Set(allMatchedMeetingIds)];
-    console.log(`[report] Loading chunks for ${uniqueMeetingIds.length} meetings...`);
-
-    const chunksByMeeting = await loadMeetingChunks(adminClient, uniqueMeetingIds, 6);
-
-    const meetingTitles = new Map<string, string>();
-    if (uniqueMeetingIds.length > 0) {
-      const { data: meetingRows } = await adminClient
-        .from("meetings")
-        .select("id, title, start_time")
-        .in("id", uniqueMeetingIds);
-      for (const m of meetingRows ?? []) {
-        meetingTitles.set(m.id, `${m.title} (${m.start_time?.slice(0, 10) ?? ""})`);
-      }
+    if (entities.length === 0) {
+      throw new Error("Stage 1 returned no entities — cannot build dossiers");
     }
 
-    // ── Build enriched priority blocks for Pass 2 ─────────
-    const priorityBlocks = rankings.priority
-      .map((account) => {
-        const meetingContent = (account.matched_meeting_ids ?? [])
-          .map((id) => {
-            const chunks = chunksByMeeting.get(id);
-            if (!chunks) return null;
-            const title = meetingTitles.get(id) ?? id;
-            return `  Meeting: ${title}\n${chunks
-              .split("\n")
-              .map((l) => `    ${l}`)
-              .join("\n")}`;
-          })
-          .filter(Boolean)
-          .join("\n\n");
+    // ── STAGE 2: per-entity dossier lookup (parallel SQL) ──
+    console.log("[report] Stage 2: fetching per-entity dossiers...");
+    const dossiers = await buildAllDossiers(entities, adminClient, userId);
+    const withHits = dossiers.filter((d) => d.totalHits > 0);
+    const withoutHits = dossiers.filter((d) => d.totalHits === 0);
+    console.log(
+      `[report] Stage 2 done: ${withHits.length} entities with history, ${withoutHits.length} cold`
+    );
 
-        return [
-          `### ${account.display_name} (${account.type})`,
-          `**Signals:** ${(account.signals ?? []).join(", ")}`,
-          `**Briefing:** ${account.briefing_context}`,
-          `**Resurface summary:** ${account.resurface_summary}`,
-          meetingContent
-            ? `**Transcript excerpts:**\n${meetingContent}`
-            : "**Transcript excerpts:** None — no matched meetings in Resurface.",
-        ].join("\n");
-      })
-      .join("\n\n---\n\n");
+    // ── STAGE 3: format dossiers ──
+    // Sort: most hits first, so Claude reads the richest ones when token-limited
+    withHits.sort((a, b) => b.totalHits - a.totalHits);
+    const dossierText = withHits.map(formatDossier).join("\n\n---\n\n");
 
-    const warmList = rankings.warm
-      .map((w) => `- **${w.display_name}**: ${w.resurface_summary}`)
+    const coldList = withoutHits
+      .map((d) => `${d.entity.name} (${d.entity.type}) — ${d.entity.role_at_event}`)
       .join("\n");
 
-    const coldList = (rankings.cold ?? []).join(", ");
-
-    // ── Pass 2 ─────────────────────────────────────────────
-    console.log("[report] Pass 2: writing full report...");
-    const pass2 = await callClaude(
+    // ── STAGE 4: synthesize the report ──
+    console.log("[report] Stage 4: synthesizing report...");
+    const stage4 = await callClaude(
       anthropicKey,
-      PASS2_SYSTEM,
-      PASS2_USER_TEMPLATE(bundleName, priorityBlocks, warmList, coldList, briefingText, gapsText),
-      8192,
+      STAGE4_SYSTEM,
+      STAGE4_USER(bundleName, briefingText, dossierText, coldList, gapsText),
+      12000,
       true
     );
-    for (const [k, v] of Object.entries(pass2.usage)) {
+    for (const [k, v] of Object.entries(stage4.usage)) {
       totalUsage[k] = (totalUsage[k] ?? 0) + (v as number);
     }
 
+    const reportText = stage4.text;
     const latencyMs = Date.now() - t0;
-    const reportText = pass2.text;
 
-    // ── Save report + flip status ─────────────────────────
+    // ── Save ──
     await adminClient.from("bundle_reports").delete().eq("bundle_id", bundleId);
-    const { error: saveError } = await adminClient
-      .from("bundle_reports")
-      .insert({
-        bundle_id: bundleId,
-        content_md: reportText,
-        model: MODEL,
-        generated_at: new Date().toISOString(),
-      });
+    const { error: saveError } = await adminClient.from("bundle_reports").insert({
+      bundle_id: bundleId,
+      content_md: reportText,
+      model: MODEL,
+      generated_at: new Date().toISOString(),
+    });
     if (saveError) throw new Error(`Failed to save report: ${saveError.message}`);
 
     await adminClient
@@ -588,11 +574,10 @@ async function generateReport(
       source_type: "bundle",
       source_id: bundleId,
       metadata: {
-        passes: 2,
-        priority_accounts: rankings.priority.length,
-        warm_accounts: rankings.warm.length,
-        cold_accounts: (rankings.cold ?? []).length,
-        matched_meetings: uniqueMeetingIds.length,
+        pipeline: "entity-driven-v1",
+        entities_total: entities.length,
+        entities_with_history: withHits.length,
+        entities_cold: withoutHits.length,
       },
     });
 
@@ -611,7 +596,7 @@ async function generateReport(
 }
 
 // ============================================================
-// HTTP handler — returns 202 immediately, work continues in bg
+// HTTP handler — 202 + background work
 // ============================================================
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -680,7 +665,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Mark as generating and return 202 immediately
     await adminClient
       .from("bundles")
       .update({
@@ -691,7 +675,6 @@ Deno.serve(async (req) => {
       })
       .eq("id", bundle_id);
 
-    // Kick off background work — function returns without awaiting
     EdgeRuntime.waitUntil(
       generateReport(adminClient, anthropicKey, user.id, bundle_id, bundle.name)
     );
