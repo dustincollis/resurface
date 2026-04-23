@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Target, Plus, ChevronRight, Check, X, Trophy, Frown, Archive, Loader2 } from 'lucide-react'
+import { useNavigate, Link } from 'react-router-dom'
+import { Target, Plus, ChevronRight, Check, X, Trophy, Frown, Archive, Loader2, Sparkles } from 'lucide-react'
 import { usePursuits, useCreatePursuit, useAddPursuitMember } from '../hooks/usePursuits'
 import { useTemplates } from '../hooks/useTemplates'
 import { useCreateItem } from '../hooks/useItems'
@@ -36,6 +36,27 @@ export default function Pursuits() {
   const [newDescription, setNewDescription] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [backfillStatus, setBackfillStatus] = useState<
+    { state: 'idle' } | { state: 'running' } | { state: 'done'; processed: number; created: number } | { state: 'error'; message: string }
+  >({ state: 'idle' })
+
+  const runBackfill = async () => {
+    if (!user) return
+    setBackfillStatus({ state: 'running' })
+    const { data, error } = await supabase.functions.invoke('backfill-pursuit-links', {
+      body: { user_id: user.id },
+    })
+    if (error) {
+      setBackfillStatus({ state: 'error', message: error.message })
+      return
+    }
+    const d = data as { meetings_processed?: number; links_created?: number }
+    setBackfillStatus({
+      state: 'done',
+      processed: d?.meetings_processed ?? 0,
+      created: d?.links_created ?? 0,
+    })
+  }
 
   const grouped = useMemo(() => {
     const groups: Record<PursuitStatus, Pursuit[]> = {
@@ -119,14 +140,51 @@ export default function Pursuits() {
             Threads of focus you've decided matter — items, commitments, and meetings grouped under one banner.
           </p>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
-        >
-          <Plus size={14} />
-          New pursuit
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runBackfill}
+            disabled={backfillStatus.state === 'running'}
+            title="Scan active-mode meetings for ones that belong to an active pursuit. Suggestions land in /proposals."
+            className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-300 hover:border-gray-600 hover:bg-gray-800 disabled:opacity-50"
+          >
+            {backfillStatus.state === 'running' ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            Match past meetings
+          </button>
+          <button
+            onClick={() => setShowForm((s) => !s)}
+            className="flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+          >
+            <Plus size={14} />
+            New pursuit
+          </button>
+        </div>
       </div>
+
+      {backfillStatus.state === 'done' && (
+        <div className="mb-4 rounded-lg border border-purple-900/40 bg-purple-950/20 px-3 py-2 text-xs text-purple-200">
+          Scanned {backfillStatus.processed} meeting{backfillStatus.processed === 1 ? '' : 's'}.{' '}
+          {backfillStatus.created > 0 ? (
+            <>
+              Created {backfillStatus.created} suggestion{backfillStatus.created === 1 ? '' : 's'}.{' '}
+              <Link to="/proposals" className="underline hover:text-white">
+                Review in /proposals
+              </Link>
+              .
+            </>
+          ) : (
+            <>No matches found.</>
+          )}
+        </div>
+      )}
+      {backfillStatus.state === 'error' && (
+        <div className="mb-4 rounded-lg border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+          Backfill failed: {backfillStatus.message}
+        </div>
+      )}
 
       {showForm && (
         <div className="mb-6 space-y-3 rounded-xl border border-gray-700 bg-gray-900 p-4">
