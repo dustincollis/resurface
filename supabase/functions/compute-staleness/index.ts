@@ -42,21 +42,36 @@ Deno.serve(async (req) => {
       const stakesMultiplier = (item.stakes ?? 3) * 5;
 
       let deadlineUrgency = 0;
+      // Dampens baseDecay (time-since-touch). Items scheduled for a month
+      // out aren't "stale" — they're on schedule. Stakes still count at
+      // full weight so high-stakes future work can still surface.
+      let futureDampener = 1;
       if (item.due_date) {
         // Use noon local-time to avoid UTC midnight boundary issues
         // (matches the frontend's daysUntilDue helper)
         const dueDate = new Date(item.due_date + "T12:00:00");
         const hoursUntilDue = (dueDate.getTime() - now) / (1000 * 60 * 60);
+        const daysUntilDue = hoursUntilDue / 24;
         if (hoursUntilDue < 0) {
           deadlineUrgency = 100;
         } else if (hoursUntilDue < 24) {
-          deadlineUrgency = 50;
+          deadlineUrgency = 75;
         } else if (hoursUntilDue < 72) {
+          deadlineUrgency = 50;
+        } else if (daysUntilDue <= 7) {
           deadlineUrgency = 25;
+        } else if (daysUntilDue <= 14) {
+          deadlineUrgency = 10;
+        }
+
+        if (daysUntilDue > 30) {
+          futureDampener = 0;
+        } else if (daysUntilDue > 14) {
+          futureDampener = 0.3;
         }
       }
 
-      const stalenessScore = baseDecay + stakesMultiplier + deadlineUrgency;
+      const stalenessScore = baseDecay * futureDampener + stakesMultiplier + deadlineUrgency;
 
       const { error: updateError } = await adminClient
         .from("items")

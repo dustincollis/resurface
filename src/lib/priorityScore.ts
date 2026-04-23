@@ -34,6 +34,7 @@ export function computePriority(item: Item): number {
     else if (days === 0) dueComponent = 90
     else if (days <= 3) dueComponent = 60
     else if (days <= 7) dueComponent = 30
+    else if (days <= 14) dueComponent = 15
   }
   dueComponent *= dueWeight
 
@@ -127,9 +128,12 @@ export function getSurfaceReasons(item: Item): SurfaceReason[] {
     let deadlineContribution = 0
     if (item.due_date) {
       const hoursUntilDue = (new Date(item.due_date).getTime() - Date.now()) / (1000 * 60 * 60)
+      const daysUntilDue_ = hoursUntilDue / 24
       if (hoursUntilDue < 0) deadlineContribution = 100
-      else if (hoursUntilDue < 24) deadlineContribution = 50
-      else if (hoursUntilDue < 72) deadlineContribution = 25
+      else if (hoursUntilDue < 24) deadlineContribution = 75
+      else if (hoursUntilDue < 72) deadlineContribution = 50
+      else if (daysUntilDue_ <= 7) deadlineContribution = 25
+      else if (daysUntilDue_ <= 14) deadlineContribution = 10
     }
     const timeOnlyScore = Math.max(0, score - stakesContribution - deadlineContribution)
     if (timeOnlyScore >= 40) {
