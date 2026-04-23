@@ -92,6 +92,22 @@ export async function suggestPursuitLink(args: PursuitLinkArgs): Promise<number>
       reasons.push(`pursuit name "${p.name}" mentioned`);
     }
 
+    // Pursuit's company appears in the meeting blob. Catches cases where the
+    // pursuit name is long-form ("S&P Mobility AEM Migration") but the
+    // meeting says "S&P deck review". Word-boundary check avoids "S&P"
+    // matching inside "responsible" — we require the company string to be
+    // either at the start/end of the blob or flanked by non-alphanum chars.
+    if (companyLower && companyLower.length >= 2) {
+      const re = new RegExp(
+        `(^|[^a-z0-9])${companyLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[^a-z0-9]|$)`,
+        "i"
+      );
+      if (re.test(meetingBlob)) {
+        score += 2;
+        reasons.push(`company "${p.company}" mentioned`);
+      }
+    }
+
     if (companyLower) {
       for (const d of attendeeDomains) {
         const dRoot = d.split(".")[0];
