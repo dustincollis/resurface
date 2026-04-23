@@ -247,12 +247,17 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:routes -->
 
 <!-- AUTO:components -->
-## 12. Components (25)
+## 12. Components (31)
 
 | Component | Purpose |
 |-----------|---------|
 | AddMenu |  |
 | AddToPursuit | Modal to add items/commitments to pursuits |
+| BundleChat |  |
+| BundleCreateForm |  |
+| BundleLayout |  |
+| BundleReport |  |
+| BundleSource |  |
 | ChatPanel | Main chat interface (global scope) |
 | DecomposeSection | AI decomposition into subtasks |
 | EasyButtonModal | "Easy Win" AI suggestion |
@@ -270,6 +275,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | OnboardingWizard | First-run stream creation |
 | PlaybookHealth | Pursuit playbook progress tracker |
 | ProposalCard | Proposal review with accept/edit/merge/reject actions |
+| PursuitLinkSuggestion |  |
 | QuickAddBar | Inline task creation with #stream / due:date parsing |
 | SearchModal | Global Cmd+K search (items + meetings) |
 | StatusBadge | Status indicator chip (5 types) |
@@ -279,13 +285,16 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (29)
+## 13. Hooks (33)
 
 | Hook | Purpose |
 |------|---------|
 | useActivityLog | Per-item activity history |
 | useAiTelemetry |  |
 | useAuth | Session, user, signOut |
+| useBundleChat |  |
+| useBundleReport |  |
+| useBundles |  |
 | useChat | Send messages to ai-chat |
 | useClusterReports | Generate and fetch cluster reports |
 | useCommitments | Query/create/update commitments |
@@ -306,6 +315,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | useProfile | Fetch/update profile, distill bio |
 | useProposalGroups |  |
 | useProposals | Query by status/source, accept/reject/merge |
+| usePursuitLinkProposals |  |
 | usePursuits | Query/create/update/delete pursuits, manage members |
 | useRealtimeSubscription | Supabase Postgres change subscriptions |
 | useReviewInputs |  |
@@ -363,12 +373,18 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (32 migrations, 30 tables)
+## 15. Database Tables (37 migrations, 37 tables)
 
 | Table | Source migration |
 |-------|-----------------|
 | activity_log | 20260407000000_initial_schema |
 | ai_call_telemetry | 20260418000000_ai_call_telemetry |
+| bundle_chunks | 20260418020000_context_bundles |
+| bundle_documents | 20260418020000_context_bundles |
+| bundle_entities | 20260418020000_context_bundles |
+| bundle_gaps | 20260418020000_context_bundles |
+| bundle_reports | 20260418020000_context_bundles |
+| bundles | 20260418020000_context_bundles |
 | chat_messages | 20260407000000_initial_schema |
 | cluster_reports | 20260411010000_cluster_reports |
 | commitments | 20260409030000_commitments |
@@ -390,6 +406,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | profiles | 20260407000000_initial_schema |
 | proposal_groups | 20260415000000_proposal_groups |
 | proposals | 20260409000000_proposals |
+| pursuit_link_proposals | 20260423000000_pursuit_link_proposals |
 | pursuit_members | 20260409060000_pursuits |
 | pursuit_playbook_steps | 20260410040000_pursuit_playbooks |
 | pursuits | 20260409060000_pursuits |
@@ -495,3 +512,4 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-18**: `scripts/deploy-functions.sh` + `npm run deploy:functions`. Bakes in `--no-verify-jwt` on every deploy so external webhooks (Power Automate → calendar-sync, Jamie → jamie-webhook) don't get 401'd by the gateway before the function runs. Replaces direct `supabase functions deploy` usage in CLAUDE.md.
 - **2026-04-18**: Context Bundles — queryable event briefing packs. New `bundles` primitive (6 tables: `bundles`, `bundle_documents`, `bundle_chunks` with pgvector 1024-dim embeddings, `bundle_entities`, `bundle_gaps`, `bundle_reports`; migration `20260418020000`). Three edge functions: `ai-bundle-ingest` (Opus 4.7 entity extraction + Voyage `voyage-3-large` embeddings, section-based chunking preserving `section_path` for citations), `ai-bundle-report` (Opus 4.7 synthesized plane-reading narrative, stored in `bundle_reports`, regenerable), `ai-bundle-chat` (Opus 4.7, hybrid retrieval pgvector+FTS, tool calls reaching into Resurface: `lookup_person_in_resurface`, `lookup_company_in_resurface`, `list_bundle_subjects`, `search_resurface_transcripts`). Frontend: `/events` list + `/events/:id` detail with three-tab layout (Report/Query/Source), no sidebar, mobile-first (`BundleLayout`). Report persisted to localStorage for offline plane reading; service worker added for app shell caching. `chat_messages.scope_type` extended to include `'bundle'`. Sidebar gains "Events" nav entry.
 - **2026-04-18**: Memory extraction engaged. Every parser run (active + historical) now emits a `memories[]` array of durable facts about people/companies/preferences; the edge function inserts them directly into the `memories` table with `source='extracted_from_transcript'` (no proposal-queue round trip, per design). Existing memories are passed into the prompt as a "do not re-emit" list, and the insert helper case-insensitively dedupes against the table as a safety belt. Settings page gains a manual "add memory" input that writes with `source='user_added'`. The `memories` block was already being injected into every AI call via `buildUserContext`, so the loop is now closed — every future AI call starts with accumulated context instead of cold.
+- **2026-04-23**: Auto-suggest pursuit links for parsed meetings. New `pursuit_link_proposals` table (migration `20260423000000`) holds AI-suggested {meeting → pursuit} matches as pending review items. `ai-parse-transcript` now runs a two-stage matcher after proposal insertion: (1) deterministic pre-filter scoring each active pursuit on company match, pursuit-name mentions in the transcript, and attendee email-domain overlap; (2) if any candidate passes, Claude (Sonnet 4.6) picks at most one from the shortlist with reasoning + confidence ≥ 0.7. A single strong deterministic match (score ≥ 3, clear winner) skips the LLM call entirely. Never auto-applied; user accepts on `/proposals` via a new `PursuitLinkSuggestion` banner. Accept inserts a `pursuit_members` row with `member_type='meeting'` — the infrastructure for meeting↔pursuit linkage has existed since the pursuits migration but was manual-only until now.

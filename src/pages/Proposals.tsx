@@ -3,8 +3,10 @@ import { useSearchParams, Link } from 'react-router-dom'
 import { Inbox, X, BarChart3 } from 'lucide-react'
 import { useProposals } from '../hooks/useProposals'
 import { usePendingProposalGroupsByMeeting } from '../hooks/useProposalGroups'
+import { usePendingPursuitLinkProposals } from '../hooks/usePursuitLinkProposals'
 import ProposalCard from '../components/ProposalCard'
 import GroupingSuggestion from '../components/GroupingSuggestion'
+import PursuitLinkSuggestion from '../components/PursuitLinkSuggestion'
 import type { ProposalSourceType } from '../lib/types'
 
 export default function Proposals() {
@@ -26,6 +28,17 @@ export default function Proposals() {
   // they need a meeting context to be coherent.
   const meetingFilterId = sourceType === 'meeting' ? sourceId : null
   const { data: pendingGroups } = usePendingProposalGroupsByMeeting(meetingFilterId)
+
+  // Pursuit-link suggestions are per-meeting by nature. Fetch all pending and
+  // filter to the active meeting when the page is filtered; otherwise show all.
+  const { data: allPursuitLinks } = usePendingPursuitLinkProposals()
+  const visiblePursuitLinks = useMemo(() => {
+    if (!allPursuitLinks) return []
+    if (meetingFilterId) {
+      return allPursuitLinks.filter((p) => p.source_meeting_id === meetingFilterId)
+    }
+    return allPursuitLinks
+  }, [allPursuitLinks, meetingFilterId])
 
   const clearFilter = () => {
     const next = new URLSearchParams(searchParams)
@@ -87,7 +100,7 @@ export default function Proposals() {
 
       {isLoading ? (
         <div className="text-sm text-gray-500">Loading...</div>
-      ) : !proposals || proposals.length === 0 ? (
+      ) : (!proposals || proposals.length === 0) && visiblePursuitLinks.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-800 px-6 py-16 text-center">
           <Inbox size={32} className="mx-auto text-gray-700" />
           <h2 className="mt-3 text-sm font-medium text-gray-400">Nothing to review</h2>
@@ -97,6 +110,13 @@ export default function Proposals() {
         </div>
       ) : (
         <>
+          {visiblePursuitLinks.length > 0 && (
+            <div>
+              {visiblePursuitLinks.map((p) => (
+                <PursuitLinkSuggestion key={p.id} proposal={p} />
+              ))}
+            </div>
+          )}
           {pendingGroups && pendingGroups.length > 0 && (
             <div>
               {pendingGroups.map((g) => (
@@ -105,7 +125,7 @@ export default function Proposals() {
             </div>
           )}
           <div className="space-y-3">
-            {proposals.map((p) => (
+            {(proposals ?? []).map((p) => (
               <ProposalCard key={p.id} proposal={p} />
             ))}
           </div>

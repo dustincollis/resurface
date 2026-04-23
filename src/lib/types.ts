@@ -498,6 +498,27 @@ export interface ProposalGroup {
 }
 
 // ============================================================
+// Pursuit-link proposals — AI-suggested link between a parsed meeting
+// and an existing pursuit. Accepting inserts a pursuit_members row
+// (meeting). Never auto-applied.
+// ============================================================
+
+export type PursuitLinkProposalStatus = 'pending' | 'accepted' | 'rejected'
+
+export interface PursuitLinkProposal {
+  id: string
+  user_id: string
+  source_meeting_id: string
+  suggested_pursuit_id: string
+  reasoning: string | null
+  confidence: number | null
+  status: PursuitLinkProposalStatus
+  created_at: string
+  reviewed_at: string | null
+  updated_at: string
+}
+
+// ============================================================
 // AI call telemetry — one row per Claude API call from any edge function
 // ============================================================
 
