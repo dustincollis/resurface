@@ -383,7 +383,7 @@ Deno.serve(async (req) => {
     } else {
       return await handleActiveMode(
         adminClient, userId, userDisplayName, meeting_id, meeting, parsed,
-        currentTitle, isPlaceholderTitle, aiTitle, bodyTranscript
+        currentTitle, isPlaceholderTitle, aiTitle, bodyTranscript, anthropicKey
       );
     }
   } catch (err) {
@@ -992,6 +992,7 @@ async function handleActiveMode(
   isPlaceholderTitle: boolean,
   aiTitle: string | null,
   bodyTranscript: unknown,
+  anthropicKey: string,
 ) {
   const discussionCompany: string | null =
     typeof parsed.company === "string" && parsed.company.trim().length > 0
