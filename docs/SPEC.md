@@ -247,7 +247,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:routes -->
 
 <!-- AUTO:components -->
-## 12. Components (31)
+## 12. Components (32)
 
 | Component | Purpose |
 |-----------|---------|
@@ -282,10 +282,11 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | StreamFormModal | Create/edit stream with field templates |
 | SuggestedMerges | People merge suggestions |
 | TemplateEditor | Manage process templates |
+| TriageSkippedSection |  |
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (33)
+## 13. Hooks (34)
 
 | Hook | Purpose |
 |------|---------|
@@ -322,6 +323,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | useSearch | Global full-text + fuzzy search |
 | useStreams | Query/create/update/reorder streams |
 | useTemplates | Query/create/update/delete process templates |
+| useTriageSkippedInputs |  |
 <!-- /AUTO:hooks -->
 
 <!-- AUTO:edge_functions -->
@@ -353,6 +355,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | evaluate-goals | Periodic goal progress evaluation |
 | backfill-identities | Populate people/companies from free-text fields |
 | backfill-pursuit-links | One-shot sweep: match historical active-mode meetings to active pursuits |
+| ai-catalog-batch | Sonnet triage pass over a batch of inputs; decides which ones get full synthesis |
 | fix-identity-links | Reconcile duplicate people/companies |
 | retry-unprocessed | Retry failed proposal processing |
 
@@ -374,7 +377,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (37 migrations, 37 tables)
+## 15. Database Tables (38 migrations, 37 tables)
 
 | Table | Source migration |
 |-------|-----------------|
@@ -516,3 +519,4 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-23**: Auto-suggest pursuit links for parsed meetings. New `pursuit_link_proposals` table (migration `20260423000000`) holds AI-suggested {meeting → pursuit} matches as pending review items. `ai-parse-transcript` now runs a two-stage matcher after proposal insertion: (1) deterministic pre-filter scoring each active pursuit on company match, pursuit-name mentions in the transcript, and attendee email-domain overlap; (2) if any candidate passes, Claude (Sonnet 4.6) picks at most one from the shortlist with reasoning + confidence ≥ 0.7. A single strong deterministic match (score ≥ 3, clear winner) skips the LLM call entirely. Never auto-applied; user accepts on `/proposals` via a new `PursuitLinkSuggestion` banner. Accept inserts a `pursuit_members` row with `member_type='meeting'` — the infrastructure for meeting↔pursuit linkage has existed since the pursuits migration but was manual-only until now.
 - **2026-04-23**: Backfill for historical meetings. Matcher extracted into `supabase/functions/_shared/pursuit-matcher.ts`; new `backfill-pursuit-links` edge function sweeps active-mode meetings (`transcript_summary is not null`) and runs the matcher per meeting, creating pending proposals without re-parsing transcripts. Idempotent (skips already-linked and already-proposed pairs via the unique constraint). Triggered from a new "Match past meetings" button on `/pursuits`. Accepts optional `since` and `limit` body params for scoped runs.
 - **2026-04-23**: Focus staleness gated by due-date horizon. `compute-staleness` now dampens the time-decay component (`baseDecay * log₂(hoursSinceTouch)`) when an item's `due_date` is far out: ×0.3 for 15–30 days, ×0 for 30+ days. Stakes contribute at full weight regardless so a high-stakes future item can still surface — but medium-stakes items scheduled for a month out no longer drift into Focus via time-decay alone. Deadline urgency ramp widened to match: overdue=100, ≤24h=75, ≤72h=50, ≤7d=25, ≤14d=10 (previously capped at 72h). Frontend's `computePriority` due-component ramp extended to 14 days in `src/lib/priorityScore.ts`, and the reverse-engineered "Nd stale" chip tracks the same bands. Rationale: "staleness" means neglected present work, not scheduled future work — an item due in 5 weeks isn't stale, it's on schedule.
+- **2026-04-24**: Batch email ingestion with pre-synthesis triage. New `/add` File mode accepts multi-file drops (up to dozens of `.eml` at once). Each file creates an `inputs` row, then one batched Sonnet call (`ai-catalog-batch` edge function) classifies all of them at once: actionable/skip with a short reason, plus optional thread_group_id for detected reply chains. Skipped inputs get marked with `triage_result='skipped'` and never generate proposals — skipping the expensive per-input synthesis. Actionable inputs fire `ai-parse-input` in the background via `EdgeRuntime.waitUntil` so the response returns immediately. Migration `20260424000000` adds `triage_result`, `triage_reason`, `thread_group_id` to `inputs`. New UI: staged-file list with per-file remove on `/add`, post-batch result banner, and a collapsed "Skipped by triage" section on `/proposals` with a "Process anyway" override per row (flips the decision and fires full synthesis). Screenshots bypass the catalog step (no text to pre-filter) and go straight to synthesis. Rationale: dropping "the day's emails" (~30-50 at a time) would waste most Claude calls on FYI replies and confirmations if every file got full-synthesis treatment; one batched triage call at Sonnet prices filters the signal from the noise.

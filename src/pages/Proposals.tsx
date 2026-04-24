@@ -7,6 +7,7 @@ import { usePendingPursuitLinkProposals } from '../hooks/usePursuitLinkProposals
 import ProposalCard from '../components/ProposalCard'
 import GroupingSuggestion from '../components/GroupingSuggestion'
 import PursuitLinkSuggestion from '../components/PursuitLinkSuggestion'
+import TriageSkippedSection from '../components/TriageSkippedSection'
 import type { ProposalSourceType } from '../lib/types'
 
 export default function Proposals() {
@@ -97,6 +98,8 @@ export default function Proposals() {
           </button>
         </div>
       )}
+
+      <TriageSkippedSection />
 
       {isLoading ? (
         <div className="text-sm text-gray-500">Loading...</div>

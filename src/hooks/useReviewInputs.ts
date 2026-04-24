@@ -165,3 +165,140 @@ export function useCreateReviewInput() {
     },
   })
 }
+
+// ----------------------------------------------------------------------------
+// Batch upload: create N inputs, then hand the whole list to ai-catalog-batch
+// for triage + background synthesis. The catalog call fires per-input
+// synthesis internally via EdgeRuntime.waitUntil — no client-side fan-out
+// needed. Caller gets back counts as soon as the catalog returns.
+// ----------------------------------------------------------------------------
+
+export interface BatchUploadArgs {
+  files: File[]
+  user_description?: string | null
+  onProgress?: (created: number, total: number) => void
+}
+
+export interface BatchUploadResult {
+  created_inputs: ReviewInput[]
+  failed_uploads: Array<{ filename: string; error: string }>
+  catalog: {
+    total_inputs: number
+    actionable: number
+    skipped: number
+    thread_groups_detected: number
+  } | null
+}
+
+async function stageSingleFile(
+  userId: string,
+  file: File
+): Promise<{ row: ReviewInput }> {
+  const isEml = /\.eml$/i.test(file.name) || file.type === 'message/rfc822'
+  const isImage = file.type.startsWith('image/')
+
+  let rawText: string | null = null
+  let storagePath: string | null = null
+  let mimeType: string | null = null
+  let inputType: ReviewInputType
+  let metadata: Record<string, unknown> = {}
+  let emailSubject: string | null = null
+
+  if (isEml) {
+    inputType = 'email'
+    rawText = await file.text()
+    const headers = parseEmailHeaders(rawText)
+    emailSubject = headers.subject
+    metadata = {
+      subject: headers.subject,
+      from: headers.from,
+      to: headers.to,
+      date: headers.date,
+      original_filename: file.name,
+    }
+  } else if (isImage) {
+    inputType = 'screenshot'
+    mimeType = file.type || 'image/png'
+    storagePath = screenshotPath(userId, file.name)
+    const { error: upErr } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, file, { contentType: mimeType, upsert: false })
+    if (upErr) throw upErr
+    metadata = { original_filename: file.name, size: file.size }
+  } else {
+    throw new Error(`Unsupported file type: ${file.name}`)
+  }
+
+  const title = deriveTitle({ input_type: inputType, file, raw_text: rawText, emailSubject })
+
+  const { data: insertedRow, error: insertErr } = await supabase
+    .from('inputs')
+    .insert({
+      user_id: userId,
+      input_type: inputType,
+      title,
+      raw_text: rawText,
+      storage_path: storagePath,
+      mime_type: mimeType,
+      metadata,
+    })
+    .select()
+    .single()
+  if (insertErr) throw insertErr
+  return { row: insertedRow as ReviewInput }
+}
+
+export function useBatchUploadInputs() {
+  const { user } = useAuth()
+
+  return useMutation({
+    mutationFn: async (args: BatchUploadArgs): Promise<BatchUploadResult> => {
+      if (!user) throw new Error('not authenticated')
+      if (args.files.length === 0) throw new Error('no files')
+
+      const createdInputs: ReviewInput[] = []
+      const failedUploads: Array<{ filename: string; error: string }> = []
+
+      // Stage each file independently so one bad file doesn't abort the rest.
+      for (const file of args.files) {
+        try {
+          const { row } = await stageSingleFile(user.id, file)
+          createdInputs.push(row)
+        } catch (err) {
+          failedUploads.push({
+            filename: file.name,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+        args.onProgress?.(createdInputs.length + failedUploads.length, args.files.length)
+      }
+
+      let catalog: BatchUploadResult['catalog'] = null
+      if (createdInputs.length > 0) {
+        const userContext = formatUserContextBlock(buildUserContext())
+        const { data: catalogResult, error: catalogErr } = await supabase.functions.invoke(
+          'ai-catalog-batch',
+          {
+            body: {
+              input_ids: createdInputs.map((i) => i.id),
+              user_context: userContext,
+            },
+          }
+        )
+        if (catalogErr) {
+          // Surface the error but don't throw — the inputs exist and will
+          // stay in `triage_result=null` state; they can be retried.
+          console.error('[batch-upload] catalog error:', catalogErr)
+        } else {
+          catalog = catalogResult as BatchUploadResult['catalog']
+        }
+      }
+
+      return { created_inputs: createdInputs, failed_uploads: failedUploads, catalog }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inputs'] })
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
+    },
+  })
+}

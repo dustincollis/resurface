@@ -459,6 +459,8 @@ export interface Proposal {
 
 export type ReviewInputType = 'email' | 'screenshot' | 'pasted_text'
 
+export type TriageResult = 'actionable' | 'skipped' | 'failed'
+
 export interface ReviewInput {
   id: string
   user_id: string
@@ -471,6 +473,9 @@ export interface ReviewInput {
   metadata: Record<string, unknown>
   processed_at: string | null
   processing_error: string | null
+  triage_result: TriageResult | null
+  triage_reason: string | null
+  thread_group_id: string | null
   created_at: string
   updated_at: string
 }
