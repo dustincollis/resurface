@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Calendar, Inbox, Handshake, Target, Flag, Lightbulb, Users, Building2, Layers, Settings, Search, LogOut, Crosshair, ChevronRight, ChevronDown, BarChart3, Plus, MapPin } from 'lucide-react'
+import { Search, LogOut, ChevronRight, ChevronDown, Plus } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -8,23 +8,39 @@ import { useIdeaCounts } from '../hooks/useIdeas'
 import SearchModal from './SearchModal'
 import AddMenu from './AddMenu'
 
+// Sidebar runs text-first: no per-row icons, typography carries nav weight.
+// A short monospace timestamp under the wordmark sets the editorial/
+// terminal voice used by chips and metadata throughout the app.
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/focus', icon: Crosshair, label: 'Focus' },
-  { to: '/proposals', icon: Inbox, label: 'Proposals' },
-  { to: '/commitments', icon: Handshake, label: 'Commitments' },
-  { to: '/pursuits', icon: Target, label: 'Pursuits' },
-  { to: '/goals', icon: Flag, label: 'Goals' },
-  { to: '/ideas', icon: Lightbulb, label: 'Ideas' },
-  { to: '/meetings', icon: Calendar, label: 'Discussions' },
-  { to: '/events', icon: MapPin, label: 'Events' },
+  { to: '/', label: 'Dashboard' },
+  { to: '/focus', label: 'Focus' },
+  { to: '/focus-v2', label: 'Today v2' },
+  { to: '/proposals', label: 'Proposals' },
+  { to: '/commitments', label: 'Commitments' },
+  { to: '/pursuits', label: 'Pursuits' },
+  { to: '/goals', label: 'Goals' },
+  { to: '/ideas', label: 'Ideas' },
+  { to: '/meetings', label: 'Discussions' },
+  { to: '/events', label: 'Events' },
 ]
 
 const directoryItems = [
-  { to: '/people', icon: Users, label: 'People' },
-  { to: '/companies', icon: Building2, label: 'Companies' },
-  { to: '/streams', icon: Layers, label: 'Streams' },
+  { to: '/people', label: 'People' },
+  { to: '/companies', label: 'Companies' },
+  { to: '/streams', label: 'Streams' },
 ]
+
+function formatSidebarTimestamp(d: Date): string {
+  const day = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()
+  const mon = d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()
+  const date = d.getDate()
+  let h = d.getHours()
+  const m = d.getMinutes().toString().padStart(2, '0')
+  const ampm = h >= 12 ? 'P' : 'A'
+  h = h % 12
+  if (h === 0) h = 12
+  return `${day} · ${mon} ${date} · ${h}:${m}${ampm}`
+}
 
 export default function Layout() {
   const { session, user, loading, signOut } = useAuth()
@@ -63,8 +79,13 @@ export default function Layout() {
     <div className="flex h-screen bg-gray-950 text-gray-100">
       {/* Sidebar */}
       <aside className="flex w-56 flex-col border-r border-gray-800 bg-gray-900">
-        <div className="flex h-12 items-center justify-between px-4">
-          <span className="text-base font-semibold tracking-tight">Resurface</span>
+        <div className="flex items-start justify-between px-4 pt-4 pb-3">
+          <div>
+            <div className="text-lg font-semibold tracking-tight text-white">Resurface</div>
+            <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-gray-500">
+              {formatSidebarTimestamp(new Date())}
+            </div>
+          </div>
           <button
             onClick={() => setSearchOpen(true)}
             className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
@@ -97,23 +118,22 @@ export default function Layout() {
 
         {/* Main nav */}
         <nav className="space-y-0.5 px-2 py-1">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {navItems.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                `flex items-center rounded-lg px-3 py-1.5 text-sm transition-colors ${
                   isActive
                     ? 'bg-gray-800 text-white'
                     : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                 }`
               }
             >
-              <Icon size={16} />
-              {label}
+              <span className="flex-1">{label}</span>
               {label === 'Ideas' && surfacedCount > 0 && (
-                <span className="ml-auto rounded-full bg-amber-900/40 px-1.5 py-0.5 text-[10px] text-amber-300">
+                <span className="font-mono text-[10px] text-amber-300">
                   {surfacedCount}
                 </span>
               )}
@@ -132,19 +152,18 @@ export default function Layout() {
           </button>
           {directoryOpen && (
             <div className="mt-0.5 space-y-0.5">
-              {directoryItems.map(({ to, icon: Icon, label }) => (
+              {directoryItems.map(({ to, label }) => (
                 <NavLink
                   key={to}
                   to={to}
                   className={({ isActive }) =>
-                    `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                    `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                       isActive
                         ? 'bg-gray-800 text-white'
                         : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                     }`
                   }
                 >
-                  <Icon size={16} />
                   {label}
                 </NavLink>
               ))}
@@ -199,31 +218,29 @@ export default function Layout() {
             to="/settings"
             end
             className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 isActive
                   ? 'bg-gray-800 text-white'
                   : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
               }`
             }
           >
-            <Settings size={16} />
             Settings
           </NavLink>
           <NavLink
             to="/settings/analytics"
             className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 isActive
                   ? 'bg-gray-800 text-white'
                   : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
               }`
             }
           >
-            <BarChart3 size={16} />
             Analytics
           </NavLink>
           <div className="mt-1 flex items-center justify-between px-3 py-1">
-            <span className="truncate text-xs text-gray-500">
+            <span className="truncate font-mono text-[10px] text-gray-500">
               {user?.email}
             </span>
             <button

@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+/* Typography tokens. Inter for display, JetBrains Mono for metadata and
+   keyboard/terminal-voice UI (sidebar timestamp, date chips, keyboard
+   hint strips, monochrome tag chips). Overrides Tailwind's default
+   --font-sans / --font-mono so every `font-sans` / `font-mono` utility
+   in the codebase automatically adopts the new stack. */
+@theme {
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 @media print {
   /* Reset dark-theme background and let content flow naturally */
   html,
