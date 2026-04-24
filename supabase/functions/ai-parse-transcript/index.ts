@@ -616,15 +616,20 @@ Extract these elements:
    - An open question without an assigned owner — those go in open_questions, NOT action_items
    - A decision that was made — those go in decisions, NOT action_items
    - A general capability or wish: "Eventually we want to have X"
+   - **Attending or joining a meeting that was already discussed as scheduled.** The calendar is the system of record for events; Resurface does not need a task to "show up." BUT: work that RESULTS in a meeting — scheduling, confirming, rescheduling, sending the invite, coordinating logistics, preparing materials specifically for it — DOES count.
 
    Examples:
    - ✓ COUNT — "I'll have the deck to you by Friday" → explicit commitment by speaker
    - ✓ COUNT — "Holly: Can you review the contract?" "Yeah, I'll get to it tomorrow" → explicit accepted assignment to whoever said yes
    - ✓ COUNT — "Tom is going to update the spreadsheet by Wednesday" → explicit commitment by Tom
+   - ✓ COUNT — "I'll reach out to Alice to set up a call next week" → scheduling work, the email/outreach is the action
+   - ✓ COUNT — "Let me put time on your calendar for Thursday" → scheduling action by speaker
    - ✗ SKIP — "We should probably revisit pricing at some point" → speculative, no commitment
    - ✗ SKIP — "It would be great if marketing could help with this" → aspirational, no commitment
    - ✗ SKIP — "We talked about needing better dashboards" → discussion topic, no actor or commitment
    - ✗ SKIP — "What about doing a roadshow next quarter?" → hypothetical question
+   - ✗ SKIP — "See you Thursday at 3" / "I'll be at the summit next week" → meeting attendance, calendar handles it
+   - ✗ SKIP — "Let's sync again after the demo" → vague recurrence, not a concrete scheduling action
 
    For each real action item, return:
    - **commitment_strength**: "explicit" (direct verbal commitment with clear actor and verb) | "implied" (strong implication but not stated directly, e.g. someone restates a plan they're owning). Do NOT return items weaker than "implied" — those are not action items, they are topics.

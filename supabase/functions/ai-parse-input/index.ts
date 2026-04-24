@@ -376,6 +376,7 @@ Rules:
 - Do include incoming commitments (things others promised the user), so the user can track what they're waiting on.
 - Be willing to identify implied action items -- things that would obviously need to happen next even if not stated verbatim. Mark them commitment_strength="implied".
 - Resolve relative dates ("by Friday", "next week") against the TODAY date in the user message.
+- **Do NOT emit an action item whose only content is attending or joining an already-scheduled meeting.** The calendar is the system of record for events; Resurface doesn't need a task to "show up". BUT scheduling work DOES count — "email Alice to set up a call", "put time on their calendar", "confirm the demo time", "reschedule Thursday", "send the invite" are all legitimate action items.
 - If nothing actionable is in the content, return empty arrays. Do not invent.
 - Return ONLY the JSON object. No prose, no code fences.`;
 }
