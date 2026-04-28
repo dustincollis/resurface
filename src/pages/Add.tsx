@@ -520,6 +520,8 @@ export default function Add() {
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
+                  onClick={(e) => e.currentTarget.showPicker?.()}
+                  style={{ colorScheme: 'dark' }}
                   className="w-full rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-white focus:border-purple-600 focus:outline-none"
                 />
               </Field>
