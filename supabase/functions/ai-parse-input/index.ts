@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
           source_id: input.id,
           evidence_text: evidence,
           normalized_payload: {
-            title: a.title,
+            title: prefixWithCompany(a.title as string, a.company as string | null),
             description: a.description ?? "",
             due_date: a.suggested_due_date ?? null,
             company: a.company ?? null,
@@ -275,7 +275,7 @@ Deno.serve(async (req) => {
           source_id: input.id,
           evidence_text: evidence,
           normalized_payload: {
-            title: c.title,
+            title: prefixWithCompany(c.title as string, c.company as string | null),
             description: c.description ?? "",
             counterpart: c.counterpart ?? null,
             company: c.company ?? null,
@@ -408,6 +408,22 @@ The image above is a screenshot the user took of a message they received or sent
       return `INPUT TYPE: Pasted text
 The content below was copy-pasted from somewhere (Slack thread, Teams chat, email body, notes). Infer the context from the text itself -- there may or may not be speaker labels.`;
   }
+}
+
+// Prepend "Company: " to a title when a company is known and the title doesn't
+// already start with the company name. Word-boundary aware so "Ivoclar" matches
+// "Ivoclar deck" but not "Ivoclarian feedback".
+function prefixWithCompany(title: string | null | undefined, company: string | null | undefined): string {
+  const t = (title ?? "").trim();
+  const c = (company ?? "").trim();
+  if (!t || !c) return t;
+  const lcT = t.toLowerCase();
+  const lcC = c.toLowerCase();
+  if (lcT.startsWith(lcC)) {
+    const next = t.charAt(c.length);
+    if (next === "" || /[^a-z0-9]/i.test(next)) return t;
+  }
+  return `${c}: ${t}`;
 }
 
 // Uint8Array -> base64 without blowing the stack on large buffers.

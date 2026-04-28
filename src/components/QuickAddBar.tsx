@@ -10,9 +10,18 @@ interface QuickAddBarProps {
   compact?: boolean
 }
 
+function todayString() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export default function QuickAddBar({ defaultStreamId, compact = false }: QuickAddBarProps) {
   const navigate = useNavigate()
   const [text, setText] = useState('')
+  const [dueDate, setDueDate] = useState(todayString())
   const [expanded, setExpanded] = useState(!compact)
   const { data: streams } = useStreams()
   const createItem = useCreateItem()
@@ -32,7 +41,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
       {
         title: parsed.title,
         stream_id: parsed.stream_id ?? defaultStreamId ?? null,
-        due_date: parsed.due_date ?? null,
+        due_date: parsed.due_date ?? (dueDate || null),
       },
       {
         onSuccess: (newItem) => {
@@ -41,6 +50,7 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
       }
     )
     setText('')
+    setDueDate(todayString())
     if (compact) setExpanded(false)
   }
 
@@ -77,9 +87,14 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={() => { if (!text.trim()) setExpanded(false) }}
-          placeholder="Add a task... (#stream, due:date)"
+          placeholder="Add a task... (#stream)"
           className="w-64 bg-transparent text-xs text-white placeholder-gray-500 outline-none"
+        />
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-xs text-white focus:border-purple-500 focus:outline-none"
         />
         {text.trim() && (
           <button
@@ -108,8 +123,14 @@ export default function QuickAddBar({ defaultStreamId, compact = false }: QuickA
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Add a task... (#stream, due:date)"
+        placeholder="Add a task... (#stream)"
         className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+      />
+      <input
+        type="date"
+        value={dueDate}
+        onChange={(e) => setDueDate(e.target.value)}
+        className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white focus:border-purple-500 focus:outline-none"
       />
       {text.trim() && (
         <button

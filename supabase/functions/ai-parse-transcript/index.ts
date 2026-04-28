@@ -898,7 +898,7 @@ async function handleHistoricalMode(
     try {
       await adminClient.from("commitments").insert({
         user_id: userId,
-        title: c.title.trim(),
+        title: prefixWithCompany(c.title, company),
         description: c.description ?? null,
         counterpart: c.counterpart ?? null,
         company: company,
@@ -1128,7 +1128,7 @@ async function handleActiveMode(
       source_id: meetingId,
       evidence_text: evidenceQuote,
       normalized_payload: {
-        title: a.title,
+        title: prefixWithCompany(a.title, company),
         description: a.description ?? "",
         due_date: a.suggested_due_date ?? null,
         company,
@@ -1181,7 +1181,7 @@ async function handleActiveMode(
         source_id: meetingId,
         evidence_text: evidenceQuote,
         normalized_payload: {
-          title: c.title,
+          title: prefixWithCompany(c.title, company),
           description: c.description ?? "",
           counterpart: c.counterpart ?? null,
           company,
@@ -1485,3 +1485,19 @@ Confidence must be between 0 and 1. Only return clusters with confidence >= 0.7.
 
 // Pursuit link suggestion is implemented in _shared/pursuit-matcher.ts
 // (shared with backfill-pursuit-links).
+
+// Prepend "Company: " to a title when a company is known and the title doesn't
+// already start with the company name. Word-boundary aware so "Ivoclar" matches
+// "Ivoclar deck" but not "Ivoclarian feedback".
+function prefixWithCompany(title: string | null | undefined, company: string | null | undefined): string {
+  const t = (title ?? "").trim();
+  const c = (company ?? "").trim();
+  if (!t || !c) return t;
+  const lcT = t.toLowerCase();
+  const lcC = c.toLowerCase();
+  if (lcT.startsWith(lcC)) {
+    const next = t.charAt(c.length);
+    if (next === "" || /[^a-z0-9]/i.test(next)) return t;
+  }
+  return `${c}: ${t}`;
+}
