@@ -14,7 +14,6 @@ import AddMenu from './AddMenu'
 const navItems = [
   { to: '/', label: 'Dashboard' },
   { to: '/focus', label: 'Focus' },
-  { to: '/focus-v2', label: 'Today v2' },
   { to: '/proposals', label: 'Proposals' },
   { to: '/commitments', label: 'Commitments' },
   { to: '/pursuits', label: 'Pursuits' },

@@ -7,7 +7,6 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Focus from './pages/Focus'
-import FocusV2 from './pages/FocusV2'
 import Add from './pages/Add'
 import Analytics from './pages/Analytics'
 import Landscape from './pages/Landscape'
@@ -46,7 +45,6 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="focus" element={<Focus />} />
-              <Route path="focus-v2" element={<FocusV2 />} />
               <Route path="add" element={<Add />} />
               <Route path="river" element={<DashRiver />} />
               <Route path="streams" element={<Streams />} />
