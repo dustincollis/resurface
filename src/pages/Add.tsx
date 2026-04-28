@@ -19,6 +19,14 @@ interface StagedFile {
 
 const MAX_FILE_MB = 10
 
+function todayString(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export default function Add() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -55,7 +63,7 @@ export default function Add() {
   const [title, setTitle] = useState('')
   const [nextAction, setNextAction] = useState('')
   const [streamId, setStreamId] = useState('')
-  const [dueDate, setDueDate] = useState('')
+  const [dueDate, setDueDate] = useState(todayString())
   const [stakes, setStakes] = useState(3)
   const [resistance, setResistance] = useState(3)
   const [itemDescription, setItemDescription] = useState('')
