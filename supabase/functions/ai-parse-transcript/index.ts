@@ -718,9 +718,23 @@ Extract these elements:
    - There are no clear external attendees worth following up with
    - The meeting was so brief or transactional that a follow-up would feel performative
 
-   **Recipients**: For each warranted follow-up, identify who should receive it. Most meetings = ONE recipient (usually the meeting organizer or principal external counterpart). Sometimes two or three when several people genuinely warrant individual touches. NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant a follow-up. Use the attendee list when provided; otherwise infer names from the transcript.
+   **Recipients — DEFAULT TO ONE.** For each warranted follow-up, the default is ONE recipient: the principal external counterpart. That's usually whoever ran the meeting on their side, OR whoever owns the most deliverables coming out of it. Pick one.
 
-   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Aim for warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Best," or similar, and leave the actual signature blank (the user will fill it in).
+   Add a SECOND recipient ONLY when one of these is true:
+   - They are at a *different organization* than the principal recipient (cross-company; e.g. one person from Storyblok and one from a separate vendor), OR
+   - They personally own a distinct deliverable that the principal cannot speak to or hand off on their behalf
+
+   When multiple people from the SAME organization were in the same meeting, do NOT generate separate drafts for each. In real life ${userDisplayName} writes ONE email to the principal and CCs the rest, or just doesn't include the rest at all. If a teammate of the principal made a notable contribution, social bid, or personal connection, ${userDisplayName} can acknowledge them by name *inside the body* of the principal's email — e.g. "tell Dyana great to meet her too" or "the JMU connection was a fun surprise". Do NOT generate a separate draft for them.
+
+   This means: a meeting with three external people from the same vendor produces ONE draft to ONE primary recipient. A meeting with one client + one external partner produces TWO drafts (cross-company). A meeting with one external person produces ONE draft. Bias hard toward fewer recipients; the user can always add CCs themselves before sending.
+
+   NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant a follow-up. Use the attendee list when provided; otherwise infer names from the transcript.
+
+   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Aim for warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Regards," and leave the actual signature blank (the user will fill it in).
+
+   **Acknowledge gaps honestly.** If ${userDisplayName} committed in the meeting to find / look up / locate something but you have no evidence in the transcript that they actually have it, the draft should reflect reality, not pretend. Example: if they said "I'll send the business plan" but the transcript doesn't show them having it, draft "I went looking but couldn't find it on my side — could you send it over?" instead of pretending they're attaching it. The user's actual voice is honest about what they did and didn't do; mirror that.
+
+   **Include one explicit ask when there is one.** Real follow-ups often need something from the recipient to move forward (a document, a calendar slot, a confirmation, an introduction). If the meeting surfaces a clear thing ${userDisplayName} needs from this recipient, include one direct ask. Don't manufacture asks where there aren't any — but don't strip them out either when they're real.
 
    **Writing rules — these matter, the user can spot AI-isms:**
    - **NO em dashes (—).** None. Use a period, comma, or "and" instead. This is the single most common AI tell.
@@ -730,7 +744,7 @@ Extract these elements:
    - **Avoid the words** "delve", "leverage", "robust", "seamless", "navigate" (as a verb for non-physical things), "ensure" (when you mean "make sure"), and "moreover/furthermore" (use "also" or just start a new sentence).
    - Write the way ${userDisplayName} would actually type a quick email after a meeting: short sentences, occasional contractions, one paragraph break if needed, no rhetorical flourishes.
 
-   When a single follow-up has multiple recipients with materially different content (e.g. the principal got specific commitments, their teammates were just present), split into multiple follow_up entries — one per audience. When recipients should genuinely get the same message, keep them in one entry.
+   In almost every case, a meeting produces AT MOST ONE follow_up entry in the array. Multiple follow_up entries are reserved for the rare case where ${userDisplayName} genuinely needs to send separate messages to people at different organizations who were both in the same call. Do NOT emit multiple follow_up entries for same-company teammates.
 
    For each follow-up return:
    - **rationale**: one short sentence explaining why this meeting warrants a follow-up
