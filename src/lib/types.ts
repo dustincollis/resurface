@@ -656,3 +656,41 @@ export interface Idea {
   updated_at: string
   reviewed_at: string | null
 }
+
+// Follow-Ups
+export type FollowUpStatus = 'pending' | 'sent' | 'dismissed'
+
+export interface FollowUpRecipient {
+  name: string
+  email: string | null
+  person_id: string | null
+  draft_subject: string
+  draft_body: string
+  rationale: string | null
+  sent_at: string | null
+}
+
+export interface FollowUp {
+  id: string
+  user_id: string
+  source_meeting_id: string
+  status: FollowUpStatus
+  rationale: string | null
+  evidence_text: string | null
+  recipients: FollowUpRecipient[]
+  ai_confidence: number | null
+  notes: string | null
+  created_at: string
+  sent_at: string | null
+  dismissed_at: string | null
+  updated_at: string
+}
+
+// Hydrated form: optional source meeting fields joined client-side
+export interface FollowUpWithMeeting extends FollowUp {
+  meeting?: {
+    id: string
+    title: string | null
+    start_time: string | null
+  } | null
+}

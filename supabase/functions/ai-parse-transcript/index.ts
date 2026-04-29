@@ -708,6 +708,32 @@ Extract these elements:
 
    For each memory return: { "content": "the atomic fact sentence" }
 
+10. **Follow-Ups — POST-MEETING RELATIONAL TOUCHES**: A follow-up is the short message ${userDisplayName} would normally send right after a meeting — "thanks Beth, I appreciate the time. I'll work with the team and get those numbers for you." This is distinct from action items (which are the work itself) and commitments (which span weeks and have deliverables). A follow-up is the *acknowledgment* that the work exists, the relational closing move that gets dropped when ${userDisplayName} is in back-to-back meetings.
+
+   **Extract a follow-up ONLY if the meeting warrants one.** Most external meetings (client calls, intros, kickoffs, partner conversations, anything with someone outside ${userDisplayName}'s team) do. Most internal standups, team syncs, and casual check-ins do NOT. Use judgment — would skipping the message look unresponsive or hurt the relationship? If yes, extract. If no, return an empty array.
+
+   A follow-up does NOT count and MUST be skipped if:
+   - It's a routine internal meeting where no relational closing is expected
+   - It's a meeting ${userDisplayName} ran where they were the host and the audience was internal
+   - There are no clear external attendees worth following up with
+   - The meeting was so brief or transactional that a follow-up would feel performative
+
+   **Recipients**: For each warranted follow-up, identify who should receive it. Most meetings = ONE recipient (usually the meeting organizer or principal external counterpart). Sometimes two or three when several people genuinely warrant individual touches. NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant a follow-up. Use the attendee list when provided; otherwise infer names from the transcript.
+
+   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Tone: warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Best," or similar — leave the actual signature blank (the user will fill it in).
+
+   When a single follow-up has multiple recipients with materially different content (e.g. the principal got specific commitments, their teammates were just present), split into multiple follow_up entries — one per audience. When recipients should genuinely get the same message, keep them in one entry.
+
+   For each follow-up return:
+   - **rationale**: one short sentence explaining why this meeting warrants a follow-up
+   - **evidence_quote**: a short verbatim line from the transcript that anchors the follow-up (under 200 chars)
+   - **recipients**: array of objects with:
+     - **name**: recipient's name (first + last if known, else just first)
+     - **email**: email if you can determine it from the transcript or attendee list, else null
+     - **draft_subject**: short subject line (under 80 chars)
+     - **draft_body**: the message body (3–6 sentences)
+     - **rationale**: one short sentence — why this person specifically
+
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
   "summary": "<the markdown synopsis as a single string>",
@@ -748,6 +774,21 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   ],
   "memories": [
     {"content": "atomic durable fact, under 140 chars"}
+  ],
+  "follow_ups": [
+    {
+      "rationale": "string (one sentence, why this meeting needs a follow-up)",
+      "evidence_quote": "string (verbatim, under 200 chars)",
+      "recipients": [
+        {
+          "name": "string",
+          "email": "string or null",
+          "draft_subject": "string (under 80 chars)",
+          "draft_body": "string (3-6 sentences)",
+          "rationale": "string (one sentence, why this person)"
+        }
+      ]
+    }
   ]
 }`;
 }
@@ -1034,6 +1075,15 @@ async function handleActiveMode(
     .eq("source_id", meetingId)
     .eq("status", "pending");
 
+  // Same idea for follow-ups: clear any pending (un-acted-on) follow-ups for
+  // this meeting before regenerating. Sent and dismissed follow-ups stay.
+  await adminClient
+    .from("follow_ups")
+    .delete()
+    .eq("user_id", userId)
+    .eq("source_meeting_id", meetingId)
+    .eq("status", "pending");
+
   const actionItems = (parsed.action_items ?? []) as Array<{
     title?: string;
     description?: string;
@@ -1244,6 +1294,16 @@ async function handleActiveMode(
     (parsed as { memories?: unknown }).memories
   );
 
+  // Follow-ups — parser-extracted post-meeting relational touches. Written
+  // directly to the follow_ups table (no proposal-queue round trip). The
+  // /follow-ups page is the queue for these.
+  const followUpsCreated = await insertExtractedFollowUps(
+    adminClient,
+    userId,
+    meetingId,
+    (parsed as { follow_ups?: unknown }).follow_ups
+  );
+
   // Cluster detection: if this meeting produced 3+ task proposals, ask the
   // model whether any of them belong to a single named deliverable (e.g.
   // "the S&P deck"). Clusters land in proposal_groups as pending suggestions
@@ -1280,6 +1340,7 @@ async function handleActiveMode(
       proposals_created: proposalRows.length,
       commitments_created: commitmentRows.length,
       memories_created: memoriesCreated,
+      follow_ups_created: followUpsCreated,
       groups_created: groupsCreated,
       pursuit_links_created: pursuitLinksCreated,
       not_for_user: notForUser,
@@ -1347,6 +1408,103 @@ async function insertExtractedMemories(adminClient: any, userId: string, raw: un
   const { error } = await adminClient.from("memories").insert(toInsert);
   if (error) {
     console.error("[ai-parse-transcript] memory insert error:", error);
+    return 0;
+  }
+  return toInsert.length;
+}
+
+// ----------------------------------------------------------------------------
+// Follow-up insert — writes parser-extracted follow-ups directly to the
+// follow_ups table with status='pending'. The /follow-ups page is the
+// review queue. Each follow-up carries a recipients[] jsonb where each
+// recipient has its own draft body and sent_at — the user marks recipients
+// individually via copy-to-clipboard. Most meetings produce 0 or 1
+// follow-up; rarely more when audiences need materially different content.
+// ----------------------------------------------------------------------------
+
+interface FollowUpRecipientCandidate {
+  name?: string;
+  email?: string | null;
+  draft_subject?: string;
+  draft_body?: string;
+  rationale?: string;
+}
+
+interface FollowUpCandidate {
+  rationale?: string;
+  evidence_quote?: string | null;
+  recipients?: FollowUpRecipientCandidate[];
+}
+
+// deno-lint-ignore no-explicit-any
+async function insertExtractedFollowUps(
+  adminClient: any,
+  userId: string,
+  meetingId: string,
+  raw: unknown,
+): Promise<number> {
+  if (!Array.isArray(raw)) return 0;
+
+  const toInsert: Array<{
+    user_id: string;
+    source_meeting_id: string;
+    status: string;
+    rationale: string | null;
+    evidence_text: string | null;
+    recipients: Array<{
+      name: string;
+      email: string | null;
+      person_id: string | null;
+      draft_subject: string;
+      draft_body: string;
+      rationale: string | null;
+      sent_at: string | null;
+    }>;
+    ai_confidence: number;
+  }> = [];
+
+  for (const f of raw as FollowUpCandidate[]) {
+    if (!f || typeof f !== "object") continue;
+    const recipientsIn = Array.isArray(f.recipients) ? f.recipients : [];
+
+    const recipients = recipientsIn
+      .filter((r) =>
+        r && typeof r === "object" &&
+        typeof r.name === "string" && r.name.trim().length > 0 &&
+        typeof r.draft_body === "string" && r.draft_body.trim().length > 0
+      )
+      .map((r) => ({
+        name: r.name!.trim(),
+        email: typeof r.email === "string" && r.email.trim().length > 0 ? r.email.trim() : null,
+        person_id: null as string | null,
+        draft_subject: typeof r.draft_subject === "string" && r.draft_subject.trim().length > 0
+          ? r.draft_subject.trim()
+          : "Following up",
+        draft_body: r.draft_body!.trim(),
+        rationale: typeof r.rationale === "string" && r.rationale.trim().length > 0 ? r.rationale.trim() : null,
+        sent_at: null as string | null,
+      }));
+
+    if (recipients.length === 0) continue;
+
+    toInsert.push({
+      user_id: userId,
+      source_meeting_id: meetingId,
+      status: "pending",
+      rationale: typeof f.rationale === "string" && f.rationale.trim().length > 0 ? f.rationale.trim() : null,
+      evidence_text: typeof f.evidence_quote === "string" && f.evidence_quote.trim().length > 0
+        ? f.evidence_quote.trim()
+        : null,
+      recipients,
+      ai_confidence: 0.7,
+    });
+  }
+
+  if (toInsert.length === 0) return 0;
+
+  const { error } = await adminClient.from("follow_ups").insert(toInsert);
+  if (error) {
+    console.error("[ai-parse-transcript] follow_up insert error:", error);
     return 0;
   }
   return toInsert.length;

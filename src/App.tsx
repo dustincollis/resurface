@@ -18,6 +18,7 @@ import ItemDetail from './pages/ItemDetail'
 import Meetings from './pages/Meetings'
 import MeetingDetail from './pages/MeetingDetail'
 import Proposals from './pages/Proposals'
+import FollowUps from './pages/FollowUps'
 import Commitments from './pages/Commitments'
 import Pursuits from './pages/Pursuits'
 import PursuitDetail from './pages/PursuitDetail'
@@ -54,6 +55,7 @@ export default function App() {
               <Route path="meetings/:id" element={<MeetingDetail />} />
               <Route path="proposals" element={<Proposals />} />
               <Route path="proposals/analytics" element={<ProposalAnalytics />} />
+              <Route path="follow-ups" element={<FollowUps />} />
               <Route path="commitments" element={<Commitments />} />
               <Route path="pursuits" element={<Pursuits />} />
               <Route path="pursuits/:id" element={<PursuitDetail />} />

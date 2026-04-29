@@ -15,6 +15,7 @@ const navItems = [
   { to: '/', label: 'Dashboard' },
   { to: '/focus', label: 'Focus' },
   { to: '/proposals', label: 'Proposals' },
+  { to: '/follow-ups', label: 'Follow-Ups' },
   { to: '/commitments', label: 'Commitments' },
   { to: '/pursuits', label: 'Pursuits' },
   { to: '/goals', label: 'Goals' },

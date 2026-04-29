@@ -87,6 +87,9 @@ Canonical identity layer normalizing free-text names across meetings, commitment
 ### Streams
 User-defined work categories (e.g., "Client Work", "Internal Ops"). Color, icon, sort order. Support custom field templates (JSONB). Archivable. Uncategorized is a virtual stream.
 
+### Follow-Ups
+Post-meeting relational closing moves -- the "thanks, here's what I took away, I'll get back to you on X" message. Distinct from commitments (which span weeks and have deliverables) and tasks (which are the work itself). One follow-up per meeting (when warranted), each with one or more recipients and a per-recipient AI-drafted body. Status: `pending` / `sent` / `dismissed`. Per-recipient `sent_at` lets the user mark each addressee individually (one click = copies the body to clipboard + stamps that recipient sent). The follow-up rolls up to `sent` when every recipient is stamped, or `dismissed` if the user gives up. AI-extracted by `ai-parse-transcript` (writes directly to `follow_ups`, no proposal-queue round trip -- mirrors the memories pattern). Persists indefinitely; `/follow-ups` groups by age (Today / Yesterday / Earlier this week / Older) so lateness is visible without UI dimming.
+
 ---
 
 ## 5. Ingestion Pipeline
@@ -109,7 +112,7 @@ ICS feed or Microsoft Graph (built, blocked by EPAM admin) -> creates calendar-s
 
 The central extraction engine. Every ingestion path feeds here.
 
-**Extracts**: Synopsis (structured markdown), suggested title, discussion-level company, action items (with commitment_strength, evidence_quote, assignee, urgency, suggested_due_date), decisions, open questions, commitments (outgoing only), and ideas.
+**Extracts**: Synopsis (structured markdown), suggested title, discussion-level company, action items (with commitment_strength, evidence_quote, assignee, urgency, suggested_due_date), decisions, open questions, commitments (outgoing only), ideas, memories, and follow-ups (post-meeting relational touches with per-recipient drafts).
 
 **Strict criteria**: An item counts ONLY if someone explicitly committed to act (first-person language, accepted assignment, specific named assignment). Speculative items are dropped. Commitments are social/relational obligations distinct from clean deliverables.
 
@@ -211,7 +214,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 ---
 
 <!-- AUTO:routes -->
-## 11. Routes (27)
+## 11. Routes (28)
 
 > Note: ReviewInput has been folded into the unified `/add` page. The `/add` route opens a three-option wizard (File / Paste / Task) that replaces both `/review-input` and the old inline QuickAddBar flow.
 
@@ -228,6 +231,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | `/add` | Add | Unified capture wizard: File / Paste / Task (replaces Review Input + QuickAddBar) |
 | `/proposals` | Proposals | Triage queue for AI-extracted proposals |
 | `/proposals/analytics` | ProposalAnalytics | Accept rates, sources, types |
+| `/follow-ups` | FollowUps | Post-meeting follow-up drafts grouped by age |
 | `/commitments` | Commitments | Outgoing/incoming obligations tracker |
 | `/pursuits` | Pursuits | Pursuit threads grouped by status |
 | `/pursuits/:id` | PursuitDetail | Pursuit context, linked items, playbook, team |
@@ -247,7 +251,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:routes -->
 
 <!-- AUTO:components -->
-## 12. Components (32)
+## 12. Components (33)
 
 | Component | Purpose |
 |-----------|---------|
@@ -262,6 +266,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | DecomposeSection | AI decomposition into subtasks |
 | EasyButtonModal | "Easy Win" AI suggestion |
 | ErrorBoundary | Error handling with reload |
+| FollowUpCard | Follow-up review card with per-recipient drafts and send/dismiss actions |
 | GoalChat | Per-goal chat thread |
 | GroupingSuggestion |  |
 | InlineEditable | Reusable inline text editor |
@@ -286,7 +291,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (34)
+## 13. Hooks (35)
 
 | Hook | Purpose |
 |------|---------|
@@ -301,6 +306,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | useCommitments | Query/create/update commitments |
 | useCompanies | Query companies, get people/pursuits |
 | useEasyButton | AI "Easy Win" recommendation |
+| useFollowUps | Query/update follow-ups, mark recipients sent, dismiss |
 | useGoals | Query/create/update goals, apply templates |
 | useIdeas | Query/cluster/triage ideas |
 | useItemAssists | Generate AI assists |
@@ -377,7 +383,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (38 migrations, 37 tables)
+## 15. Database Tables (39 migrations, 38 tables)
 
 | Table | Source migration |
 |-------|-----------------|
@@ -394,6 +400,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | commitments | 20260409030000_commitments |
 | companies | 20260410020000_people_and_companies |
 | delegated_items | 20260413050000_proposal_actions_enhanced |
+| follow_ups | 20260429000000_follow_ups |
 | goal_tasks | 20260410010000_templates_and_goals |
 | goals | 20260410010000_templates_and_goals |
 | ideas | 20260411000000_ideas_and_historical |
@@ -520,4 +527,5 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-23**: Backfill for historical meetings. Matcher extracted into `supabase/functions/_shared/pursuit-matcher.ts`; new `backfill-pursuit-links` edge function sweeps active-mode meetings (`transcript_summary is not null`) and runs the matcher per meeting, creating pending proposals without re-parsing transcripts. Idempotent (skips already-linked and already-proposed pairs via the unique constraint). Triggered from a new "Match past meetings" button on `/pursuits`. Accepts optional `since` and `limit` body params for scoped runs.
 - **2026-04-23**: Focus staleness gated by due-date horizon. `compute-staleness` now dampens the time-decay component (`baseDecay * log₂(hoursSinceTouch)`) when an item's `due_date` is far out: ×0.3 for 15–30 days, ×0 for 30+ days. Stakes contribute at full weight regardless so a high-stakes future item can still surface — but medium-stakes items scheduled for a month out no longer drift into Focus via time-decay alone. Deadline urgency ramp widened to match: overdue=100, ≤24h=75, ≤72h=50, ≤7d=25, ≤14d=10 (previously capped at 72h). Frontend's `computePriority` due-component ramp extended to 14 days in `src/lib/priorityScore.ts`, and the reverse-engineered "Nd stale" chip tracks the same bands. Rationale: "staleness" means neglected present work, not scheduled future work — an item due in 5 weeks isn't stale, it's on schedule.
 - **2026-04-24**: Batch email ingestion with pre-synthesis triage. New `/add` File mode accepts multi-file drops (up to dozens of `.eml` at once). Each file creates an `inputs` row, then one batched Sonnet call (`ai-catalog-batch` edge function) classifies all of them at once: actionable/skip with a short reason, plus optional thread_group_id for detected reply chains. Skipped inputs get marked with `triage_result='skipped'` and never generate proposals — skipping the expensive per-input synthesis. Actionable inputs fire `ai-parse-input` in the background via `EdgeRuntime.waitUntil` so the response returns immediately. Migration `20260424000000` adds `triage_result`, `triage_reason`, `thread_group_id` to `inputs`. New UI: staged-file list with per-file remove on `/add`, post-batch result banner, and a collapsed "Skipped by triage" section on `/proposals` with a "Process anyway" override per row (flips the decision and fires full synthesis). Screenshots bypass the catalog step (no text to pre-filter) and go straight to synthesis. Rationale: dropping "the day's emails" (~30-50 at a time) would waste most Claude calls on FYI replies and confirmations if every file got full-synthesis treatment; one batched triage call at Sonnet prices filters the signal from the noise.
+- **2026-04-29**: Follow-ups — post-meeting relational closing moves as a first-class entity, distinct from commitments and tasks. New `follow_ups` table (migration `20260429000000`) with jsonb `recipients[]` (each with `name`, `email`, `person_id`, `draft_subject`, `draft_body`, `rationale`, `sent_at`), status (`pending`/`sent`/`dismissed`), `source_meeting_id` FK, evidence text, AI confidence. `ai-parse-transcript` extended (active mode only) to extract follow-up suggestions: AI judges whether the meeting warrants one (most external meetings yes, internal standups no), picks recipient(s) from attendees, drafts per-recipient body with rationale. Writes directly to `follow_ups` (status=`pending`), no proposal-queue round trip — mirrors the memories pattern. Persists indefinitely; never auto-expires. New `/follow-ups` route groups pending by age bucket (Today / Yesterday / Earlier this week / Older) with no visual fading — the bucket header carries the lateness signal. Per-recipient send button copies the draft body to clipboard and stamps that recipient's `sent_at`; the follow-up rolls up to status=`sent` when every recipient is stamped. Dismiss closes the whole thing. New section on `/meetings/:id` shows the meeting's own follow-up inline. Sidebar gains "Follow Ups" entry next to Proposals. New `useFollowUps` hook + `FollowUpCard` component. Rationale: follow-ups fail not because of forgetting but because of depletion after back-to-back meetings; AI removes the cognitive cost of composing them so the relational layer doesn't drop when the day gets busy.
 - **2026-04-24**: Editorial typography pass + parallel `/focus-v2` view. Loaded **Inter** (sans) and **JetBrains Mono** (monospace) via Google Fonts; wired `--font-sans` and `--font-mono` in `src/index.css` so every `font-sans`/`font-mono` utility inherits the new stack. `StatusBadge` retired the filled `bg-X-900/40` pattern in favor of outlined, uppercase, monospace chips with text/border color matching — the chip system used throughout the new view. Sidebar stripped of per-row icons (navigation is text-first now); wordmark gets a small monospace timestamp underneath (`FRI · APR 24 · 9:12A`); user email at the bottom also rendered in mono. New page `FocusV2.tsx` at route `/focus-v2` (sidebar entry "Today v2") shares `useItems` + `sortByPriority` with current Focus but renders as an editorial vertical list: large title, one-line monospace meta (stream dot + name + relative due), single right-side narrative chip ("Overdue" / "Due Today" / "Nd Stale" / "High Stakes" / "Pinned" / "Waiting") chosen by a deterministic priority cascade. Reserved red for OVERDUE alone — cyan carries every other signal so the one alert color actually alerts. Current `/focus` left untouched for A/B comparison; once the new view earns the default, the old can be retired. Rationale: shifts the app from "priority list" to "today's agenda of your work life" without touching data or ranking logic.

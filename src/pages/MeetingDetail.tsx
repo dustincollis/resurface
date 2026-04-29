@@ -5,8 +5,10 @@ import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, ty
 import { useItemsByDiscussion, useCreateItem } from '../hooks/useItems'
 import { useProposalsBySource } from '../hooks/useProposals'
 import { useCommitmentsByMeeting } from '../hooks/useCommitments'
+import { useFollowUpsByMeeting } from '../hooks/useFollowUps'
 import { useIdeasByMeeting, useUpdateIdeaStatus } from '../hooks/useIdeas'
 import AddToPursuit from '../components/AddToPursuit'
+import FollowUpCard from '../components/FollowUpCard'
 import { queryClient } from '../lib/queryClient'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -51,6 +53,7 @@ export default function MeetingDetail() {
   const { data: linkedTasks } = useItemsByDiscussion(id!)
   const { data: meetingProposals } = useProposalsBySource('meeting', id!)
   const { data: meetingCommitments } = useCommitmentsByMeeting(id!)
+  const { data: meetingFollowUps } = useFollowUpsByMeeting(id!)
   const { data: meetingIdeas } = useIdeasByMeeting(id!)
   const updateIdeaStatus = useUpdateIdeaStatus()
   const uploadTranscript = useUploadTranscript()
@@ -361,6 +364,20 @@ export default function MeetingDetail() {
                   </button>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Follow-ups extracted from this discussion */}
+        {meetingFollowUps && meetingFollowUps.length > 0 && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="mb-3 text-sm font-medium text-gray-300">
+              Follow-ups from this discussion ({meetingFollowUps.length})
+            </h3>
+            <div className="space-y-3">
+              {meetingFollowUps.map((f) => (
+                <FollowUpCard key={f.id} followUp={f} hideMeetingLink />
+              ))}
             </div>
           </div>
         )}
