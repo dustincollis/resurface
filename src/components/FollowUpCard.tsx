@@ -15,14 +15,11 @@ interface Props {
   hideMeetingLink?: boolean
 }
 
-// Pre-formatted, ready to paste. The user copies this and pastes into Outlook.
+// Plain-text body only. The user is usually pasting into a reply where the
+// To/Subject are already populated; including header lines just creates
+// cleanup work. Subject + recipient stay visible on the card.
 function clipboardText(r: FollowUpRecipient): string {
-  const lines: string[] = []
-  if (r.email) lines.push(`To: ${r.email}`)
-  lines.push(`Subject: ${r.draft_subject}`)
-  lines.push('')
-  lines.push(r.draft_body)
-  return lines.join('\n')
+  return r.draft_body
 }
 
 export default function FollowUpCard({ followUp, hideMeetingLink }: Props) {
