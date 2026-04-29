@@ -439,7 +439,7 @@ server.tool(
       let query = supabase
         .from('follow_ups')
         .select(
-          'id, status, source_meeting_id, rationale, evidence_text, recipients, ai_confidence, notes, created_at, sent_at, dismissed_at'
+          'id, status, source_meeting_id, rationale, evidence_text, draft_subject, draft_body, recipients, ai_confidence, notes, created_at, sent_at, dismissed_at'
         )
 
       if (status && status !== 'all') {

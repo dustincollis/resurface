@@ -658,16 +658,16 @@ export interface Idea {
 }
 
 // Follow-Ups
+// A follow-up is ONE email: shared subject + body + a To list. Per-recipient
+// drafts are gone (the user's actual style addresses everyone in one greeting,
+// not separate emails to each addressee).
 export type FollowUpStatus = 'pending' | 'sent' | 'dismissed'
 
 export interface FollowUpRecipient {
   name: string
   email: string | null
   person_id: string | null
-  draft_subject: string
-  draft_body: string
   rationale: string | null
-  sent_at: string | null
 }
 
 export interface FollowUp {
@@ -677,6 +677,8 @@ export interface FollowUp {
   status: FollowUpStatus
   rationale: string | null
   evidence_text: string | null
+  draft_subject: string
+  draft_body: string
   recipients: FollowUpRecipient[]
   ai_confidence: number | null
   notes: string | null

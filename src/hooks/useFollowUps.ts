@@ -3,12 +3,7 @@ import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from './useAuth'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
-import type {
-  FollowUp,
-  FollowUpRecipient,
-  FollowUpStatus,
-  FollowUpWithMeeting,
-} from '../lib/types'
+import type { FollowUp, FollowUpStatus, FollowUpWithMeeting } from '../lib/types'
 
 interface FollowUpFilters {
   status?: FollowUpStatus | FollowUpStatus[]
@@ -98,7 +93,7 @@ function invalidateAll() {
   queryClient.invalidateQueries({ queryKey: ['follow_ups'] })
 }
 
-// Update arbitrary fields on a follow-up (e.g. user-edited recipients,
+// Update arbitrary fields on a follow-up (e.g. user-edited body or subject,
 // notes, etc). Pass a partial; the row's own RLS scopes to the user.
 export function useUpdateFollowUp() {
   return useMutation({
@@ -113,31 +108,16 @@ export function useUpdateFollowUp() {
   })
 }
 
-// Mark a single recipient as sent at the given timestamp. If every recipient
-// in the row has sent_at populated after the change, the follow-up rolls up
-// to status='sent' and gets a sent_at stamp on the row itself.
-export function useMarkRecipientSent() {
+// Mark the entire follow-up sent — one click after copying the body.
+// (The To list is a single email, so per-recipient send tracking went away.)
+export function useMarkFollowUpSent() {
   return useMutation({
-    mutationFn: async (args: { id: string; recipientIndex: number }) => {
-      const { data: existing, error: fetchErr } = await supabase
-        .from('follow_ups')
-        .select('id, status, recipients')
-        .eq('id', args.id)
-        .single()
-      if (fetchErr) throw fetchErr
-
-      const recipients = ((existing?.recipients ?? []) as FollowUpRecipient[]).map((r, i) =>
-        i === args.recipientIndex ? { ...r, sent_at: new Date().toISOString() } : r,
-      )
-      const allSent = recipients.length > 0 && recipients.every((r) => !!r.sent_at)
-      const patch: Partial<FollowUp> = {
-        recipients,
-        ...(allSent ? { status: 'sent', sent_at: new Date().toISOString() } : {}),
-      }
+    mutationFn: async (id: string) => {
+      const now = new Date().toISOString()
       const { error } = await supabase
         .from('follow_ups')
-        .update(patch)
-        .eq('id', args.id)
+        .update({ status: 'sent', sent_at: now })
+        .eq('id', id)
       if (error) throw error
     },
     onSuccess: invalidateAll,
@@ -150,33 +130,6 @@ export function useDismissFollowUp() {
       const { error } = await supabase
         .from('follow_ups')
         .update({ status: 'dismissed', dismissed_at: new Date().toISOString() })
-        .eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: invalidateAll,
-  })
-}
-
-// "Send all" — stamps every un-sent recipient and rolls up to status='sent'.
-// The frontend is still responsible for copying the per-recipient bodies to
-// the clipboard; this just records the act.
-export function useMarkAllSent() {
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const now = new Date().toISOString()
-      const { data: existing, error: fetchErr } = await supabase
-        .from('follow_ups')
-        .select('id, recipients')
-        .eq('id', id)
-        .single()
-      if (fetchErr) throw fetchErr
-      const recipients = ((existing?.recipients ?? []) as FollowUpRecipient[]).map((r) => ({
-        ...r,
-        sent_at: r.sent_at ?? now,
-      }))
-      const { error } = await supabase
-        .from('follow_ups')
-        .update({ recipients, status: 'sent', sent_at: now })
         .eq('id', id)
       if (error) throw error
     },

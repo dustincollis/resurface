@@ -718,43 +718,44 @@ Extract these elements:
    - There are no clear external attendees worth following up with
    - The meeting was so brief or transactional that a follow-up would feel performative
 
-   **Recipients — DEFAULT TO ONE.** For each warranted follow-up, the default is ONE recipient: the principal external counterpart. That's usually whoever ran the meeting on their side, OR whoever owns the most deliverables coming out of it. Pick one.
+   **A follow-up is ONE EMAIL**, with one subject, one body, and a To list of all the relevant external attendees. Not N parallel emails to N people. The greeting names everyone on the To list.
 
-   Add a SECOND recipient ONLY when one of these is true:
-   - They are at a *different organization* than the principal recipient (cross-company; e.g. one person from Storyblok and one from a separate vendor), OR
-   - They personally own a distinct deliverable that the principal cannot speak to or hand off on their behalf
+   **Recipients — INCLUDE ALL RELEVANT EXTERNAL ATTENDEES.** This is one email; the To list reflects who's on the email. Include every external attendee who participated meaningfully or is part of the ongoing relationship. Exclude pure note-takers / silent observers if they clearly added nothing and aren't part of the working relationship, but err on the side of including them; ${userDisplayName} can remove names before sending.
 
-   When multiple people from the SAME organization were in the same meeting, do NOT generate separate drafts for each. In real life ${userDisplayName} writes ONE email to the principal and CCs the rest, or just doesn't include the rest at all. If a teammate of the principal made a notable contribution, social bid, or personal connection, ${userDisplayName} can acknowledge them by name *inside the body* of the principal's email — e.g. "tell Dyana great to meet her too" or "the JMU connection was a fun surprise". Do NOT generate a separate draft for them.
+   NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant being on the email (rare).
 
-   This means: a meeting with three external people from the same vendor produces ONE draft to ONE primary recipient. A meeting with one client + one external partner produces TWO drafts (cross-company). A meeting with one external person produces ONE draft. Bias hard toward fewer recipients; the user can always add CCs themselves before sending.
+   **Greeting — match ${userDisplayName}'s actual habit:**
+   - 1 recipient: "Hey Justin," or "Justin," (first name only)
+   - 2 or 3 recipients: name them all. "Hey Justin, Dyana, and Sean," or "Justin and Ethan,"
+   - 4+ recipients: "Hey All," or "All,"
 
-   NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant a follow-up. Use the attendee list when provided; otherwise infer names from the transcript.
+   The greeting goes on its own line, followed by a blank line, then the body.
 
-   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Aim for warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Regards," and leave the actual signature blank (the user will fill it in).
+   **Multiple follow_up entries — almost never.** A meeting produces AT MOST ONE follow_up entry. The rare exception: people from two different external organizations on the same call who genuinely need different content. Even then, prefer one email if the message would be the same. NEVER emit multiple follow_up entries for same-company teammates.
 
-   **Acknowledge gaps honestly.** If ${userDisplayName} committed in the meeting to find / look up / locate something but you have no evidence in the transcript that they actually have it, the draft should reflect reality, not pretend. Example: if they said "I'll send the business plan" but the transcript doesn't show them having it, draft "I went looking but couldn't find it on my side — could you send it over?" instead of pretending they're attaching it. The user's actual voice is honest about what they did and didn't do; mirror that.
+   **Body writing**: 3–6 sentences. Warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes the group next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. End with "Regards," on its own line, then a blank line where the signature would go.
 
-   **Include one explicit ask when there is one.** Real follow-ups often need something from the recipient to move forward (a document, a calendar slot, a confirmation, an introduction). If the meeting surfaces a clear thing ${userDisplayName} needs from this recipient, include one direct ask. Don't manufacture asks where there aren't any — but don't strip them out either when they're real.
+   **Acknowledge gaps honestly.** If ${userDisplayName} committed in the meeting to find / look up / locate something but you have no evidence in the transcript that they actually have it, the draft should reflect reality, not pretend. Example: if they said "I'll send the business plan" but the transcript doesn't show them having it, write "I went looking but couldn't find it on my side, could you send it over?" instead of pretending it's attached. Mirror ${userDisplayName}'s honest voice.
+
+   **Include one explicit ask when there is one.** Real follow-ups often need something from the recipient(s) to move forward (a document, a calendar slot, a confirmation, an introduction). If the meeting surfaces a clear thing ${userDisplayName} needs from the group, include one direct ask. Don't manufacture asks where there aren't any.
 
    **Writing rules — these matter, the user can spot AI-isms:**
    - **NO em dashes (—).** None. Use a period, comma, or "and" instead. This is the single most common AI tell.
-   - **NO colons followed by a punchy / pithy statement.** Patterns like "The result: a stronger relationship." or "Here's the thing: it works." or "What stood out: the candor." are AI tells. Use a normal sentence instead. Colons inside an email header line ("Subject: ...") are fine; colons inside body prose introducing a punchy fragment are not.
+   - **NO colons followed by a punchy / pithy statement.** Patterns like "The result: a stronger relationship." or "Here's the thing: it works." or "What stood out: the candor." are AI tells. Use a normal sentence instead.
    - **NO "it's not just X, it's Y" constructions.** Another AI tell.
    - **Avoid triadic lists with rhetorical rhythm** ("clear, focused, and decisive"). One adjective is usually enough.
    - **Avoid the words** "delve", "leverage", "robust", "seamless", "navigate" (as a verb for non-physical things), "ensure" (when you mean "make sure"), and "moreover/furthermore" (use "also" or just start a new sentence).
    - Write the way ${userDisplayName} would actually type a quick email after a meeting: short sentences, occasional contractions, one paragraph break if needed, no rhetorical flourishes.
 
-   In almost every case, a meeting produces AT MOST ONE follow_up entry in the array. Multiple follow_up entries are reserved for the rare case where ${userDisplayName} genuinely needs to send separate messages to people at different organizations who were both in the same call. Do NOT emit multiple follow_up entries for same-company teammates.
-
    For each follow-up return:
    - **rationale**: one short sentence explaining why this meeting warrants a follow-up
    - **evidence_quote**: a short verbatim line from the transcript that anchors the follow-up (under 200 chars)
-   - **recipients**: array of objects with:
-     - **name**: recipient's name (first + last if known, else just first)
+   - **draft_subject**: ONE shared subject line (under 80 chars)
+   - **draft_body**: ONE shared body, including the greeting that names everyone on the To list and the "Regards," signoff
+   - **recipients**: array of objects, each with:
+     - **name**: recipient's first name (or first + last if both known)
      - **email**: email if you can determine it from the transcript or attendee list, else null
-     - **draft_subject**: short subject line (under 80 chars)
-     - **draft_body**: the message body (3–6 sentences)
-     - **rationale**: one short sentence — why this person specifically
+     - **rationale**: one short sentence — why this person is on the email
 
 Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
 {
@@ -801,13 +802,13 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
     {
       "rationale": "string (one sentence, why this meeting needs a follow-up)",
       "evidence_quote": "string (verbatim, under 200 chars)",
+      "draft_subject": "string (under 80 chars, ONE shared subject)",
+      "draft_body": "string (ONE shared body, includes greeting naming everyone + 'Regards,' signoff)",
       "recipients": [
         {
-          "name": "string",
+          "name": "string (first name, or first + last)",
           "email": "string or null",
-          "draft_subject": "string (under 80 chars)",
-          "draft_body": "string (3-6 sentences)",
-          "rationale": "string (one sentence, why this person)"
+          "rationale": "string (one sentence, why this person is on the email)"
         }
       ]
     }
@@ -1447,14 +1448,14 @@ async function insertExtractedMemories(adminClient: any, userId: string, raw: un
 interface FollowUpRecipientCandidate {
   name?: string;
   email?: string | null;
-  draft_subject?: string;
-  draft_body?: string;
   rationale?: string;
 }
 
 interface FollowUpCandidate {
   rationale?: string;
   evidence_quote?: string | null;
+  draft_subject?: string;
+  draft_body?: string;
   recipients?: FollowUpRecipientCandidate[];
 }
 
@@ -1473,38 +1474,34 @@ async function insertExtractedFollowUps(
     status: string;
     rationale: string | null;
     evidence_text: string | null;
+    draft_subject: string;
+    draft_body: string;
     recipients: Array<{
       name: string;
       email: string | null;
       person_id: string | null;
-      draft_subject: string;
-      draft_body: string;
       rationale: string | null;
-      sent_at: string | null;
     }>;
     ai_confidence: number;
   }> = [];
 
   for (const f of raw as FollowUpCandidate[]) {
     if (!f || typeof f !== "object") continue;
-    const recipientsIn = Array.isArray(f.recipients) ? f.recipients : [];
 
+    const draftBody = typeof f.draft_body === "string" ? f.draft_body.trim() : "";
+    if (!draftBody) continue; // No body, no follow-up
+
+    const recipientsIn = Array.isArray(f.recipients) ? f.recipients : [];
     const recipients = recipientsIn
       .filter((r) =>
         r && typeof r === "object" &&
-        typeof r.name === "string" && r.name.trim().length > 0 &&
-        typeof r.draft_body === "string" && r.draft_body.trim().length > 0
+        typeof r.name === "string" && r.name.trim().length > 0
       )
       .map((r) => ({
         name: r.name!.trim(),
         email: typeof r.email === "string" && r.email.trim().length > 0 ? r.email.trim() : null,
         person_id: null as string | null,
-        draft_subject: typeof r.draft_subject === "string" && r.draft_subject.trim().length > 0
-          ? r.draft_subject.trim()
-          : "Following up",
-        draft_body: r.draft_body!.trim(),
         rationale: typeof r.rationale === "string" && r.rationale.trim().length > 0 ? r.rationale.trim() : null,
-        sent_at: null as string | null,
       }));
 
     if (recipients.length === 0) continue;
@@ -1517,6 +1514,10 @@ async function insertExtractedFollowUps(
       evidence_text: typeof f.evidence_quote === "string" && f.evidence_quote.trim().length > 0
         ? f.evidence_quote.trim()
         : null,
+      draft_subject: typeof f.draft_subject === "string" && f.draft_subject.trim().length > 0
+        ? f.draft_subject.trim()
+        : "Following up",
+      draft_body: draftBody,
       recipients,
       ai_confidence: 0.7,
     });
