@@ -720,7 +720,15 @@ Extract these elements:
 
    **Recipients**: For each warranted follow-up, identify who should receive it. Most meetings = ONE recipient (usually the meeting organizer or principal external counterpart). Sometimes two or three when several people genuinely warrant individual touches. NEVER include ${userDisplayName} as a recipient. NEVER include attendees from ${userDisplayName}'s own team unless they specifically warrant a follow-up. Use the attendee list when provided; otherwise infer names from the transcript.
 
-   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Tone: warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Best," or similar — leave the actual signature blank (the user will fill it in).
+   **Drafts**: For each recipient, write a short follow-up body (3–6 sentences). Aim for warm, direct, professional, not overly formal. Mention what was discussed, what ${userDisplayName} owes them next, and (if natural) one specific thing from the conversation that shows ${userDisplayName} was paying attention. Do NOT invent details that aren't in the transcript. Address the recipient by first name. Sign off with "Best," or similar, and leave the actual signature blank (the user will fill it in).
+
+   **Writing rules — these matter, the user can spot AI-isms:**
+   - **NO em dashes (—).** None. Use a period, comma, or "and" instead. This is the single most common AI tell.
+   - **NO colons followed by a punchy / pithy statement.** Patterns like "The result: a stronger relationship." or "Here's the thing: it works." or "What stood out: the candor." are AI tells. Use a normal sentence instead. Colons inside an email header line ("Subject: ...") are fine; colons inside body prose introducing a punchy fragment are not.
+   - **NO "it's not just X, it's Y" constructions.** Another AI tell.
+   - **Avoid triadic lists with rhetorical rhythm** ("clear, focused, and decisive"). One adjective is usually enough.
+   - **Avoid the words** "delve", "leverage", "robust", "seamless", "navigate" (as a verb for non-physical things), "ensure" (when you mean "make sure"), and "moreover/furthermore" (use "also" or just start a new sentence).
+   - Write the way ${userDisplayName} would actually type a quick email after a meeting: short sentences, occasional contractions, one paragraph break if needed, no rhetorical flourishes.
 
    When a single follow-up has multiple recipients with materially different content (e.g. the principal got specific commitments, their teammates were just present), split into multiple follow_up entries — one per audience. When recipients should genuinely get the same message, keep them in one entry.
 
