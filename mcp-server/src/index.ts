@@ -416,6 +416,74 @@ server.tool(
   }
 )
 
+// ----- list_follow_ups -----
+server.tool(
+  'list_follow_ups',
+  'List follow-ups (post-meeting relational drafts) by status. Each follow-up has a recipients array with per-person draft_subject + draft_body and per-person sent_at. status: pending (unsent), sent (all recipients sent), dismissed.',
+  {
+    status: z
+      .enum(['pending', 'sent', 'dismissed', 'all'])
+      .optional()
+      .default('pending')
+      .describe('Filter by follow-up status (default: pending)'),
+    source_meeting_id: z
+      .string()
+      .optional()
+      .describe('Optional: limit to follow-ups from a specific meeting'),
+    limit: z.number().int().min(1).max(100).optional().default(50),
+  },
+  async ({ status, source_meeting_id, limit }) => {
+    try {
+      await ensureAuthed()
+
+      let query = supabase
+        .from('follow_ups')
+        .select(
+          'id, status, source_meeting_id, rationale, evidence_text, recipients, ai_confidence, notes, created_at, sent_at, dismissed_at'
+        )
+
+      if (status && status !== 'all') {
+        query = query.eq('status', status)
+      }
+      if (source_meeting_id) {
+        query = query.eq('source_meeting_id', source_meeting_id)
+      }
+
+      const { data, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(limit)
+
+      if (error) throw error
+
+      // Hydrate with meeting titles so the result is self-contained
+      // (saves the agent a follow-up get_discussion call per row).
+      const rows = data ?? []
+      const meetingIds = Array.from(
+        new Set(rows.map((r: { source_meeting_id: string }) => r.source_meeting_id))
+      )
+      let titlesById = new Map<string, { title: string | null; start_time: string | null }>()
+      if (meetingIds.length > 0) {
+        const { data: meetings } = await supabase
+          .from('meetings')
+          .select('id, title, start_time')
+          .in('id', meetingIds)
+        for (const m of meetings ?? []) {
+          titlesById.set(m.id, { title: m.title, start_time: m.start_time })
+        }
+      }
+
+      const hydrated = rows.map((r: { source_meeting_id: string }) => ({
+        ...r,
+        meeting: titlesById.get(r.source_meeting_id) ?? null,
+      }))
+
+      return jsonResult(hydrated)
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  }
+)
+
 // ============================================================
 // Start server
 // ============================================================
