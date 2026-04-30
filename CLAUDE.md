@@ -68,3 +68,12 @@ mcp-server/      -- Local MCP server for Claude Desktop/Code
 3. If you changed the data model, update `## 15. Database Tables`
 4. If you added a new AI capability, update `## 9. Item Intelligence`
 5. Run `node scripts/refresh-spec.mjs` to verify AUTO sections are in sync (optional but recommended)
+
+## Required Skill Invocations
+Invoke these skills automatically. Dustin won't always remember to ask, and missing them costs real quality.
+
+- **`claude-api`** — Before making structural changes to any Edge Function under `supabase/functions/` that calls the Anthropic API, or any file importing `@anthropic-ai/sdk`. Especially before changing the cached `system` prompt block, swapping models (Opus / Sonnet / Haiku), reshaping response JSON, or tuning prompt caching / batch / tool use. The parser's `system` block is cached for ~90% cost reduction on the instruction prefix; editing that block invalidates the cache. This skill catches the silent degradations.
+
+- **`security-review`** — Before any `git push` that touches `supabase/functions/`, `supabase/migrations/`, `src/lib/supabase.ts`, RLS policies, JWT/auth code, the MCP server, or anything that handles PII (emails, names, transcripts). Run on the pending changes (diff vs `origin/main`). One-shot pass before push, not a per-commit blocker.
+
+If unsure whether a skill applies, invoke it. False positives are cheap; missed checks are not.
