@@ -85,37 +85,89 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const body = await req.json().catch(() => ({}));
     const force = body?.force === true;
+    // Optional: generate the briefing for an arbitrary date instead of "today".
+    // Used for testing (preview tomorrow's briefing now) and for cron pre-warming
+    // (cron passes the upcoming date explicitly so it doesn't depend on UTC vs.
+    // local-time wall-clock alignment).
+    const requestedDate =
+      typeof body?.for_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.for_date)
+        ? (body.for_date as string)
+        : null;
+    // Optional: when called via service role (cron / internal), pick the user
+    // explicitly. JWT path always uses the authed user and ignores this.
+    const requestedUserId =
+      typeof body?.user_id === "string" && body.user_id.length > 0
+        ? (body.user_id as string)
+        : null;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey =
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
       Deno.env.get("SB_SERVICE_ROLE_KEY")!;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
+    const defaultUserId = Deno.env.get("RESURFACE_DEFAULT_USER_ID");
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-    } = await adminClient.auth.getUser(token);
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const userId = user.id;
+    // Three call paths, in order of trust:
+    //   1. Service-role token  — internal / cron caller. May specify any user via
+    //                            body.user_id (or fall back to RESURFACE_DEFAULT_USER_ID).
+    //   2. User JWT            — browser. Uses the authed user; body.user_id is ignored.
+    //   3. No auth header      — anonymous cron-style caller (matches compute-staleness
+    //                            / retry-unprocessed). LOCKED to RESURFACE_DEFAULT_USER_ID.
+    //                            body.user_id is IGNORED on this path — otherwise an
+    //                            internet-routable URL with --no-verify-jwt would let any
+    //                            caller request another user's briefing once multi-user is
+    //                            enabled. The single-user app today doesn't suffer this,
+    //                            but the schema is multi-user-ready and we don't want a
+    //                            latent vulnerability sitting in the code waiting to fire.
+    const token = authHeader ? authHeader.replace("Bearer ", "") : null;
+    const isServiceRole = token !== null && token === serviceRoleKey;
+    let userId: string;
+    let userEmail: string | null = null;
 
-    // ---- Determine "today" in user's timezone ----
+    if (isServiceRole) {
+      const candidate = requestedUserId ?? defaultUserId ?? null;
+      if (!candidate) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Service-role caller must supply user_id (or RESURFACE_DEFAULT_USER_ID env).",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      userId = candidate;
+    } else if (token === null) {
+      // Anonymous path: lock to default user. Ignore body.user_id deliberately.
+      if (!defaultUserId) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Anonymous calls require RESURFACE_DEFAULT_USER_ID env to be set.",
+          }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      userId = defaultUserId;
+    } else {
+      const {
+        data: { user },
+      } = await adminClient.auth.getUser(token!);
+      if (!user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+      userEmail = user.email ?? null;
+    }
+
+    // ---- Determine the briefing date in the user's timezone ----
     const { data: profile } = await adminClient
       .from("profiles")
       .select("timezone, display_name, bio")
@@ -124,15 +176,18 @@ Deno.serve(async (req) => {
     const tz: string =
       (profile?.timezone as string | undefined) || "America/New_York";
     const userDisplayName: string =
-      (profile?.display_name as string | undefined) || user.email?.split("@")[0] || "the user";
+      (profile?.display_name as string | undefined) || userEmail?.split("@")[0] || "the user";
     const userBio: string =
       (profile?.bio as string | undefined) || "";
 
-    const briefingDate = ymdInTz(new Date(), tz);
+    const briefingDate = requestedDate ?? ymdInTz(new Date(), tz);
+    // Day-of-week derived from the briefing date itself so for_date previews
+    // ("show me Friday's briefing") render correctly.
+    const briefingDateForDow = new Date(`${briefingDate}T12:00:00Z`);
     const dayOfWeek = new Intl.DateTimeFormat("en-US", {
       weekday: "long",
       timeZone: tz,
-    }).format(new Date());
+    }).format(briefingDateForDow);
 
     // ---- Snapshot: return existing if force=false ----
     if (!force) {

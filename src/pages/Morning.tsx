@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Loader2, RefreshCw, AlertCircle, Clock, Mail, AlertTriangle, ListTodo, Users } from 'lucide-react'
 import {
   useMorningBriefing,
@@ -41,15 +41,28 @@ function timeRange(start: string | null, end: string | null): string {
   return `${formatTime(start)} – ${formatTime(end)}`
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export default function Morning() {
-  const { data: briefing, isLoading, error } = useMorningBriefing()
-  const regenerate = useRegenerateMorningBriefing()
+  const [searchParams] = useSearchParams()
+  // ?date=YYYY-MM-DD lets you preview an arbitrary day's briefing.
+  // Useful for testing tomorrow before tomorrow happens.
+  const rawDate = searchParams.get('date')
+  const forDate = rawDate && DATE_RE.test(rawDate) ? rawDate : undefined
+
+  const { data: briefing, isLoading, error } = useMorningBriefing(forDate)
+  const regenerate = useRegenerateMorningBriefing(forDate)
 
   // The page's outer wrapper sets the light theme by overriding the app's
   // global dark background. The rest of the app stays dark; only here.
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900">
       <div className="mx-auto max-w-2xl px-5 py-8 sm:py-12">
+        {forDate && (
+          <div className="mb-4 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            Previewing briefing for <strong>{forDate}</strong>. Remove <code>?date=</code> from the URL to return to today.
+          </div>
+        )}
         {isLoading && !briefing && <LoadingState />}
         {error && !briefing && <ErrorState message={(error as Error).message} onRetry={() => regenerate.mutate()} />}
         {briefing && (

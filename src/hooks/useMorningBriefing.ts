@@ -16,27 +16,29 @@ function todayLocal(): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-export function useMorningBriefing() {
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+// `forDate` lets a caller preview an arbitrary date's briefing (e.g. the
+// /morning page reads `?date=YYYY-MM-DD` from the URL for testing). When
+// undefined, the function uses the user's "today" in their profile timezone.
+export function useMorningBriefing(forDate?: string) {
   const { user } = useAuth()
+  const targetDate = forDate && DATE_RE.test(forDate) ? forDate : todayLocal()
 
   return useQuery({
-    queryKey: ['morning_briefing', todayLocal()],
+    queryKey: ['morning_briefing', targetDate],
     queryFn: async () => {
-      const today = todayLocal()
-      // First check if today's row already exists (avoids hitting the
-      // Edge Function on every page reload).
       const { data: existing, error: existingErr } = await supabase
         .from('morning_briefings')
         .select('*')
         .eq('user_id', user!.id)
-        .eq('briefing_date', today)
+        .eq('briefing_date', targetDate)
         .maybeSingle()
       if (existingErr) throw existingErr
       if (existing && existing.status === 'ready') {
         return existing as MorningBriefing
       }
 
-      // Trigger generation via the Edge Function.
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) throw new Error('Not authenticated')
 
@@ -49,7 +51,7 @@ export function useMorningBriefing() {
             Authorization: `Bearer ${session.access_token}`,
             apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify(forDate && DATE_RE.test(forDate) ? { for_date: forDate } : {}),
         },
       )
       if (!resp.ok) {
@@ -64,13 +66,15 @@ export function useMorningBriefing() {
   })
 }
 
-export function useRegenerateMorningBriefing() {
+export function useRegenerateMorningBriefing(forDate?: string) {
   const { user } = useAuth()
   return useMutation({
     mutationFn: async () => {
       if (!user) throw new Error('Not authenticated')
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) throw new Error('Not authenticated')
+      const payload: Record<string, unknown> = { force: true }
+      if (forDate && DATE_RE.test(forDate)) payload.for_date = forDate
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-morning-briefing`,
         {
@@ -80,7 +84,7 @@ export function useRegenerateMorningBriefing() {
             Authorization: `Bearer ${session.access_token}`,
             apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
-          body: JSON.stringify({ force: true }),
+          body: JSON.stringify(payload),
         },
       )
       if (!resp.ok) {
