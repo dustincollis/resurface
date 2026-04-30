@@ -304,50 +304,154 @@ Deno.serve(async (req) => {
     const title = deriveTitle(payload);
     const startTime = deriveStartTimeISO(payload);
 
-    const insertPayload: Record<string, unknown> = {
-      user_id: userId,
-      title,
-      start_time: startTime,
-      attendees,
-      transcript: formattedTranscript,
-      source: "jamie_webhook",
-      import_mode: "active",
-      external_source_id: externalId,
-    };
+    // ----- Merge with calendar_sync row if present -----
+    //
+    // The two ingestion pipelines (Power Automate → calendar-sync, Jamie
+    // → jamie-webhook) produce separate rows for the same real meeting:
+    // calendar uses external_source_id="outlook:event:...", jamie uses
+    // "jamie:meeting:...". We merge by:
+    //   1. Idempotency: existing row with this jamie_external_source_id
+    //      already → return as duplicate.
+    //   2. Find a candidate calendar_sync row for the same user with
+    //      start_time within ±20 min of Jamie's, and no jamie_external
+    //      _source_id yet. If exactly one match, UPDATE it with Jamie's
+    //      transcript + attendees + title (only if calendar's was the
+    //      placeholder "Untitled meeting") + jamie_external_source_id.
+    //   3. If 0 or 2+ candidates, fall through to INSERT a fresh row
+    //      (the current behavior). 2+ is conservative — refuse to guess
+    //      which calendar row this is, leave the duplicate to be merged
+    //      manually.
+    let meetingId: string | null = null;
+    let mergedFromCalendar = false;
 
-    const { data: inserted, error: insertErr } = await adminClient
+    // Step 1: idempotency
+    const { data: alreadyExists } = await adminClient
       .from("meetings")
-      .insert(insertPayload)
       .select("id")
-      .single();
-
-    if (insertErr) {
-      // Unique violation on (user_id, external_source_id) means we've
-      // already processed this meeting. Acknowledge idempotently.
-      const code = (insertErr as { code?: string }).code;
-      if (code === "23505") {
-        console.log("[jamie-webhook] duplicate, ignoring", { externalId });
-        await finalizeLog(200, undefined, "duplicate");
-        return new Response(
-          JSON.stringify({ ok: true, duplicate: true, external_id: externalId }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      console.error("[jamie-webhook] insert failed:", insertErr);
-      await finalizeLog(500, undefined, insertErr.message);
+      .eq("user_id", userId)
+      .eq("jamie_external_source_id", externalId)
+      .maybeSingle();
+    if (alreadyExists) {
+      console.log("[jamie-webhook] duplicate (jamie_external_source_id), ignoring", { externalId });
+      await finalizeLog(200, undefined, "duplicate");
       return new Response(
-        JSON.stringify({
-          error: "Failed to insert meeting",
-          detail: insertErr.message,
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ ok: true, duplicate: true, external_id: externalId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const meetingId = (inserted as { id: string }).id;
+    // Step 2: candidate calendar_sync row
+    if (startTime) {
+      const start = new Date(startTime);
+      const lo = new Date(start.getTime() - 20 * 60 * 1000).toISOString();
+      const hi = new Date(start.getTime() + 20 * 60 * 1000).toISOString();
+      const { data: candidates } = await adminClient
+        .from("meetings")
+        .select("id, title, attendees, start_time")
+        .eq("user_id", userId)
+        .eq("source", "calendar_sync")
+        .is("jamie_external_source_id", null)
+        .gte("start_time", lo)
+        .lte("start_time", hi);
+
+      if (candidates && candidates.length === 1) {
+        const cand = candidates[0] as { id: string; title: string | null; attendees: string[] | null };
+        // Merge attendees: calendar's emails + Jamie's speaker names. Both
+        // signals are useful — keep them all, dedup'd.
+        const mergedAttendees = Array.from(
+          new Set([...(cand.attendees ?? []), ...attendees].filter(Boolean))
+        );
+        // Title: prefer the more specific one. Calendar's "Untitled
+        // meeting" placeholder loses to Jamie's derived title.
+        const finalTitle =
+          cand.title && cand.title !== "Untitled meeting" ? cand.title : title;
+
+        const { error: updateErr } = await adminClient
+          .from("meetings")
+          .update({
+            title: finalTitle,
+            attendees: mergedAttendees,
+            transcript: formattedTranscript,
+            jamie_external_source_id: externalId,
+            // Don't overwrite source/external_source_id — keep the calendar
+            // lineage as the row's primary identity.
+          })
+          .eq("id", cand.id);
+
+        if (!updateErr) {
+          meetingId = cand.id;
+          mergedFromCalendar = true;
+          console.log("[jamie-webhook] merged into calendar row", { calendarId: cand.id, externalId });
+        } else {
+          console.warn("[jamie-webhook] calendar merge failed, falling through to insert:", updateErr);
+        }
+      } else if (candidates && candidates.length > 1) {
+        console.log("[jamie-webhook] multiple calendar candidates in window, refusing to guess; inserting fresh row", {
+          externalId,
+          candidateCount: candidates.length,
+        });
+      }
+    }
+
+    // Step 3: insert fresh row if no merge happened
+    if (!meetingId) {
+      const insertPayload: Record<string, unknown> = {
+        user_id: userId,
+        title,
+        start_time: startTime,
+        attendees,
+        transcript: formattedTranscript,
+        source: "jamie_webhook",
+        import_mode: "active",
+        external_source_id: externalId,
+        jamie_external_source_id: externalId,
+      };
+
+      const { data: inserted, error: insertErr } = await adminClient
+        .from("meetings")
+        .insert(insertPayload)
+        .select("id")
+        .single();
+
+      if (insertErr) {
+        // Unique violation could mean a race with idempotency check OR
+        // pre-merge-migration row using external_source_id. Acknowledge.
+        const code = (insertErr as { code?: string }).code;
+        if (code === "23505") {
+          console.log("[jamie-webhook] duplicate (unique violation), ignoring", { externalId });
+          await finalizeLog(200, undefined, "duplicate");
+          return new Response(
+            JSON.stringify({ ok: true, duplicate: true, external_id: externalId }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        console.error("[jamie-webhook] insert failed:", insertErr);
+        await finalizeLog(500, undefined, insertErr.message);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to insert meeting",
+            detail: insertErr.message,
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      meetingId = (inserted as { id: string }).id;
+    }
+
+    // Type guard — meetingId is non-null after step 2 (merge) or step 3
+    // (insert). Both branches either assign or return, so this is the
+    // post-condition; the check is for TypeScript narrowing + defense.
+    if (!meetingId) {
+      await finalizeLog(500, undefined, "meetingId not resolved");
+      return new Response(
+        JSON.stringify({ error: "Internal: meetingId unresolved" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // ----- Resolve attendees → people + meeting_attendees -----
     try {
@@ -414,6 +518,7 @@ Deno.serve(async (req) => {
         attendees,
         segments_count: segments.length,
         parse_status: "dispatched",
+        merged_from_calendar: mergedFromCalendar,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
