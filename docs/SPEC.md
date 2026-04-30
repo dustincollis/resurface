@@ -383,7 +383,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (39 migrations, 38 tables)
+## 15. Database Tables (40 migrations, 38 tables)
 
 | Table | Source migration |
 |-------|-----------------|
