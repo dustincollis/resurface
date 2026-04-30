@@ -142,6 +142,11 @@ interface AcceptProposalArgs {
   editedPayload?: Record<string, unknown>
   pursuitId?: string | null
   tracking?: boolean
+  // When true (task proposals only), creates the item with status='done'
+  // and completed_at=now(). Use case: end-of-day triage where the user has
+  // already done some of the work between meeting and review. Preserves
+  // tracking/history that "not actionable" or "dismiss" would lose.
+  markDone?: boolean
 }
 
 export function useAcceptProposal() {
@@ -154,6 +159,7 @@ export function useAcceptProposal() {
       editedPayload,
       pursuitId,
       tracking = false,
+      markDone = false,
     }: AcceptProposalArgs) => {
       // The parser's payload may be either task-shaped (title, due_date,
       // assignee, ...) or commitment-shaped (title, counterpart, do_by, ...).
@@ -176,7 +182,10 @@ export function useAcceptProposal() {
               source_meeting_id: (sourcePayload.source_meeting_id as string | null) ?? null,
             } as TaskProposalPayload)
 
-        const insertPayload: CreateItemPayload & { user_id: string } = {
+        const insertPayload: CreateItemPayload & {
+          user_id: string
+          completed_at?: string
+        } = {
           user_id: user!.id,
           title: taskFields.title,
           description: taskFields.description ?? '',
@@ -186,6 +195,10 @@ export function useAcceptProposal() {
           source_meeting_id: taskFields.source_meeting_id ?? null,
           custom_fields: taskFields.company ? { company: taskFields.company } : undefined,
           tracking,
+        }
+        if (markDone) {
+          insertPayload.status = 'done'
+          insertPayload.completed_at = new Date().toISOString()
         }
         const { data: itemRow, error: insertErr } = await supabase
           .from('items')
@@ -201,8 +214,13 @@ export function useAcceptProposal() {
         supabase.from('activity_log').insert({
           user_id: item.user_id,
           item_id: item.id,
-          action: 'created',
-          details: { title: item.title, source: 'proposal', proposal_id: proposal.id },
+          action: markDone ? 'created_done' : 'created',
+          details: {
+            title: item.title,
+            source: 'proposal',
+            proposal_id: proposal.id,
+            ...(markDone ? { marked_done_on_accept: true } : {}),
+          },
         })
       } else {
         // commitment_outgoing or commitment_incoming

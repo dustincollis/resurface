@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Quote,
   Check,
+  CheckCheck,
   X,
   Pencil,
   GitMerge,
@@ -121,6 +122,12 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
 
   const handleAccept = () => {
     acceptMut.mutate({ proposal, acceptAs, pursuitId })
+  }
+
+  // Accept the task AND mark it complete in one click. For end-of-day
+  // triage where the work is already done. Only meaningful for tasks.
+  const handleAcceptAsDone = () => {
+    acceptMut.mutate({ proposal, acceptAs: 'task', pursuitId, markDone: true })
   }
 
   const handleTrack = () => {
@@ -421,6 +428,17 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
                 {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                 Accept
               </button>
+              {acceptAs === 'task' && (
+                <button
+                  onClick={handleAcceptAsDone}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded bg-emerald-600/20 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-600/30 disabled:opacity-50"
+                  title="Already did this. Creates the item already marked complete so you keep the history."
+                >
+                  {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
+                  Already done
+                </button>
+              )}
               {assigneeIsPerson && (
                 <button
                   onClick={() => assignOtherMut.mutate({ proposal, assignedToName: assigneeRaw })}
