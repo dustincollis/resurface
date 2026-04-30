@@ -14,7 +14,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
 import { recordAiCall } from "../_shared/telemetry.ts";
 
-const MODEL = "claude-sonnet-4-6";
+// Opus 4.7 for editorial voice quality — the morning briefing is one of
+// the highest-leverage AI surfaces in the app (it opens the user's day).
+// Cost delta vs Sonnet 4.6 at this volume (one call/user/day) is ~$3/year.
+//
+// Opus 4.7 specifics that affect this call:
+//   - temperature/top_p/top_k removed (sending any returns 400). Don't pass.
+//   - Adaptive thinking is OFF by default; we leave it off — a 3-5 sentence
+//     summary doesn't need multi-step reasoning.
+//   - Token counting differs from Sonnet, so max_tokens has a bit of headroom.
+const MODEL = "claude-opus-4-7";
 
 interface AttendeeContext {
   name: string;
@@ -666,15 +675,14 @@ ${tasksBlock || "(empty)"}`;
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 400,
-        temperature: 0.4,
-        system: [
-          {
-            type: "text",
-            text: systemBlock,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        max_tokens: 600,
+        // No prompt cache marker: Sonnet 4.6 minimum cacheable prefix is 2048
+        // tokens and Opus 4.7's is 4096 — our system block (~250 tokens) sits
+        // far below either, so cache_control would be silent no-op overhead.
+        // If/when this prompt grows past 4096 tokens (e.g. by inlining the
+        // follow-up voice guide), add cache_control back on the system block.
+        // No temperature: Opus 4.7 removed sampling parameters entirely.
+        system: systemBlock,
         messages: [{ role: "user", content: userBlock }],
       }),
     });
