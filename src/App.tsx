@@ -7,6 +7,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Focus from './pages/Focus'
+import Morning from './pages/Morning'
 import Add from './pages/Add'
 import Analytics from './pages/Analytics'
 import Landscape from './pages/Landscape'
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
+              <Route path="morning" element={<Morning />} />
               <Route path="focus" element={<Focus />} />
               <Route path="add" element={<Add />} />
               <Route path="river" element={<DashRiver />} />

@@ -13,6 +13,7 @@ import AddMenu from './AddMenu'
 // terminal voice used by chips and metadata throughout the app.
 const navItems = [
   { to: '/', label: 'Dashboard' },
+  { to: '/morning', label: 'Morning' },
   { to: '/focus', label: 'Focus' },
   { to: '/proposals', label: 'Proposals' },
   { to: '/follow-ups', label: 'Follow-Ups' },

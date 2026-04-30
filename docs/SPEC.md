@@ -214,13 +214,14 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 ---
 
 <!-- AUTO:routes -->
-## 11. Routes (28)
+## 11. Routes (29)
 
 > Note: ReviewInput has been folded into the unified `/add` page. The `/add` route opens a three-option wizard (File / Paste / Task) that replaces both `/review-input` and the old inline QuickAddBar flow.
 
 | Route | Page | Purpose |
 |-------|------|---------|
 | `/` | Dashboard | Stats, stale items, upcoming meetings, pending proposals |
+| `/morning` | Morning | Daily briefing snapshot (light theme, mobile-first): AI intro + meetings + follow-ups + commitments + tasks |
 | `/focus` | Focus | Top 10 priority items + pinned; constrained daily view |
 | `/river` | DashRiver | Timeline waterfall of all items with clustering |
 | `/streams` | Streams | List/kanban view of items by stream |
@@ -291,7 +292,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (35)
+## 13. Hooks (36)
 
 | Hook | Purpose |
 |------|---------|
@@ -318,6 +319,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | useMeetings | Query meetings, create manual meetings |
 | useMemories | Fetch/delete user memories |
 | useMicrosoft | OAuth exchange, calendar sync |
+| useMorningBriefing |  |
 | usePeople | Query people, merge duplicates |
 | useProfile | Fetch/update profile, distill bio |
 | useProposalGroups |  |
@@ -353,6 +355,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | ai-parse-transcript | Central extraction engine | Opus 4.6 (active) / Sonnet 4.6 (archive) |
 | ai-triage-ideas | Batch score idea quality (high/medium/low) | Sonnet 4.6 |
 | meeting-briefing | Pre-meeting attendee context + commitments | Sonnet 4.6 |
+| generate-morning-briefing | Daily snapshot: today's meetings + per-attendee context + pending follow-ups + pressing commitments + surfaced tasks. AI synthesizes the 60-second intro paragraph; structured sections rendered deterministically. | Sonnet 4.6 |
 
 ### Infrastructure Functions
 | Function | Purpose |
@@ -383,7 +386,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (40 migrations, 38 tables)
+## 15. Database Tables (41 migrations, 39 tables)
 
 | Table | Source migration |
 |-------|-----------------|
@@ -413,6 +416,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | meeting_chunks | 20260411000001_meeting_chunks_pgvector |
 | meetings | 20260407000000_initial_schema |
 | memories | 20260408010000_memories |
+| morning_briefings | 20260430000000_morning_briefings |
 | people | 20260410020000_people_and_companies |
 | profiles | 20260407000000_initial_schema |
 | proposal_groups | 20260415000000_proposal_groups |
@@ -530,4 +534,5 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-29**: Follow-ups — post-meeting relational closing moves as a first-class entity, distinct from commitments and tasks. New `follow_ups` table (migration `20260429000000`) with jsonb `recipients[]` (each with `name`, `email`, `person_id`, `draft_subject`, `draft_body`, `rationale`, `sent_at`), status (`pending`/`sent`/`dismissed`), `source_meeting_id` FK, evidence text, AI confidence. `ai-parse-transcript` extended (active mode only) to extract follow-up suggestions: AI judges whether the meeting warrants one (most external meetings yes, internal standups no), picks recipient(s) from attendees, drafts per-recipient body with rationale. Writes directly to `follow_ups` (status=`pending`), no proposal-queue round trip — mirrors the memories pattern. Persists indefinitely; never auto-expires. New `/follow-ups` route groups pending by age bucket (Today / Yesterday / Earlier this week / Older) with no visual fading — the bucket header carries the lateness signal. Per-recipient send button copies the draft body to clipboard and stamps that recipient's `sent_at`; the follow-up rolls up to status=`sent` when every recipient is stamped. Dismiss closes the whole thing. New section on `/meetings/:id` shows the meeting's own follow-up inline. Sidebar gains "Follow Ups" entry next to Proposals. New `useFollowUps` hook + `FollowUpCard` component. Rationale: follow-ups fail not because of forgetting but because of depletion after back-to-back meetings; AI removes the cognitive cost of composing them so the relational layer doesn't drop when the day gets busy.
 - **2026-04-24**: Editorial typography pass + parallel `/focus-v2` view. Loaded **Inter** (sans) and **JetBrains Mono** (monospace) via Google Fonts; wired `--font-sans` and `--font-mono` in `src/index.css` so every `font-sans`/`font-mono` utility inherits the new stack. `StatusBadge` retired the filled `bg-X-900/40` pattern in favor of outlined, uppercase, monospace chips with text/border color matching — the chip system used throughout the new view. Sidebar stripped of per-row icons (navigation is text-first now); wordmark gets a small monospace timestamp underneath (`FRI · APR 24 · 9:12A`); user email at the bottom also rendered in mono. New page `FocusV2.tsx` at route `/focus-v2` (sidebar entry "Today v2") shares `useItems` + `sortByPriority` with current Focus but renders as an editorial vertical list: large title, one-line monospace meta (stream dot + name + relative due), single right-side narrative chip ("Overdue" / "Due Today" / "Nd Stale" / "High Stakes" / "Pinned" / "Waiting") chosen by a deterministic priority cascade. Reserved red for OVERDUE alone — cyan carries every other signal so the one alert color actually alerts. Current `/focus` left untouched for A/B comparison; once the new view earns the default, the old can be retired. Rationale: shifts the app from "priority list" to "today's agenda of your work life" without touching data or ranking logic.
 - **2026-04-29**: Follow-up iteration based on real-use feedback. **Writing rules** baked into the parser prompt to suppress AI tells: no em dashes, no colon-punchlines ("Here's the thing: it works"), no "it's not just X, it's Y", no triadic rhetorical lists, blocklist of giveaway words (`delve`, `leverage`, `robust`, `seamless`, `navigate` as a verb, `ensure`, `moreover`). Positive instruction: write the way Dustin would actually type a quick email after a meeting. Default signoff changed from "Best," to "Regards,". Two new instructions: acknowledge gaps honestly ("I went looking but couldn't find it on my side, could you send it over?" rather than pretending) and include one explicit ask when the meeting surfaces a real need from the recipient. **One email = one follow-up row** schema rework (migration `20260429010000`). `draft_subject` and `draft_body` move up to the row; `recipients[]` simplifies to a To list (`name`, `email`, `person_id`, `rationale`). Per-recipient drafts are gone — they didn't match the user's actual style of greeting everyone in one email ("Hey Justin, Dyana, and Sean,") or "Hey All," for 4+. Parser greeting-style guidance updated to match. Clipboard fix: copy button copies the body only, no `To:` / `Subject:` header lines that were trash to delete when pasting into a reply. New MCP tool `list_follow_ups` (mcp-server) so the agent can query by status, scope to a meeting, and get the source meeting title hydrated inline.
+- **2026-04-30**: Morning briefing — daily snapshot at `/morning`, mobile-first and light-themed (dark theme everywhere else but the morning ritual reads on a phone, often before sunrise — white-on-black is harsh). New `morning_briefings` table (migration `20260430000000`) with one row per user per date and jsonb sections for meetings/follow-ups/commitments/tasks plus an AI-synthesized intro paragraph. New Edge Function `generate-morning-briefing` (Sonnet 4.6) pulls today's calendar with per-meeting attendee context (people lookup, company, open commitments to/from), pending follow-ups, outgoing commitments overdue or due today, and today's surfaced task list (overdue / due today / pinned / critical staleness / high stakes). AI generates only the 60-second intro paragraph; everything else is deterministic and saved as jsonb so the page renders without further synthesis. Snapshot semantics: first call of the day generates and persists, subsequent calls return the same data, manual "Refresh" button regenerates. No cron yet — on-demand generation keeps compute predictable (the user said "if they change every minute, that could be a lot of computer"). New `useMorningBriefing` hook + `Morning` page; sidebar entry "Morning" right under Dashboard. PWA tightening + 6am cron pre-warming + email backup all deferred for follow-on iterations.
 - **2026-04-30**: Three smaller ships and skill tooling. (a) **"Already Done" button on task proposals**: end-of-day triage problem — by the time you review proposals, you've already done some of the work. "Not actionable" is wrong (it WAS actionable, just complete) and dismissing loses history. New button accepts the proposal AND creates the item with `status='done'` + `completed_at=now()` in one click. Activity log records `created_done` so the path is distinguishable from a normal accept. Only shown when `acceptAs='task'` (commitments have their own met/broken states). (b) **Follow-up parser default flipped to GENERATE for any external attendee.** Diagnosed today: zero follow-ups generated for that morning's external meetings (Orange Logic, Shane Intro, Principal Financial — all 1:1 client/partner calls that clearly warranted one). The "Extract ONLY if warrants" framing was making the model lean cautious on edge cases. Flipped to "DEFAULT YES whenever ANY external attendee is present" with explicit skip cases (all-internal, routine standup, <5min transactional). After re-parse: all three now have follow-ups; genuinely-internal meetings still correctly skip. (c) **CLAUDE.md "Required Skill Invocations" section.** Auto-trigger rules for two Claude Code skills: `claude-api` whenever editing parser/Edge Function prompt structure (cache hygiene), and `security-review` before any push touching auth/RLS/PII paths. (d) **Two project-level skills** under `.claude/skills/`: `resurface-iterate-prompt` (one command for deploy + reparse + per-meeting summary with delta vs prior run) and `resurface-ship-feature` (pre-flight checks + ordered ship: `supabase db push` → `npm run deploy:functions` → `git push`). Both replace inline curl/JWT/python boilerplate that was repeating across iterations. Per-skill `.history/` directory gitignored.

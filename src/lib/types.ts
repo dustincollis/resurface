@@ -696,3 +696,78 @@ export interface FollowUpWithMeeting extends FollowUp {
     start_time: string | null
   } | null
 }
+
+// Morning Briefing
+export type MorningBriefingStatus = 'generating' | 'ready' | 'failed'
+
+export interface BriefingAttendeeContext {
+  name: string
+  person_id: string | null
+  company: string | null
+  last_seen_meeting_date: string | null
+  open_commitments: Array<{
+    id: string
+    title: string
+    direction: string
+    do_by: string | null
+  }>
+}
+
+export interface BriefingMeeting {
+  id: string
+  title: string | null
+  start_time: string | null
+  end_time: string | null
+  attendees: string[]
+  attendee_context: BriefingAttendeeContext[]
+  pursuit: { id: string; name: string; color: string | null } | null
+  prior_summary: string | null
+}
+
+export interface BriefingFollowUp {
+  id: string
+  source_meeting_id: string
+  source_meeting_title: string | null
+  draft_subject: string
+  recipients: string[]
+  age_days: number
+}
+
+export interface BriefingCommitment {
+  id: string
+  title: string
+  counterpart: string | null
+  company: string | null
+  do_by: string | null
+  days_overdue: number
+}
+
+export interface BriefingTask {
+  id: string
+  title: string
+  due_date: string | null
+  status: string
+  stakes: number | null
+  staleness_score: number | null
+  pinned: boolean
+  surface_reason: string
+}
+
+export interface MorningBriefing {
+  id: string
+  user_id: string
+  briefing_date: string
+  generated_at: string
+  intro_text: string | null
+  meetings_data: BriefingMeeting[]
+  follow_ups_data: BriefingFollowUp[]
+  commitments_data: BriefingCommitment[]
+  tasks_data: BriefingTask[]
+  status: MorningBriefingStatus
+  error_text: string | null
+  ai_model: string | null
+  ai_input_tokens: number
+  ai_output_tokens: number
+  ai_cache_read_tokens: number
+  ai_latency_ms: number | null
+}
