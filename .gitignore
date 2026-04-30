@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 credentials.txt
+
+# Claude Code project-local state
+.claude/settings.local.json
+.claude/skills/*/.history/
