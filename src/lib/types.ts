@@ -722,6 +722,13 @@ export interface BriefingMeeting {
   attendee_context: BriefingAttendeeContext[]
   pursuit: { id: string; name: string; color: string | null } | null
   prior_summary: string | null
+  is_recurring_noise: boolean
+  related_prior_meeting: {
+    id: string
+    title: string | null
+    start_time: string | null
+    one_line: string | null
+  } | null
 }
 
 export interface BriefingFollowUp {

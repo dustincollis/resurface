@@ -47,6 +47,17 @@ interface MeetingItem {
   attendee_context: AttendeeContext[];
   pursuit: { id: string; name: string; color: string | null } | null;
   prior_summary: string | null;
+  // Flag meetings where the attendee list is just noise (recurring all-hands,
+  // daily triage, etc.). Frontend hides the attendee block on these.
+  is_recurring_noise: boolean;
+  // Optional reference to a prior meeting that this one is preparing for or
+  // continuing from (e.g. "PREP: X" → the X meeting earlier in the week).
+  related_prior_meeting: {
+    id: string;
+    title: string | null;
+    start_time: string | null;
+    one_line: string | null;
+  } | null;
 }
 
 interface FollowUpItem {
@@ -394,7 +405,50 @@ async function fetchTodaysMeetings(
     attendee_context: [],
     pursuit: null,
     prior_summary: null,
+    is_recurring_noise: false,
+    related_prior_meeting: null,
   }));
+}
+
+// Detect meetings where listing every attendee is noise — recurring
+// all-hands, daily triage, large internal cadences. Heuristic: title
+// matches a known pattern. Frontend hides the attendee block on these.
+function isRecurringNoiseMeeting(title: string | null): boolean {
+  if (!title) return false;
+  const t = title.toLowerCase();
+  const patterns = [
+    /\bdaily new deals triage\b/,
+    /\bdep na\b.*\btriage\b/,
+    /\bweekly sync\b/,
+    /\bbi-?weekly\b.*\bsync\b/,
+    /\bmonthly team\b/,
+    /\bteam standup\b/,
+    /\bdaily standup\b/,
+    /\ball[- ]hands\b/,
+    /\bops updates\b/,
+  ];
+  return patterns.some((p) => p.test(t));
+}
+
+// Normalize an attendee identifier (could be email, name, or speaker
+// label) into candidate match keys. We try multiple lookups against the
+// people table because Power Automate sends emails like
+// "Alice_Pinti@epam.com" while the `people` table stores "Alice Pinti".
+function attendeeMatchKeys(raw: string): {
+  email: string | null;
+  derivedName: string | null;
+  rawName: string;
+} {
+  const trimmed = raw.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower.includes("@")) {
+    // Email — extract local part, replace _/. with space, title-case-ish for name match
+    const local = lower.split("@")[0];
+    const derivedName = local.replace(/[._]/g, " ").trim();
+    return { email: lower, derivedName, rawName: lower };
+  }
+  return { email: null, derivedName: null, rawName: lower };
 }
 
 async function fetchPendingFollowUps(
@@ -546,31 +600,32 @@ async function hydrateMeetings(
 ): Promise<MeetingItem[]> {
   if (meetings.length === 0) return meetings;
 
-  // Collect all unique attendee names across today's meetings.
-  const allAttendeeNames = Array.from(
-    new Set(meetings.flatMap((m) => m.attendees))
-  );
-
-  // Resolve attendee names → people rows. Match by name (case-insensitive).
-  const lowered = allAttendeeNames.map((n) => n.trim().toLowerCase());
+  // ---- Build people lookup with multiple match strategies ----
+  // Power Automate sends emails ("Alice_Pinti@epam.com"); Jamie sends speaker
+  // names ("Alice Pinti"). We need both to resolve to the same person row.
   const { data: people } = await db
     .from("people")
-    .select("id, name, company_id, companies(name)")
+    .select("id, name, email, company_id, companies(name)")
     .eq("user_id", userId);
-  const peopleByLowerName = new Map<string, Record<string, unknown>>();
+
+  const byEmail = new Map<string, Record<string, unknown>>();
+  const byName = new Map<string, Record<string, unknown>>();
   for (const p of people ?? []) {
+    const email = ((p.email as string) ?? "").trim().toLowerCase();
     const name = ((p.name as string) ?? "").trim().toLowerCase();
-    if (name) peopleByLowerName.set(name, p);
-    // Cheap alias: if name has space, also key on first word so "Beth" matches "Beth Smith"
-    if (name.includes(" ")) {
-      const first = name.split(" ")[0];
-      if (first && !peopleByLowerName.has(first)) {
-        peopleByLowerName.set(first, p);
+    if (email) byEmail.set(email, p);
+    if (name) {
+      byName.set(name, p);
+      // Alias: also key on first word ("Beth" matches "Beth Smith") and on
+      // underscored variants ("alice_pinti" → "alice pinti")
+      if (name.includes(" ")) {
+        const first = name.split(" ")[0];
+        if (first && !byName.has(first)) byName.set(first, p);
       }
     }
   }
 
-  // Pull all open outgoing+incoming commitments referencing these counterparts/companies.
+  // Pull all open commitments for matching against attendees.
   const { data: commitments } = await db
     .from("commitments")
     .select("id, title, direction, counterpart, company, do_by, status")
@@ -578,32 +633,71 @@ async function hydrateMeetings(
     .eq("status", "open");
   const commitmentsList = (commitments ?? []) as Array<Record<string, unknown>>;
 
-  // For each meeting, build attendee_context.
+  // ---- Pull recent meetings (last 14 days) to find prior context ----
+  // For each of today's meetings, see if there's a recent prior meeting
+  // with similar title (substring match) or strong attendee overlap. Use
+  // its transcript_summary as context for the briefing.
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: priorMeetings } = await db
+    .from("meetings")
+    .select("id, title, start_time, transcript_summary, attendees")
+    .eq("user_id", userId)
+    .gte("start_time", fourteenDaysAgo)
+    .lt("start_time", meetings[0]?.start_time ?? new Date().toISOString())
+    .not("transcript_summary", "is", null)
+    .order("start_time", { ascending: false })
+    .limit(80);
+  const priorList = (priorMeetings ?? []) as Array<Record<string, unknown>>;
+
+  // ---- Skip lists ----
+  const isPlaceholder = (raw: string): boolean => {
+    const lower = raw.trim().toLowerCase();
+    return (
+      lower === "speaker -1" ||
+      lower.startsWith("speaker ") ||
+      lower === "dustin" ||
+      lower === "dustin collis" ||
+      lower.endsWith("@epam.com") && (lower.startsWith("dustin_collis") || lower.startsWith("dustin.collis"))
+    );
+  };
+
+  // ---- Build attendee_context per meeting ----
   const out: MeetingItem[] = [];
   for (const m of meetings) {
     const ctx: AttendeeContext[] = [];
-    for (const name of m.attendees) {
-      const lower = name.trim().toLowerCase();
-      if (
-        lower === "speaker -1" ||
-        lower.startsWith("speaker ") ||
-        lower === "dustin" ||
-        lower === "dustin collis"
-      ) {
-        continue; // Skip placeholders and the user themselves
-      }
-      const person = peopleByLowerName.get(lower) ?? peopleByLowerName.get(lower.split(" ")[0]);
+    for (const raw of m.attendees) {
+      if (isPlaceholder(raw)) continue;
+
+      const keys = attendeeMatchKeys(raw);
+      const person =
+        (keys.email && byEmail.get(keys.email)) ||
+        (keys.derivedName && byName.get(keys.derivedName)) ||
+        byName.get(keys.rawName) ||
+        byName.get(keys.rawName.split(" ")[0]);
+
       const company =
         ((person?.companies as Record<string, unknown> | undefined)?.name as string) ?? null;
       const personId = (person?.id as string) ?? null;
+      // Use the person's canonical name if we found a match, otherwise keep
+      // the raw email/name (better than rendering Alice_Pinti@epam.com).
+      const displayName = person
+        ? ((person.name as string) || raw)
+        : keys.derivedName
+          ? keys.derivedName.replace(/\b\w/g, (c) => c.toUpperCase())
+          : raw;
 
-      // Open commitments where counterpart matches this person's name OR
-      // company matches their company.
+      // Open commitments where counterpart or company matches.
+      const lookupKeys = [
+        keys.rawName,
+        keys.derivedName,
+        ((person?.name as string) ?? "").toLowerCase(),
+      ].filter(Boolean) as string[];
+
       const open: AttendeeContext["open_commitments"] = [];
       for (const c of commitmentsList) {
         const cp = ((c.counterpart as string) ?? "").trim().toLowerCase();
         const cc = ((c.company as string) ?? "").trim().toLowerCase();
-        const matchesPerson = cp && (cp === lower || cp === lower.split(" ")[0]);
+        const matchesPerson = cp && lookupKeys.some((k) => cp === k || cp === k.split(" ")[0]);
         const matchesCompany = cc && company && cc === company.toLowerCase();
         if (matchesPerson || matchesCompany) {
           open.push({
@@ -616,16 +710,113 @@ async function hydrateMeetings(
       }
 
       ctx.push({
-        name,
+        name: displayName,
         person_id: personId,
         company,
-        last_seen_meeting_date: null, // could lookup last meeting_attendees join; deferred for v0 cost
+        last_seen_meeting_date: null,
         open_commitments: open,
       });
     }
-    out.push({ ...m, attendee_context: ctx });
+
+    // ---- Detect recurring noise meetings ----
+    const isNoise = isRecurringNoiseMeeting(m.title);
+
+    // ---- Find related prior meeting ----
+    const related = isNoise ? null : findRelatedPriorMeeting(m, priorList);
+
+    out.push({
+      ...m,
+      attendee_context: ctx,
+      is_recurring_noise: isNoise,
+      related_prior_meeting: related,
+    });
   }
   return out;
+}
+
+// Heuristic: find a prior meeting in the last 14 days that's likely the
+// real meeting this one is preparing for, or a recurring instance of the
+// same topic. Strategy:
+//   1. If title starts with "PREP", "Prep", "Prep for", "Prep:" → strip
+//      that prefix and search for a prior meeting whose title contains
+//      the remainder (case-insensitive).
+//   2. Otherwise, look for prior meetings with title that shares a long
+//      substring with this one (≥ 8 chars) — handles recurring meetings
+//      that share a name across weeks.
+//   3. Take the most recent match. Surface its title + a one-line
+//      summary (first sentence of transcript_summary if any).
+function findRelatedPriorMeeting(
+  meeting: MeetingItem,
+  priors: Array<Record<string, unknown>>
+): MeetingItem["related_prior_meeting"] {
+  if (!meeting.title) return null;
+  const myTitle = meeting.title.toLowerCase();
+
+  // Strip prep prefixes
+  const stripped = myTitle
+    .replace(/^prep(\s+for)?[:\s]+/i, "")
+    .replace(/^preparing\s+for[:\s]+/i, "")
+    .trim();
+
+  // Tokenize and drop stopwords — we'll match on significant-word overlap.
+  // This handles word-order differences ("IDC Adobe Services" vs "Adobe
+  // Services IDC Marketscape") and partial overlap ("PREP: Adobe Services
+  // IDC Marketscape" matches "Adobe Services IDC Reading").
+  // Stopwords: filler + the user's own name (it's in every meeting they're
+  // part of, so matching on it is meaningless).
+  const STOPWORDS = new Set([
+    "a", "an", "and", "the", "for", "to", "of", "with", "on", "in",
+    "is", "at", "by", "as", "or", "vs", "x",
+    "prep", "review", "sync", "call", "meeting", "discuss",
+    "discussion", "update", "weekly", "monthly", "biweekly", "daily",
+    "quick", "intro", "introduction", "follow",
+    // User's own name
+    "dustin", "collis",
+  ]);
+  const tokens = (s: string): string[] =>
+    s.split(/[\s\W]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+
+  const myTokens = new Set(tokens(stripped));
+  if (myTokens.size === 0) return null;
+
+  let best: Record<string, unknown> | null = null;
+  let bestOverlap = 0;
+  for (const p of priors) {
+    const t = ((p.title as string) ?? "").toLowerCase();
+    if (!t) continue;
+    // Note: NOT excluding same-title priors. A recurring meeting (same
+    // title, different date) IS exactly what we want to surface as
+    // "context from last time."
+    const theirTokens = new Set(tokens(t));
+    let overlap = 0;
+    for (const tok of myTokens) if (theirTokens.has(tok)) overlap++;
+    // Require overlap ≥ 2 always. Single-token overlap (e.g. just
+    // "Adobe" or "Sitecore") is too noisy — those terms appear across
+    // many unrelated meetings.
+    if (overlap >= 2 && overlap > bestOverlap) {
+      best = p;
+      bestOverlap = overlap;
+    }
+  }
+  if (!best) return null;
+
+  // Extract a one-line summary: first sentence of transcript_summary,
+  // skipping markdown headers.
+  const summary = (best.transcript_summary as string) ?? "";
+  const firstParagraph = summary
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith("#") && !l.startsWith("##") && l.length > 20);
+  const oneLine = firstParagraph
+    ? firstParagraph.split(/(?<=[.!?])\s+/)[0].slice(0, 220)
+    : null;
+
+  return {
+    id: best.id as string,
+    title: (best.title as string) ?? null,
+    start_time: (best.start_time as string) ?? null,
+    one_line: oneLine,
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -661,15 +852,21 @@ async function synthesizeIntro(
             timeZone: "America/New_York",
           })
         : "(no time)";
-      const attendees = m.attendee_context
-        .map((a) => `${a.name}${a.company ? ` (${a.company})` : ""}`)
-        .join(", ");
+      // For recurring noise meetings, omit attendee list — it's noise.
+      const attendees = m.is_recurring_noise
+        ? "(recurring cadence)"
+        : m.attendee_context
+            .map((a) => `${a.name}${a.company ? ` [${a.company}]` : ""}`)
+            .join(", ") || "(internal)";
       const openCommits = m.attendee_context
         .flatMap((a) => a.open_commitments)
-        .map((c) => `[${c.direction}] ${c.title}`)
+        .map((c) => `${c.direction === "outgoing" ? "owed to them" : "owed by them"}: ${c.title}`)
         .slice(0, 3)
         .join("; ");
-      return `- ${time} ${m.title ?? "(untitled)"} — with ${attendees || "(unclear)"}${openCommits ? ` | open: ${openCommits}` : ""}`;
+      const prior = m.related_prior_meeting?.one_line
+        ? ` | prior context: "${m.related_prior_meeting.one_line}"`
+        : "";
+      return `- ${time} ${m.title ?? "(untitled)"} — ${attendees}${openCommits ? ` | open commitments: ${openCommits}` : ""}${prior}`;
     })
     .join("\n");
 
@@ -694,17 +891,26 @@ async function synthesizeIntro(
     .map((t) => `- [${t.surface_reason}] ${t.title}`)
     .join("\n");
 
-  const systemBlock = `You write a short, candid morning briefing for ${args.userDisplayName}, who manages multiple parallel client pursuits. The briefing is 3-5 sentences of plain prose. It opens the user's day. Voice: direct, brisk, no corporate fluff, no em dashes, no colon-punchlines, no "it's not just X, it's Y", no "delve" / "leverage" / "robust" / "seamless". Write the way a smart colleague would summarize the day in person.
+  const systemBlock = `You write a short factual paragraph that previews ${args.userDisplayName}'s day. NOT a coach, NOT a planner, NOT a priority-ranker. Resurface only knows what's in its database, which is a small slice of the whole. Don't pretend to more context than you have.
 
-The briefing should:
-- Lead with the most important thing about today (the meeting that matters most, or the overdue commitment that needs unblocking, or the through-line across the day if there is one)
-- Mention 1-3 things by name that the user should keep in mind
-- Be honest if the day is light or routine
-- End on a forward-leaning note, not a pleasantry
+**The bar for saying anything:** is it a fact you can point to in the structured data below, or are you guessing? If you're guessing, leave it out.
 
-Do NOT list everything in the structured data — the user can see that on the page below your paragraph. Synthesize, don't enumerate.
+What to write:
+- 2-4 sentences. Plain prose. No headers, no bullets, no markdown.
+- Describe the SHAPE of the day in plain terms: number of meetings, whether they cluster, whether anything external/client-facing stands out, whether there's a notable open commitment that maps to a meeting on the agenda.
+- Name specific people, companies, or topics ONLY when the data names them. "Adobe shows up in three meetings" is fine if true. "Adobe is the spine of your day" is editorial — skip it.
+- If a commitment is overdue and has a counterpart who's also a meeting attendee today, that's a fact worth mentioning ("Mo Mirpuri is on today's calendar; the Principal Financial commitment to him is a day overdue").
+- If today is light or routine, just say so. "Three internal syncs and a partner call" is a complete briefing.
 
-Return ONLY the paragraph. No JSON wrapper, no headers, no markdown.`;
+What NOT to write:
+- No prescriptive language: "make sure to", "before X, do Y", "squeeze in", "go in with a clear ask", "this is your one chance". You don't know enough to give those instructions.
+- No invented through-lines. "X is the spine of your day" / "everything is feeding the same story" — these are guesses dressed up as observations. Cut them.
+- No editorial framing of priority. Don't decide what matters most.
+- No corporate fluff: no em dashes, no colon-punchlines, no "delve / leverage / robust / seamless / navigate".
+
+If two facts are interesting (e.g. "two Sitecore meetings back-to-back AND there's an overdue commitment to a Sitecore person"), it's fine to put them in one sentence so the user can connect the dots. But don't connect the dots FOR them — they have context you don't.
+
+Return ONLY the paragraph. No quotes, no preamble.`;
 
   const userBlock = `Date: ${args.briefingDate} (${args.dayOfWeek})
 ${args.userBio ? `\nUser context: ${args.userBio}\n` : ""}

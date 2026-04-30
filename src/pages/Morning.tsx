@@ -213,7 +213,9 @@ function Briefing({
         </ul>
       </Section>
 
-      {/* Today's task list */}
+      {/* Today's task list — top 10 only; rest live on /focus. The
+          briefing is meant to be readable in a minute, not a full triage
+          surface. */}
       <Section
         title="Today's tasks"
         icon={<ListTodo size={16} />}
@@ -222,10 +224,16 @@ function Briefing({
         link={briefing.tasks_data.length > 0 ? { to: '/focus', text: 'Open Focus' } : undefined}
       >
         <ul className="space-y-2.5">
-          {briefing.tasks_data.map((t) => (
+          {briefing.tasks_data.slice(0, 10).map((t) => (
             <TaskRow key={t.id} item={t} />
           ))}
         </ul>
+        {briefing.tasks_data.length > 10 && (
+          <p className="mt-3 text-xs text-stone-500">
+            {briefing.tasks_data.length - 10} more on{' '}
+            <Link to="/focus" className="underline hover:text-stone-800">Focus</Link>.
+          </p>
+        )}
       </Section>
 
       {/* Footer */}
@@ -274,6 +282,13 @@ function Section({
 }
 
 function MeetingCard({ meeting }: { meeting: BriefingMeeting }) {
+  // Roll up open commitments across attendees so the most actionable thing
+  // about this meeting (someone you owe something to, here today) is visible
+  // up top instead of buried in per-attendee bullets.
+  const allCommitments = meeting.attendee_context.flatMap((a) =>
+    a.open_commitments.map((c) => ({ ...c, attendeeName: a.name })),
+  )
+
   return (
     <li className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -288,32 +303,57 @@ function MeetingCard({ meeting }: { meeting: BriefingMeeting }) {
         <Clock size={12} />
         {timeRange(meeting.start_time, meeting.end_time) || 'no time'}
       </div>
-      {meeting.attendee_context.length > 0 && (
-        <ul className="mt-3 space-y-1.5">
-          {meeting.attendee_context.map((a) => (
-            <li key={a.name} className="text-sm text-stone-700">
-              <span className="font-medium">{a.name}</span>
-              {a.company && <span className="text-stone-500"> · {a.company}</span>}
-              {a.open_commitments.length > 0 && (
-                <ul className="mt-1 ml-4 space-y-0.5 text-xs text-stone-600">
-                  {a.open_commitments.slice(0, 3).map((c) => (
-                    <li key={c.id}>
-                      <span className="text-amber-700">[{c.direction}]</span> {c.title}
-                      {c.do_by && (
-                        <span className="text-stone-400"> · due {c.do_by}</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+
+      {/* Prior-meeting context: when this meeting is preparing for or
+          continuing a topic from earlier in the week, surface that. */}
+      {meeting.related_prior_meeting?.one_line && (
+        <p className="mt-2 rounded bg-stone-100 px-2.5 py-1.5 text-xs italic text-stone-600">
+          From <Link
+            to={`/meetings/${meeting.related_prior_meeting.id}`}
+            className="not-italic font-medium underline hover:text-stone-900"
+          >
+            {meeting.related_prior_meeting.title || 'prior meeting'}
+          </Link>
+          : {meeting.related_prior_meeting.one_line}
+        </p>
+      )}
+
+      {/* Open commitments tied to attendees of this meeting. The most
+          actionable surface — a chance to close a loop with someone in
+          the room. */}
+      {allCommitments.length > 0 && (
+        <ul className="mt-2 space-y-0.5">
+          {allCommitments.slice(0, 4).map((c) => (
+            <li key={c.id} className="text-xs text-stone-700">
+              <span className={`mr-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                c.direction === 'outgoing'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {c.direction === 'outgoing' ? 'owe' : 'owed'}
+              </span>
+              {c.title}
+              {c.do_by && <span className="text-stone-400"> · {c.do_by}</span>}
             </li>
           ))}
         </ul>
       )}
-      {meeting.attendees.length > 0 && meeting.attendee_context.length === 0 && (
-        <p className="mt-2 text-sm text-stone-500">
-          {meeting.attendees.filter((a) => !a.toLowerCase().startsWith('speaker')).join(', ')}
-        </p>
+
+      {/* Attendees: skip entirely on recurring cadence meetings (the
+          attendee list is noise). Two-column layout for everything else
+          to keep the card compact. */}
+      {!meeting.is_recurring_noise && meeting.attendee_context.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-0.5">
+          {meeting.attendee_context.map((a) => (
+            <div key={a.name} className="truncate text-xs text-stone-600">
+              <span className="text-stone-800">{a.name}</span>
+              {a.company && <span className="text-stone-400"> · {a.company}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {meeting.is_recurring_noise && (
+        <p className="mt-2 text-xs italic text-stone-400">recurring cadence</p>
       )}
     </li>
   )
