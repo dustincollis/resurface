@@ -710,13 +710,16 @@ Extract these elements:
 
 10. **Follow-Ups — POST-MEETING RELATIONAL TOUCHES**: A follow-up is the short message ${userDisplayName} would normally send right after a meeting — "thanks Beth, I appreciate the time. I'll work with the team and get those numbers for you." This is distinct from action items (which are the work itself) and commitments (which span weeks and have deliverables). A follow-up is the *acknowledgment* that the work exists, the relational closing move that gets dropped when ${userDisplayName} is in back-to-back meetings.
 
-   **Extract a follow-up ONLY if the meeting warrants one.** Most external meetings (client calls, intros, kickoffs, partner conversations, anything with someone outside ${userDisplayName}'s team) do. Most internal standups, team syncs, and casual check-ins do NOT. Use judgment — would skipping the message look unresponsive or hurt the relationship? If yes, extract. If no, return an empty array.
+   **DEFAULT: GENERATE a follow-up whenever the meeting includes ANY external attendee** — anyone who is not on ${userDisplayName}'s team / not at ${userDisplayName}'s company. External = client, prospect, partner, vendor, agency, or any outside party. This is the most common case. **When in doubt, generate one.** ${userDisplayName} can dismiss it in two clicks if it isn't needed; missing one is the costly failure mode.
 
-   A follow-up does NOT count and MUST be skipped if:
-   - It's a routine internal meeting where no relational closing is expected
-   - It's a meeting ${userDisplayName} ran where they were the host and the audience was internal
-   - There are no clear external attendees worth following up with
-   - The meeting was so brief or transactional that a follow-up would feel performative
+   1:1s with a single external person ALMOST ALWAYS warrant a follow-up. Don't skip them just because the meeting was small. Don't skip them just because the conversation was friendly. Don't skip them just because no specific deliverable was promised. The relational closing move ("thanks, talk soon, I'll follow up on X") is the entire point of this feature — it's most needed exactly when ${userDisplayName} is depleted from a back-to-back day and would otherwise drop the touch.
+
+   ONLY skip the follow-up when the meeting clearly meets one of these:
+   - Every attendee is internal (no external party present at all). To check: scan the attendee list and the transcript for any name that doesn't sound like a teammate at ${userDisplayName}'s company.
+   - It's a routine internal standup, status sync, retro, or team check-in (purely internal cadence)
+   - The meeting was extremely brief (under ~5 minutes of real conversation) AND purely transactional — e.g., a quick scheduling confirmation with nothing else discussed.
+
+   If you skip, briefly note why in the summary's Outcomes section so the user knows the parser didn't simply forget.
 
    **A follow-up is ONE EMAIL**, with one subject, one body, and a To list of all the relevant external attendees. Not N parallel emails to N people. The greeting names everyone on the To list.
 
