@@ -484,6 +484,7 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 ### Phase 2 (deferred)
 - Semantic vector search (pgvector)
 - Multi-user / collaboration (schema supports it via RLS)
+- **Pre-multi-user security & hardening pass** (gating requirement before any second user is ever provisioned). Scope: (1) audit every `SECURITY DEFINER` function for trust on caller-supplied `user_id` parameters and add `auth.uid() = <param>` guards (currently `search_everything`, `search_meeting_chunks`, `search_bundle_chunks` all trust the parameter); (2) audit every Edge Function that uses `adminClient` for the same pattern (the `generate-morning-briefing` IDOR fix on 2026-04-30 is the template); (3) audit cron-callable endpoints — anonymous fallback to `RESURFACE_DEFAULT_USER_ID` works for single-user but breaks once there's more than one user; (4) audit RLS policy completeness on every table (`webhook_payload_log` was missing it as of 2026-04-30); (5) audit jsonb columns that denormalize PII (`morning_briefings.meetings_data`, `follow_ups.recipients`, etc.); (6) review service-role key scope and rotate; (7) review Anthropic API key blast radius; (8) review the MCP server's auth model. The throughline of every issue caught today: the single-user shortcut of "service role + body-supplied user_id" is a latent IDOR that activates the moment a second user signs up.
 
 ---
 
