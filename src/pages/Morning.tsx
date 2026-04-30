@@ -127,13 +127,12 @@ function Briefing({
   return (
     <article>
       {/* Header */}
-      <header className="mb-8 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl">
-            {weekday}
-          </h1>
-          <p className="mt-0.5 text-base text-stone-500 sm:text-lg">{rest}</p>
-        </div>
+      <header className="mb-8 flex items-center justify-between gap-4">
+        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          <span className="text-stone-900">{weekday}</span>
+          <span className="text-stone-400">{' · '}</span>
+          <span className="text-stone-700">{rest}</span>
+        </h1>
         <button
           onClick={onRegenerate}
           disabled={regenerating}
