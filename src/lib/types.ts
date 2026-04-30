@@ -723,6 +723,7 @@ export interface BriefingMeeting {
   pursuit: { id: string; name: string; color: string | null } | null
   prior_summary: string | null
   is_recurring_noise: boolean
+  is_time_block: boolean
   related_prior_meeting: {
     id: string
     title: string | null

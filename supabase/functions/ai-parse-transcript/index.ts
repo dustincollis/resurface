@@ -588,6 +588,13 @@ function buildActiveSystemPrompt(userDisplayName: string): string {
 
 **The user uploading this transcript is ${userDisplayName}.** When you see "${userDisplayName}" (or a clear first-name match) speaking or being addressed in the transcript, that IS the user.
 
+**Detect solo time-blocks first.** Many people block time on their calendar to do focused work — "Review S&P," "Work on IDC Deck," "Send Adobe Emails." If you read the transcript / notes and conclude this is just ${userDisplayName} working alone (single speaker, voice memo style, monologue, no second party addressed) AND/OR the meeting has only ${userDisplayName} on the attendee list, treat it as a personal time-block, NOT a meeting:
+- DO extract: synopsis (what they worked on), memories (durable facts), ideas (concepts they articulated)
+- DO NOT extract: action_items (these are inter-personal commitments by definition), commitments (definitionally to other people), follow_ups (definitionally external touches), open_questions assigned to others
+- Set the synopsis to reflect the work-block nature: "${userDisplayName} used this block to..." rather than narrating it as a discussion
+- Return empty arrays for action_items, commitments, follow_ups, open_questions
+This is a common pattern; don't try to invent inter-personal artifacts from a solo block.
+
 **Attendee attribution**: When the user message provides a known attendee list, use it as your reference for who was in the room. When the transcript has no speaker labels (or only generic "Speaker 1/2/3" labels), use the attendee list and contextual cues — names mentioned, people addressed directly, "as you said" references — to attribute statements to specific people where you can. If you cannot tell who said something, mark it as "unknown" rather than guessing.
 
 **Extraction philosophy**: Capture ALL real action items regardless of who they belong to. Do NOT drop items just because they're not assigned to ${userDisplayName} — better to surface a few items that turn out to be for someone else than to miss real commitments because attribution was unclear. The user will triage in the review queue.

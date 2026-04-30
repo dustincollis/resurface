@@ -50,6 +50,11 @@ interface MeetingItem {
   // Flag meetings where the attendee list is just noise (recurring all-hands,
   // daily triage, etc.). Frontend hides the attendee block on these.
   is_recurring_noise: boolean;
+  // Solo time-block: a calendar slot the user reserved to work on something
+  // alone (e.g. "Review S&P", "Work on IDC Deck"). No other attendees.
+  // Different render path than meetings — the title is the agenda, not a
+  // discussion topic.
+  is_time_block: boolean;
   // Optional reference to a prior meeting that this one is preparing for or
   // continuing from (e.g. "PREP: X" → the X meeting earlier in the week).
   related_prior_meeting: {
@@ -406,6 +411,7 @@ async function fetchTodaysMeetings(
     pursuit: null,
     prior_summary: null,
     is_recurring_noise: false,
+    is_time_block: false,
     related_prior_meeting: null,
   }));
 }
@@ -721,13 +727,25 @@ async function hydrateMeetings(
     // ---- Detect recurring noise meetings ----
     const isNoise = isRecurringNoiseMeeting(m.title);
 
+    // ---- Detect solo time-blocks ----
+    // A solo time-block: the meeting has no other attendees besides the
+    // user (or no attendees at all on the calendar invite). The title is
+    // the agenda — what the user reserved this slot to do.
+    const isTimeBlock = !isNoise && ctx.length === 0 && (
+      m.attendees.length === 0 ||
+      m.attendees.every((a) => isPlaceholder(a))
+    );
+
     // ---- Find related prior meeting ----
+    // Skip on noise meetings; allow on time-blocks (e.g. "Work on IDC
+    // Deck" → the IDC Marketscape conversation that warrants the work).
     const related = isNoise ? null : findRelatedPriorMeeting(m, priorList);
 
     out.push({
       ...m,
       attendee_context: ctx,
       is_recurring_noise: isNoise,
+      is_time_block: isTimeBlock,
       related_prior_meeting: related,
     });
   }
@@ -852,12 +870,18 @@ async function synthesizeIntro(
             timeZone: "America/New_York",
           })
         : "(no time)";
-      // For recurring noise meetings, omit attendee list — it's noise.
-      const attendees = m.is_recurring_noise
-        ? "(recurring cadence)"
+      // Tag the meeting type so the model knows how to interpret it.
+      const tag = m.is_time_block
+        ? "[SOLO TIME-BLOCK — user reserved this slot to work on this]"
+        : m.is_recurring_noise
+          ? "[RECURRING CADENCE]"
+          : "";
+      // Attendee list: omit for solo blocks (none) and recurring noise.
+      const attendees = m.is_time_block || m.is_recurring_noise
+        ? ""
         : m.attendee_context
             .map((a) => `${a.name}${a.company ? ` [${a.company}]` : ""}`)
-            .join(", ") || "(internal)";
+            .join(", ") || "(internal, no other attendees resolved)";
       const openCommits = m.attendee_context
         .flatMap((a) => a.open_commitments)
         .map((c) => `${c.direction === "outgoing" ? "owed to them" : "owed by them"}: ${c.title}`)
@@ -866,7 +890,16 @@ async function synthesizeIntro(
       const prior = m.related_prior_meeting?.one_line
         ? ` | prior context: "${m.related_prior_meeting.one_line}"`
         : "";
-      return `- ${time} ${m.title ?? "(untitled)"} — ${attendees}${openCommits ? ` | open commitments: ${openCommits}` : ""}${prior}`;
+      const parts = [
+        `- ${time} ${m.title ?? "(untitled)"}`,
+        tag,
+        attendees ? `with ${attendees}` : "",
+        openCommits ? `open commitments: ${openCommits}` : "",
+        prior,
+      ].filter(Boolean);
+      // Use pipe separator (not em dash) so the model doesn't mirror em
+      // dashes from the input into its output paragraph.
+      return parts.join(" | ");
     })
     .join("\n");
 
@@ -891,26 +924,35 @@ async function synthesizeIntro(
     .map((t) => `- [${t.surface_reason}] ${t.title}`)
     .join("\n");
 
-  const systemBlock = `You write a short factual paragraph that previews ${args.userDisplayName}'s day. NOT a coach, NOT a planner, NOT a priority-ranker. Resurface only knows what's in its database, which is a small slice of the whole. Don't pretend to more context than you have.
+  const systemBlock = `You write a short factual preview of ${args.userDisplayName}'s day. NOT a coach, NOT a planner, NOT a priority-ranker. Resurface only knows what's in its database, which is a small slice of the whole. Don't pretend to more context than you have.
 
 **The bar for saying anything:** is it a fact you can point to in the structured data below, or are you guessing? If you're guessing, leave it out.
 
-What to write:
-- 2-4 sentences. Plain prose. No headers, no bullets, no markdown.
-- Describe the SHAPE of the day in plain terms: number of meetings, whether they cluster, whether anything external/client-facing stands out, whether there's a notable open commitment that maps to a meeting on the agenda.
-- Name specific people, companies, or topics ONLY when the data names them. "Adobe shows up in three meetings" is fine if true. "Adobe is the spine of your day" is editorial — skip it.
-- If a commitment is overdue and has a counterpart who's also a meeting attendee today, that's a fact worth mentioning ("Mo Mirpuri is on today's calendar; the Principal Financial commitment to him is a day overdue").
-- If today is light or routine, just say so. "Three internal syncs and a partner call" is a complete briefing.
+**Format — break it up. No walls of text.**
+- 2 or 3 short paragraphs. Each paragraph is 1-2 sentences max.
+- Separate paragraphs with a blank line (\\n\\n). The user reads this on a phone in the morning; dense prose is harder to scan.
+- Plain prose. No headers, no bullets, no markdown, no quotes.
 
-What NOT to write:
+**Suggested rhythm** (don't force this — only follow if the facts fit):
+- Paragraph 1: shape of the day. How many meetings, whether they cluster, whether they're mostly internal or include external partners, whether the user has reserved any time-blocks to work on specific things.
+- Paragraph 2: the most notable cross-reference, if any — overdue commitment to someone on today's calendar, a recurring topic surfacing again, a prep meeting that connects to a real meeting later.
+- Paragraph 3 (only if needed): an exception worth flagging — something genuinely unusual about today.
+
+**Time-blocks** (meetings flagged \`is_time_block\`): these are slots the user reserved to do focused work alone. The title is the agenda — what they're working on. Treat them as planned work, not as meetings: "two blocks of focused work — reviewing the S&P deck and prepping for the Hi-tech call." Don't try to find attendees or commitments on them; they're solo.
+
+**What to include** (only when factual):
+- Counts and clusters: "three back-to-back from 9:00 to 10:30"
+- Specific people/companies named in the data: "Mo Mirpuri is on today's calendar"
+- Cross-references between data sources: "the commitment to follow up with Alexandra is three days overdue, and she's in the 9:00 prep meeting"
+- Time-blocks the user has set aside: "two solo blocks for the IDC deck and the S&P review"
+
+**What NOT to write:**
 - No prescriptive language: "make sure to", "before X, do Y", "squeeze in", "go in with a clear ask", "this is your one chance". You don't know enough to give those instructions.
-- No invented through-lines. "X is the spine of your day" / "everything is feeding the same story" — these are guesses dressed up as observations. Cut them.
+- No invented through-lines: "X is the spine of your day", "everything is feeding the same story". Guesses dressed up as observations. Cut them.
 - No editorial framing of priority. Don't decide what matters most.
 - No corporate fluff: no em dashes, no colon-punchlines, no "delve / leverage / robust / seamless / navigate".
 
-If two facts are interesting (e.g. "two Sitecore meetings back-to-back AND there's an overdue commitment to a Sitecore person"), it's fine to put them in one sentence so the user can connect the dots. But don't connect the dots FOR them — they have context you don't.
-
-Return ONLY the paragraph. No quotes, no preamble.`;
+Return ONLY the paragraphs, separated by blank lines. No preamble.`;
 
   const userBlock = `Date: ${args.briefingDate} (${args.dayOfWeek})
 ${args.userBio ? `\nUser context: ${args.userBio}\n` : ""}

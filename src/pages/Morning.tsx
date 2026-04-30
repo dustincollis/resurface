@@ -160,12 +160,18 @@ function Briefing({
         </div>
       )}
 
-      {/* Intro paragraph */}
+      {/* Intro paragraphs — preserve blank-line separators from the AI
+          output. Walls of text are hard to scan first thing in the
+          morning; the prompt breaks the briefing into 2-3 paragraphs. */}
       {briefing.intro_text && (
-        <section className="mb-10">
-          <p className="text-lg leading-relaxed text-stone-800 sm:text-xl">
-            {briefing.intro_text}
-          </p>
+        <section className="mb-10 space-y-4">
+          {briefing.intro_text
+            .split(/\n\n+/)
+            .map((para, i) => (
+              <p key={i} className="text-lg leading-relaxed text-stone-800 sm:text-xl">
+                {para}
+              </p>
+            ))}
         </section>
       )}
 
@@ -288,6 +294,41 @@ function MeetingCard({ meeting }: { meeting: BriefingMeeting }) {
   const allCommitments = meeting.attendee_context.flatMap((a) =>
     a.open_commitments.map((c) => ({ ...c, attendeeName: a.name })),
   )
+
+  // Time-blocks: solo work slots the user reserved. Render compactly —
+  // the title IS the agenda. No attendee list, no "internal" label.
+  if (meeting.is_time_block) {
+    return (
+      <li className="rounded-xl border border-dashed border-stone-300 bg-stone-50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            to={`/meetings/${meeting.id}`}
+            className="flex-1 text-sm font-medium text-stone-700 hover:text-stone-900"
+          >
+            {meeting.title || '(untitled block)'}
+          </Link>
+          <div className="flex shrink-0 items-center gap-1 text-xs text-stone-500">
+            <Clock size={11} />
+            {timeRange(meeting.start_time, meeting.end_time) || 'no time'}
+          </div>
+        </div>
+        {meeting.related_prior_meeting?.one_line && (
+          <p className="mt-1.5 text-xs italic text-stone-500">
+            From <Link
+              to={`/meetings/${meeting.related_prior_meeting.id}`}
+              className="not-italic underline hover:text-stone-800"
+            >
+              {meeting.related_prior_meeting.title || 'prior meeting'}
+            </Link>
+            : {meeting.related_prior_meeting.one_line}
+          </p>
+        )}
+        <p className="mt-0.5 text-[10px] uppercase tracking-wider text-stone-400">
+          time block
+        </p>
+      </li>
+    )
+  }
 
   return (
     <li className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
