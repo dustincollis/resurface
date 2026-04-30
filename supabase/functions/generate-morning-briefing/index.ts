@@ -954,8 +954,24 @@ async function synthesizeIntro(
 
 Return ONLY the paragraphs, separated by blank lines. No preamble.`;
 
+  // Pre-compute counts so the model doesn't have to count the list itself
+  // (LLMs are surprisingly bad at counting). Quote these verbatim if the
+  // intro mentions counts at all.
+  const totalItems = args.meetings.length;
+  const timeBlockCount = args.meetings.filter((m) => m.is_time_block).length;
+  const recurringCount = args.meetings.filter((m) => m.is_recurring_noise).length;
+  const realMeetingCount = totalItems - timeBlockCount - recurringCount;
+
+  const countsLine = `Counts (use these verbatim — do not recount the list):
+- Total items on calendar: ${totalItems}
+- Real meetings with other people: ${realMeetingCount}
+- Solo time-blocks reserved for focused work: ${timeBlockCount}
+- Recurring cadences (large all-hands / daily triage): ${recurringCount}`;
+
   const userBlock = `Date: ${args.briefingDate} (${args.dayOfWeek})
 ${args.userBio ? `\nUser context: ${args.userBio}\n` : ""}
+${countsLine}
+
 Meetings today:
 ${meetingsBlock || "(none scheduled)"}
 
