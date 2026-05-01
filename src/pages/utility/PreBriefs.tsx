@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Clock,
   Lightbulb,
@@ -233,9 +235,19 @@ function CompanyContext({ company }: { company: NonNullable<PreBrief['primary_co
   )
 }
 
-function PreBriefCard({ brief }: { brief: PreBrief }) {
+function PreBriefCard({
+  brief,
+  expanded,
+  onToggle,
+}: {
+  brief: PreBrief
+  expanded: boolean
+  onToggle: () => void
+}) {
   const attendeeCount = brief.meeting.attendee_count ?? brief.meeting.attendees_raw.length
   const isLargeMeeting = brief.context_status === 'skipped_large_meeting'
+  const isCollapsible = attendeeCount > 5
+  const isCollapsed = isCollapsible && !expanded
 
   return (
     <article className="rounded-lg border border-gray-800 bg-gray-900 p-4">
@@ -260,13 +272,41 @@ function PreBriefCard({ brief }: { brief: PreBrief }) {
             {brief.meeting.title || '(untitled meeting)'}
           </Link>
         </div>
-        <div className="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500">
-          <Users size={13} />
-          {attendeeCount}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="inline-flex items-center gap-1 text-xs text-gray-500">
+            <Users size={13} />
+            {attendeeCount}
+          </div>
+          {isCollapsible && (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={!isCollapsed}
+              className="inline-flex items-center gap-1 rounded border border-gray-800 px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-white"
+            >
+              {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              {isCollapsed ? 'Expand' : 'Collapse'}
+            </button>
+          )}
         </div>
       </div>
 
-      {isLargeMeeting && (
+      {isCollapsed && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-950/45 px-3 py-2 text-left text-xs text-gray-500 hover:border-gray-700 hover:text-gray-300"
+        >
+          <span>
+            {isLargeMeeting
+              ? 'Large meeting - attendee context skipped'
+              : `${attendeeCount} attendees - expand for attendee context`}
+          </span>
+          <ChevronRight size={13} className="shrink-0" />
+        </button>
+      )}
+
+      {!isCollapsed && isLargeMeeting && (
         <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950/45 px-3 py-2">
           <div className="flex gap-2 text-xs text-gray-400">
             <Users size={13} className="mt-0.5 shrink-0 text-gray-600" />
@@ -280,19 +320,19 @@ function PreBriefCard({ brief }: { brief: PreBrief }) {
         </div>
       )}
 
-      {!briefHasContext(brief) && (
+      {!isCollapsed && !briefHasContext(brief) && (
         <p className="mt-4 rounded-lg border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
           no prior context
         </p>
       )}
 
-      {brief.primary_company && (
+      {!isCollapsed && brief.primary_company && (
         <div className="mt-4">
           <CompanyContext company={brief.primary_company} />
         </div>
       )}
 
-      {!isLargeMeeting && (
+      {!isCollapsed && !isLargeMeeting && (
         <div className="mt-4 grid gap-3">
           {brief.attendees.length > 0 ? (
             brief.attendees.map((attendee) => (
@@ -309,6 +349,16 @@ function PreBriefCard({ brief }: { brief: PreBrief }) {
 
 export default function PreBriefs() {
   const { data: briefs, isLoading, error, refetch, isFetching } = usePreBriefs()
+  const [expandedBriefIds, setExpandedBriefIds] = useState<Set<string>>(() => new Set())
+
+  function toggleBrief(id: string) {
+    setExpandedBriefIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -354,7 +404,12 @@ export default function PreBriefs() {
       {!isLoading && !error && briefs && briefs.length > 0 && (
         <div className="space-y-4">
           {briefs.map((brief) => (
-            <PreBriefCard key={brief.meeting.id} brief={brief} />
+            <PreBriefCard
+              key={brief.meeting.id}
+              brief={brief}
+              expanded={expandedBriefIds.has(brief.meeting.id)}
+              onToggle={() => toggleBrief(brief.meeting.id)}
+            />
           ))}
         </div>
       )}
