@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Calendar, FileText, Trash2, Upload, Archive, Radio, Loader2, Check, X, AlertCircle, Link2, RotateCw } from 'lucide-react'
+import { Plus, Calendar, FileText, Trash2, Upload, Archive, Radio, Loader2, Check, X, AlertCircle, Link2, RotateCw, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   useMeetings,
   useCreateMeeting,
@@ -95,6 +95,12 @@ export default function Meetings() {
   const [newMode, setNewMode] = useState<MeetingImportMode>('active')
   const [singleSubmitting, setSingleSubmitting] = useState(false)
   const [singleError, setSingleError] = useState<string | null>(null)
+
+  // Upcoming meetings (calendar-sync'd future events) live behind a single
+  // collapsible chip at the top of the page. Default closed: this page is
+  // the user's place to review what's HAPPENED, not plan what's coming.
+  const [showUpcoming, setShowUpcoming] = useState(false)
+  const now = useMemo(() => Date.now(), [])
 
   // Bulk upload state
   const [showBulk, setShowBulk] = useState(false)
@@ -313,10 +319,108 @@ export default function Meetings() {
     setBatch([])
   }
 
-  const grouped = useMemo(() => {
-    if (!meetings) return new Map<string, Meeting[]>()
-    return groupByDate(meetings)
-  }, [meetings])
+  // Split into past/future. Past stays in the existing reverse-chronological
+  // order (most recent first — what you're most likely to want to review).
+  // Future is reversed to chronological so the nearest upcoming meeting
+  // shows first when the user expands the chip.
+  const { pastGrouped, futureGrouped, futureCount } = useMemo(() => {
+    if (!meetings) {
+      return {
+        pastGrouped: new Map<string, Meeting[]>(),
+        futureGrouped: new Map<string, Meeting[]>(),
+        futureCount: 0,
+      }
+    }
+    const past: Meeting[] = []
+    const future: Meeting[] = []
+    for (const m of meetings) {
+      if (m.start_time && new Date(m.start_time).getTime() > now) {
+        future.push(m)
+      } else {
+        past.push(m)
+      }
+    }
+    future.reverse()
+    return {
+      pastGrouped: groupByDate(past),
+      futureGrouped: groupByDate(future),
+      futureCount: future.length,
+    }
+  }, [meetings, now])
+
+  // Render helper for one date-grouped section. Reused for past and future
+  // so the visual treatment of meeting rows is identical regardless of
+  // which side of "now" they sit on.
+  const renderSection = ([dateLabel, items]: [string, Meeting[]]) => (
+    <section key={dateLabel}>
+      <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-gray-500">
+        {dateLabel}
+      </h2>
+      <div className="space-y-2">
+        {items.map((meeting) => (
+          <div
+            key={meeting.id}
+            onClick={() => navigate(`/meetings/${meeting.id}`)}
+            className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
+          >
+            <Calendar size={16} className="flex-shrink-0 text-gray-500" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-white">
+                  {meeting.title}
+                </span>
+                {meeting.import_mode === 'archive' && (
+                  <span
+                    className="flex flex-shrink-0 items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-gray-400"
+                    title="Archived recording — no live proposals"
+                  >
+                    <Archive size={9} />
+                    Archive
+                  </span>
+                )}
+              </div>
+              {meeting.start_time && (
+                <div className="text-xs text-gray-500">
+                  {new Date(meeting.start_time).toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                </div>
+              )}
+            </div>
+            {meeting.transcript_summary ? (
+              <FileText size={14} className="flex-shrink-0 text-purple-400" />
+            ) : meeting.transcript && !meeting.processed_at ? (
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  try {
+                    await supabase.functions.invoke('ai-parse-transcript', {
+                      body: { meeting_id: meeting.id },
+                    })
+                  } catch {
+                    // ignore — will retry via cron
+                  }
+                }}
+                className="flex flex-shrink-0 items-center gap-1 rounded bg-yellow-900/30 px-1.5 py-0.5 text-[10px] text-yellow-400 hover:bg-yellow-900/50"
+                title="Parse pending — click to retry"
+              >
+                <RotateCw size={9} />
+                Pending
+              </button>
+            ) : null}
+            <button
+              onClick={(e) => handleDelete(e, meeting.id, meeting.title)}
+              className="flex-shrink-0 rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-red-400"
+              title="Delete discussion"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -580,80 +684,35 @@ export default function Meetings() {
         </div>
       )}
 
+      {/* Upcoming chip — collapsed by default. Calendar-sync'd future
+          events live here, out of the way of the main review flow. */}
+      {futureCount > 0 && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowUpcoming(!showUpcoming)}
+            className="flex items-center gap-1.5 rounded-md border border-gray-800 bg-gray-900/40 px-3 py-1.5 text-xs text-gray-400 hover:border-gray-700 hover:text-gray-300"
+          >
+            {showUpcoming ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <Calendar size={11} />
+            {futureCount} upcoming
+          </button>
+          {showUpcoming && (
+            <div className="mt-3 space-y-6">
+              {[...futureGrouped.entries()].map(renderSection)}
+            </div>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="text-gray-400">Loading discussions...</div>
-      ) : meetings && meetings.length > 0 ? (
+      ) : pastGrouped.size > 0 ? (
         <div className="space-y-6">
-          {[...grouped.entries()].map(([dateLabel, items]) => (
-            <section key={dateLabel}>
-              <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-gray-500">
-                {dateLabel}
-              </h2>
-              <div className="space-y-2">
-                {items.map((meeting) => (
-                  <div
-                    key={meeting.id}
-                    onClick={() => navigate(`/meetings/${meeting.id}`)}
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 px-4 py-3 text-left transition-colors hover:border-gray-700"
-                  >
-                    <Calendar size={16} className="flex-shrink-0 text-gray-500" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-white">
-                          {meeting.title}
-                        </span>
-                        {meeting.import_mode === 'archive' && (
-                          <span
-                            className="flex flex-shrink-0 items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-gray-400"
-                            title="Archived recording — no live proposals"
-                          >
-                            <Archive size={9} />
-                            Archive
-                          </span>
-                        )}
-                      </div>
-                      {meeting.start_time && (
-                        <div className="text-xs text-gray-500">
-                          {new Date(meeting.start_time).toLocaleTimeString('en-US', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    {meeting.transcript_summary ? (
-                      <FileText size={14} className="flex-shrink-0 text-purple-400" />
-                    ) : meeting.transcript && !meeting.processed_at ? (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation()
-                          try {
-                            await supabase.functions.invoke('ai-parse-transcript', {
-                              body: { meeting_id: meeting.id },
-                            })
-                          } catch {
-                            // ignore — will retry via cron
-                          }
-                        }}
-                        className="flex flex-shrink-0 items-center gap-1 rounded bg-yellow-900/30 px-1.5 py-0.5 text-[10px] text-yellow-400 hover:bg-yellow-900/50"
-                        title="Parse pending — click to retry"
-                      >
-                        <RotateCw size={9} />
-                        Pending
-                      </button>
-                    ) : null}
-                    <button
-                      onClick={(e) => handleDelete(e, meeting.id, meeting.title)}
-                      className="flex-shrink-0 rounded p-1 text-gray-600 hover:bg-gray-800 hover:text-red-400"
-                      title="Delete discussion"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
+          {[...pastGrouped.entries()].map(renderSection)}
+        </div>
+      ) : futureCount > 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-700 py-8 text-center">
+          <p className="text-gray-400">No past discussions yet. Expand the upcoming list to see your scheduled meetings.</p>
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-gray-700 py-8 text-center">
