@@ -21,6 +21,7 @@ const navItems = [
   { to: '/pursuits', label: 'Pursuits' },
   { to: '/goals', label: 'Goals' },
   { to: '/ideas', label: 'Ideas' },
+  { to: '/themes', label: 'Themes' },
   { to: '/meetings', label: 'Discussions' },
   { to: '/events', label: 'Events' },
 ]

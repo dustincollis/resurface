@@ -239,6 +239,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | `/goals` | Goals | Goals grouped by status |
 | `/goals/:id` | GoalDetail | Goal with milestone tasks, chat |
 | `/ideas` | Ideas | Idea clusters with quality filter and report generation |
+| `/themes` | Themes | On-demand AI analysis of ideas + memories + outgoing commitments — what's reverberating |
 | `/people` | People | Person directory from meetings/commitments |
 | `/people/:id` | PersonDetail | Profile, meetings, commitments, pursuits |
 | `/companies` | Companies | Company directory |
@@ -252,7 +253,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:routes -->
 
 <!-- AUTO:components -->
-## 12. Components (33)
+## 12. Components (35)
 
 | Component | Purpose |
 |-----------|---------|
@@ -278,6 +279,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | KanbanBoard | Drag-drop across status columns (dnd-kit) |
 | Layout | Main nav sidebar, Cmd+K search trigger, stream list |
 | MeetingBriefing | Pre-meeting context generator |
+| MeetingGroupCard |  |
 | OnboardingWizard | First-run stream creation |
 | PlaybookHealth | Pursuit playbook progress tracker |
 | ProposalCard | Proposal review with accept/edit/merge/reject actions |
@@ -288,11 +290,12 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | StreamFormModal | Create/edit stream with field templates |
 | SuggestedMerges | People merge suggestions |
 | TemplateEditor | Manage process templates |
+| ThemeAnalysis |  |
 | TriageSkippedSection |  |
 <!-- /AUTO:components -->
 
 <!-- AUTO:hooks -->
-## 13. Hooks (36)
+## 13. Hooks (37)
 
 | Hook | Purpose |
 |------|---------|
@@ -331,6 +334,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | useSearch | Global full-text + fuzzy search |
 | useStreams | Query/create/update/reorder streams |
 | useTemplates | Query/create/update/delete process templates |
+| useThemeReports |  |
 | useTriageSkippedInputs |  |
 <!-- /AUTO:hooks -->
 
@@ -344,6 +348,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | ai-classify | Suggest stream for uncategorized items | Sonnet 4.6 |
 | ai-cluster-ideas | Group ideas by conceptual similarity | Sonnet 4.6 |
 | ai-cluster-report | Generate 5 report types per cluster | Sonnet 4.6 |
+| ai-analyze-themes | Top-down thematic analysis across ideas + memories + outgoing commitments | Opus 4.7 (adaptive thinking) |
 | ai-decompose | Break item into 3-7 subtasks | Sonnet 4.6 |
 | ai-distill-profile | Condense user bio | Sonnet 4.6 |
 | ai-easy-button | Pick lowest-resistance task + guidance | Sonnet 4.6 |
@@ -386,7 +391,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 <!-- /AUTO:edge_functions -->
 
 <!-- AUTO:tables -->
-## 15. Database Tables (42 migrations, 39 tables)
+## 15. Database Tables (51 migrations, 40 tables)
 
 | Table | Source migration |
 |-------|-----------------|
@@ -428,6 +433,7 @@ Global Cmd+K modal via `search_everything()` Postgres RPC. Full-text (tsvector w
 | streams | 20260407000000_initial_schema |
 | template_steps | 20260410010000_templates_and_goals |
 | templates | 20260410010000_templates_and_goals |
+| theme_reports | 20260501030000_theme_reports |
 | webhook_payload_log | 20260413100000_webhook_log |
 <!-- /AUTO:tables -->
 
@@ -538,9 +544,11 @@ Auto-deploy on push to main. Env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 - **2026-04-29**: Follow-up iteration based on real-use feedback. **Writing rules** baked into the parser prompt to suppress AI tells: no em dashes, no colon-punchlines ("Here's the thing: it works"), no "it's not just X, it's Y", no triadic rhetorical lists, blocklist of giveaway words (`delve`, `leverage`, `robust`, `seamless`, `navigate` as a verb, `ensure`, `moreover`). Positive instruction: write the way Dustin would actually type a quick email after a meeting. Default signoff changed from "Best," to "Regards,". Two new instructions: acknowledge gaps honestly ("I went looking but couldn't find it on my side, could you send it over?" rather than pretending) and include one explicit ask when the meeting surfaces a real need from the recipient. **One email = one follow-up row** schema rework (migration `20260429010000`). `draft_subject` and `draft_body` move up to the row; `recipients[]` simplifies to a To list (`name`, `email`, `person_id`, `rationale`). Per-recipient drafts are gone — they didn't match the user's actual style of greeting everyone in one email ("Hey Justin, Dyana, and Sean,") or "Hey All," for 4+. Parser greeting-style guidance updated to match. Clipboard fix: copy button copies the body only, no `To:` / `Subject:` header lines that were trash to delete when pasting into a reply. New MCP tool `list_follow_ups` (mcp-server) so the agent can query by status, scope to a meeting, and get the source meeting title hydrated inline.
 - **2026-04-30**: Morning briefing pre-warm + date preview. (a) New migration `20260430010000_morning_briefing_cron.sql` schedules `generate-morning-briefing` at 10:00 UTC and 11:00 UTC daily — covers 6am Eastern year-round (EDT and EST). Second call is essentially free; the function returns the existing snapshot if one exists for today. So when Dustin opens the page on his phone at 6am, the briefing is already generated and the page is instant. (b) Edge function gains an optional `for_date: "YYYY-MM-DD"` body param, threaded through the page via `?date=YYYY-MM-DD` URL param. Lets you preview tomorrow's briefing now (or any date — handy for testing without waiting for tomorrow). The page shows a small banner when in preview mode. (c) Edge function relaxed to allow unauthenticated calls (matches existing `compute-staleness` and `retry-unprocessed` patterns) so cron doesn't need to manage credentials; falls back to `RESURFACE_DEFAULT_USER_ID` when no JWT. (d) Email permanently removed from the deferred-work list — Dustin confirmed he doesn't want any email channel; the page is the channel.
 - **2026-04-30**: Morning briefing — daily snapshot at `/morning`, mobile-first and light-themed (dark theme everywhere else but the morning ritual reads on a phone, often before sunrise — white-on-black is harsh). New `morning_briefings` table (migration `20260430000000`) with one row per user per date and jsonb sections for meetings/follow-ups/commitments/tasks plus an AI-synthesized intro paragraph. New Edge Function `generate-morning-briefing` (Sonnet 4.6) pulls today's calendar with per-meeting attendee context (people lookup, company, open commitments to/from), pending follow-ups, outgoing commitments overdue or due today, and today's surfaced task list (overdue / due today / pinned / critical staleness / high stakes). AI generates only the 60-second intro paragraph; everything else is deterministic and saved as jsonb so the page renders without further synthesis. Snapshot semantics: first call of the day generates and persists, subsequent calls return the same data, manual "Refresh" button regenerates. No cron yet — on-demand generation keeps compute predictable (the user said "if they change every minute, that could be a lot of computer"). New `useMorningBriefing` hook + `Morning` page; sidebar entry "Morning" right under Dashboard. PWA tightening + 6am cron pre-warming + email backup all deferred for follow-on iterations.
+- **2026-05-01**: `/themes` — top-down thematic analysis. Inverse of the existing /ideas surface, which extracts and clusters ideas bottom-up. This new surface reads the WHOLE corpus (ideas + memories + outgoing commitments — explicitly NOT follow-ups, which are post-meeting emails not signal-bearing content) holistically and asks "what's reverberating?" Each on-demand run produces a snapshot: themes (multi-source patterns) and one-offs (single sharp signals worth watching). New table `theme_reports` (migration `20260501030000`), keeps history indefinitely so the user can scroll back and see how thinking has shifted. New Edge Function `ai-analyze-themes` (Opus 4.7 with adaptive thinking, ~$0.20-0.30 per run estimated). Prompt biased hard against generic abstractions, hedging, and manufactured themes on thin corpus — explicitly tells the model: take positions, name accounts and people, no padding to hit a count, no "delve/leverage/robust/seamless/navigate-as-verb/ensure/moreover" tells, no em dashes, no colon-punchlines. Each run is independent (no prior-report context fed back); theme decay is handled organically by recency in the corpus itself. Lives at `/themes` rather than as a top section on `/ideas` because the existing two-panel cluster layout doesn't have room. Multi-report types deferred — first one is `'general'`. The user will tune the prompt directly; visual treatment is intentionally minimal pending real output to design against.
 - **2026-05-01**: `/meetings` upcoming chip (default collapsed). Followed up on the prior change after the user pointed out the page is for reviewing what HAS happened, not planning what's coming. Future events now live behind a single collapsed chip at the top — `5 upcoming` with a chevron and a calendar icon — that expands to show scheduled events in chronological order (nearest first, opposite of the past list's reverse-chrono "most recent first"). Default state is closed each time the page loads, no localStorage persistence — the user explicitly doesn't use this app for forward-looking planning, so the default re-asserts. Past meetings render in the same date-grouped layout as before. Empty state still works for both halves: "no past discussions yet" copy points at the upcoming chip when only future events exist.
 - **2026-05-01**: `/meetings` shows future events. The `useMeetings` hook filtered to `processed_at IS NOT NULL OR transcript IS NOT NULL` — fine when "discussions" meant "things you've recorded and parsed", but calendar-sync'd future events have neither (just title + time + attendees) so they were invisible. Dropped the filter and bumped the limit from 50 to 100. The hook already sorts by `start_time` desc with nulls last, so future events float to the top of the list naturally, past meetings sit below, and the page's existing date grouping handles the visual separation. Calendar-only future events render cleanly with no content indicator on the right (no FileText icon, no Pending badge), so they read as scheduled rather than unfinished.
 - **2026-05-01**: `calendar-sync` Power Automate timeout fix + identity-resolution hardening. After the partial-index hotfix unblocked the bulk upsert, Power Automate started timing out waiting for the response (sub-200 status: "the server did not respond within the timeout limit"). Three compounding causes: (a) the previous code called the free-function `resolveAttendees` per meeting, which created a fresh resolver and re-ran `preload()` (full SELECT of people + companies) for every single meeting — for a 30-meeting batch that's 30 redundant table scans. (b) Power Automate's Outlook connector emits markdown-wrapped emails like `[name@x.com](mailto:name@x.com)`; `isEmail()`'s regex rejects them (two `@`), so they fell through to the "create a new person with this string as the name" path, polluting the people table and costing INSERTs. (c) The response waited for all of this to finish before returning. Three fixes in `supabase/functions/calendar-sync/index.ts`: share one `createIdentityResolver(adminClient, userId)` across the whole batch (one preload, in-memory cache for the rest); strip markdown-wrapped emails in the parser before they reach the resolver; move the entire identity-resolution loop into `EdgeRuntime.waitUntil()` so the response goes back fast and the linking work continues in the background. Also added `ATTENDEE_RESOLUTION_CAP = 30` — meetings with more attendees skip per-person resolution entirely (broadcast meetings, RTBs, all-hands; the meeting still upserts with the full attendees array, we just don't resolve each name to a person record because it's noise not signal).
 - **2026-05-01**: `calendar-sync` bulk upsert — partial-index hotfix. Today's earlier `calendar-sync` refactor to bulk `.upsert({ onConflict: 'user_id,external_source_id' })` was 500-ing in production because the underlying unique index from migration `20260409020000` was a partial index (`WHERE external_source_id IS NOT NULL`). Postgres's `ON CONFLICT` inference can't pick up partial unique indexes without their predicate, and supabase-js's `.upsert()` doesn't expose a way to pass one. Result: every batch errored with 42P10 "no unique or exclusion constraint matching the ON CONFLICT specification". Migration `20260501010000` replaces the partial index with a regular unique constraint on `(user_id, external_source_id)`. Default `NULLS DISTINCT` semantics preserve the prior behavior — manually-created meetings (NULL external_source_id) still don't conflict with each other — but ON CONFLICT can now infer the constraint. The old per-row code path worked through this without realizing it because SELECT-then-INSERT doesn't use ON CONFLICT.
 - **2026-05-01**: `calendar-sync` bulk upsert. Power Automate flow refactored to send all calendar events in one POST instead of looping 30+ times. The function already accepted arrays, but internally was doing N+1 work: a `SELECT ... IN (externalIds)` to find existing rows, then a per-row `UPDATE` or `INSERT` in a loop. Replaced that with a single `.upsert(rows, { onConflict: 'user_id,external_source_id' })` backed by the unique partial index from migration `20260409020000`. The `.select()` on the upsert returns the touched rows, which scopes the post-sync attendee→person identity resolution to just those rows instead of scanning every `source='calendar_sync'` meeting in the table on every call. On bulk-upsert error: log + non-200 with the supabase error in the body (no partial writes to investigate). Validation skips (cancelled/all-day/empty) still happen pre-upsert and count in `skipped` with a 200 OK. Response shape: `{ ok, processed, skipped, total }`.
 - **2026-04-30**: Three smaller ships and skill tooling. (a) **"Already Done" button on task proposals**: end-of-day triage problem — by the time you review proposals, you've already done some of the work. "Not actionable" is wrong (it WAS actionable, just complete) and dismissing loses history. New button accepts the proposal AND creates the item with `status='done'` + `completed_at=now()` in one click. Activity log records `created_done` so the path is distinguishable from a normal accept. Only shown when `acceptAs='task'` (commitments have their own met/broken states). (b) **Follow-up parser default flipped to GENERATE for any external attendee.** Diagnosed today: zero follow-ups generated for that morning's external meetings (Orange Logic, Shane Intro, Principal Financial — all 1:1 client/partner calls that clearly warranted one). The "Extract ONLY if warrants" framing was making the model lean cautious on edge cases. Flipped to "DEFAULT YES whenever ANY external attendee is present" with explicit skip cases (all-internal, routine standup, <5min transactional). After re-parse: all three now have follow-ups; genuinely-internal meetings still correctly skip. (c) **CLAUDE.md "Required Skill Invocations" section.** Auto-trigger rules for two Claude Code skills: `claude-api` whenever editing parser/Edge Function prompt structure (cache hygiene), and `security-review` before any push touching auth/RLS/PII paths. (d) **Two project-level skills** under `.claude/skills/`: `resurface-iterate-prompt` (one command for deploy + reparse + per-meeting summary with delta vs prior run) and `resurface-ship-feature` (pre-flight checks + ordered ship: `supabase db push` → `npm run deploy:functions` → `git push`). Both replace inline curl/JWT/python boilerplate that was repeating across iterations. Per-skill `.history/` directory gitignored.
+- **2026-05-01**: Review cleanup pass. `generate-morning-briefing` now reuses an existing `(user_id, briefing_date)` row for failed/forced regenerations and returns in-flight `generating` rows instead of inserting into the unique constraint again. `/meetings` now fetches past discussions and upcoming calendar events as separate query slices so future events cannot crowd out historical review context; the page also refreshes its future/past cutoff while open. New migration `20260501020000_search_rpc_auth_guards.sql` adds `auth.uid()` guards to the SECURITY DEFINER search RPCs while preserving service-role access for Edge Functions and MCP. Lint is green again; README replaced the Vite template with Resurface-specific project notes.
