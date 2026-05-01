@@ -301,6 +301,14 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
     // ============================================================
 
     const claudeStart = Date.now();
+
+    // Set max_tokens to the model ceiling. Adaptive thinking and the
+    // structured-JSON output share the budget; the model has no reason
+    // to use tokens it doesn't need, so making the cap big can't hurt
+    // throughput, only un-cap correctness. Above ~21k tokens Anthropic
+    // requires streaming, so we use SSE and collect the chunks server-
+    // side. The function still returns one consolidated JSON response
+    // to its caller — streaming is purely an API-side mechanic.
     const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -310,24 +318,15 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
       },
       body: JSON.stringify({
         model: MODEL,
-        // Adaptive thinking and output share this budget. With Opus 4.7
-        // thinking up to ~10k tokens on a long corpus, the structured
-        // JSON output (themes + evidence arrays + one-offs) needs real
-        // headroom on top. 8000 was getting truncated mid-evidence in
-        // the first real run; 32000 leaves plenty of room while keeping
-        // single-run cost predictable (~$0.50 worst case at full budget).
-        max_tokens: 32000,
-        // Adaptive thinking: Claude decides when and how much to think.
-        // Right for open-ended judgment over a long corpus. Note that on
-        // Opus 4.7 temperature/top_p are not accepted with adaptive
-        // thinking — omitted intentionally.
+        max_tokens: 64000,
         thinking: { type: "adaptive" },
+        stream: true,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
     });
 
-    if (!aiResp.ok) {
+    if (!aiResp.ok || !aiResp.body) {
       const errText = await aiResp.text();
       console.error("[ai-analyze-themes] Claude API error:", errText);
       return new Response(
@@ -336,16 +335,68 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
       );
     }
 
-    const aiResult = await aiResp.json();
-    const claudeMs = Date.now() - claudeStart;
+    // Parse the SSE stream. We accumulate text deltas from text blocks
+    // (ignoring thinking-delta blocks — those are reasoning we don't want
+    // to JSON.parse), and grab the final usage from message_delta or
+    // message_start events.
+    const reader = aiResp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let textBlocks = "";
+    let usage: Record<string, number> | null = null;
+    let stopReason: string | null = null;
+    let currentBlockType: string | null = null;
+    let streamErr: { type?: string; message?: string } | null = null;
 
-    // The response content is a list of blocks; we want the text block(s).
-    // Adaptive thinking can produce thinking blocks alongside text — only
-    // the text is the actual output.
-    const textBlocks = (aiResult.content ?? [])
-      .filter((b: { type: string }) => b.type === "text")
-      .map((b: { text: string }) => b.text)
-      .join("\n");
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const ev = JSON.parse(payload);
+          if (ev.type === "content_block_start") {
+            currentBlockType = ev.content_block?.type ?? null;
+          } else if (ev.type === "content_block_delta") {
+            // Only collect text deltas. Thinking deltas (reasoning) are
+            // not part of the output JSON.
+            if (currentBlockType === "text" && ev.delta?.type === "text_delta") {
+              textBlocks += ev.delta.text ?? "";
+            }
+          } else if (ev.type === "content_block_stop") {
+            currentBlockType = null;
+          } else if (ev.type === "message_start") {
+            usage = ev.message?.usage ?? null;
+          } else if (ev.type === "message_delta") {
+            // message_delta carries final usage (output_tokens) and stop_reason.
+            if (ev.usage) usage = { ...(usage ?? {}), ...ev.usage };
+            if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+          } else if (ev.type === "error") {
+            streamErr = ev.error ?? { message: "stream error" };
+          }
+        } catch {
+          // Malformed payload — skip rather than fail the whole stream.
+        }
+      }
+    }
+
+    if (streamErr) {
+      console.error("[ai-analyze-themes] stream error:", streamErr);
+      return new Response(
+        JSON.stringify({ error: "Claude stream error", detail: streamErr.message ?? "unknown" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const claudeMs = Date.now() - claudeStart;
+    if (stopReason && stopReason !== "end_turn") {
+      console.warn(`[ai-analyze-themes] stop_reason=${stopReason} (output may be incomplete)`);
+    }
 
     let parsed: { intro?: string; themes?: unknown[]; one_offs?: unknown[] };
     try {
@@ -372,7 +423,8 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
       memories_count: memories.length,
       commitments_count: commitments.length,
       claude_ms: claudeMs,
-      usage: aiResult.usage ?? null,
+      usage,
+      stop_reason: stopReason,
     };
 
     const { data: report, error: insertErr } = await adminClient
