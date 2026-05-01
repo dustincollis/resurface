@@ -89,9 +89,15 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
-      {/* Mobile top bar — hamburger + brand + search + add. Hidden on lg+
-          where the sidebar is always visible. */}
-      <header className="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-gray-800 bg-gray-900 px-4 py-2.5 lg:hidden">
+      {/* Mobile top bar — hamburger + brand + search. Hidden on lg+.
+          On iOS PWA, the web view extends UNDER the status bar (clock /
+          battery). Use safe-area-inset-top to push the bar's content
+          below it; the bar's background still extends to the top edge
+          so the status bar sits on a colored field, not on page content. */}
+      <header
+        className="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-gray-800 bg-gray-900 px-4 pb-2.5 lg:hidden"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.625rem)' }}
+      >
         <button
           onClick={() => setMobileNavOpen(true)}
           className="rounded p-1.5 text-gray-300 hover:bg-gray-800 hover:text-white"
@@ -126,7 +132,7 @@ export default function Layout() {
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className="flex items-start justify-between px-4 pt-4 pb-3">
+        <div className="flex items-start justify-between px-4 pb-3 pt-[calc(env(safe-area-inset-top)+1rem)] lg:pt-4">
           <div>
             <div className="text-lg font-semibold tracking-tight text-white">Resurface</div>
             <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-gray-500">
@@ -314,8 +320,9 @@ export default function Layout() {
       </aside>
 
       {/* Main content. On mobile, top padding accounts for the fixed
-          mobile header. On lg+, the header is hidden so no offset needed. */}
-      <div className="flex flex-1 flex-col overflow-hidden pt-12 lg:pt-0">
+          mobile header (which itself includes the safe-area-inset-top
+          for iOS status bar). On lg+, the header is hidden so no offset. */}
+      <div className="flex flex-1 flex-col overflow-hidden pt-[calc(env(safe-area-inset-top)+3rem)] lg:pt-0">
         <main className="flex-1 overflow-auto p-4 sm:p-6">
           <Outlet />
         </main>
