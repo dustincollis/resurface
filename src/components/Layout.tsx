@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Navigate, NavLink, Outlet } from 'react-router-dom'
-import { Search, LogOut, ChevronRight, ChevronDown, Plus } from 'lucide-react'
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Search, LogOut, ChevronRight, ChevronDown, Plus, Menu, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
 import { useUncategorizedItems } from '../hooks/useItems'
@@ -50,6 +50,11 @@ export default function Layout() {
   const { data: ideaCounts } = useIdeaCounts()
   const [searchOpen, setSearchOpen] = useState(false)
   const [directoryOpen, setDirectoryOpen] = useState(false)
+  // Mobile drawer state. On lg+ the sidebar is always visible; this is
+  // ignored. On phone, the sidebar is a slide-in overlay controlled by
+  // a hamburger button in the top bar.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const location = useLocation()
   const surfacedCount = ideaCounts?.surfaced ?? 0
 
   // Cmd+K / Ctrl+K to open search
@@ -63,6 +68,12 @@ export default function Layout() {
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [])
+
+  // Close mobile drawer whenever the route changes — tapping a nav link
+  // dismisses it without the user having to manually close.
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
 
   if (loading) {
     return (
@@ -78,8 +89,43 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
-      {/* Sidebar */}
-      <aside className="flex w-56 flex-col border-r border-gray-800 bg-gray-900">
+      {/* Mobile top bar — hamburger + brand + search + add. Hidden on lg+
+          where the sidebar is always visible. */}
+      <header className="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-gray-800 bg-gray-900 px-4 py-2.5 lg:hidden">
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          className="rounded p-1.5 text-gray-300 hover:bg-gray-800 hover:text-white"
+          title="Open menu"
+        >
+          <Menu size={20} />
+        </button>
+        <div className="text-base font-semibold tracking-tight text-white">Resurface</div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"
+            title="Search"
+          >
+            <Search size={18} />
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile drawer backdrop */}
+      {mobileNavOpen && (
+        <button
+          onClick={() => setMobileNavOpen(false)}
+          aria-label="Close menu"
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+        />
+      )}
+
+      {/* Sidebar — always visible on lg+, slide-in drawer on mobile */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-gray-800 bg-gray-900 transition-transform duration-200 lg:static lg:w-56 lg:translate-x-0 ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
         <div className="flex items-start justify-between px-4 pt-4 pb-3">
           <div>
             <div className="text-lg font-semibold tracking-tight text-white">Resurface</div>
@@ -87,13 +133,25 @@ export default function Layout() {
               {formatSidebarTimestamp(new Date())}
             </div>
           </div>
-          <button
-            onClick={() => setSearchOpen(true)}
-            className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-            title="Search (Cmd+K)"
-          >
-            <Search size={15} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+              title="Search (Cmd+K)"
+            >
+              <Search size={15} />
+            </button>
+            {/* Close button shown only on mobile — desktop has no need
+                since the sidebar is always visible. */}
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300 lg:hidden"
+              title="Close menu"
+              aria-label="Close menu"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Add — opens popover with Task / File / Paste options */}
@@ -255,9 +313,10 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <main className="flex-1 overflow-auto p-6">
+      {/* Main content. On mobile, top padding accounts for the fixed
+          mobile header. On lg+, the header is hidden so no offset needed. */}
+      <div className="flex flex-1 flex-col overflow-hidden pt-12 lg:pt-0">
+        <main className="flex-1 overflow-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>
