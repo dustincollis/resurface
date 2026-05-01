@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Calendar, FileText, Trash2, Upload, Archive, Radio, Loader2, Check, X, AlertCircle, Link2, RotateCw, ChevronDown, ChevronRight } from 'lucide-react'
 import {
@@ -100,7 +100,17 @@ export default function Meetings() {
   // collapsible chip at the top of the page. Default closed: this page is
   // the user's place to review what's HAPPENED, not plan what's coming.
   const [showUpcoming, setShowUpcoming] = useState(false)
-  const now = useMemo(() => Date.now(), [])
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const tick = () => setNow(Date.now())
+    const intervalId = window.setInterval(tick, 60 * 1000)
+    window.addEventListener('focus', tick)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', tick)
+    }
+  }, [])
 
   // Bulk upload state
   const [showBulk, setShowBulk] = useState(false)
@@ -321,8 +331,8 @@ export default function Meetings() {
 
   // Split into past/future. Past stays in the existing reverse-chronological
   // order (most recent first — what you're most likely to want to review).
-  // Future is reversed to chronological so the nearest upcoming meeting
-  // shows first when the user expands the chip.
+  // Future is already chronological from the hook so the nearest upcoming
+  // meeting shows first when the user expands the chip.
   const { pastGrouped, futureGrouped, futureCount } = useMemo(() => {
     if (!meetings) {
       return {
@@ -340,7 +350,6 @@ export default function Meetings() {
         past.push(m)
       }
     }
-    future.reverse()
     return {
       pastGrouped: groupByDate(past),
       futureGrouped: groupByDate(future),

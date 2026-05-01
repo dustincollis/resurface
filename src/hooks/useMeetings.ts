@@ -47,17 +47,52 @@ export function useMeetings() {
   return useQuery({
     queryKey: ['meetings'],
     queryFn: async () => {
-      // No transcript/processed-at filter: calendar-sync'd future events have
-      // neither (they're just title + time + attendees), but the user still
-      // wants to see them on /meetings as a "what's coming up" view. Sorting
-      // by start_time desc with nulls last means future events float to the
-      // top of the list naturally, past meetings sit below — date grouping
-      // in the page handles the visual separation.
+      // Fetch past/history separately from upcoming calendar rows so a
+      // calendar-heavy account cannot crowd out the review list before the
+      // page gets a chance to split them.
+      const nowIso = new Date().toISOString()
+      const [pastRes, futureRes] = await Promise.all([
+        supabase
+          .from('meetings')
+          .select('*')
+          .or(`start_time.lte.${nowIso},start_time.is.null`)
+          .order('start_time', { ascending: false, nullsFirst: false })
+          .limit(100),
+        supabase
+          .from('meetings')
+          .select('*')
+          .gt('start_time', nowIso)
+          .order('start_time', { ascending: true, nullsFirst: false })
+          .limit(50),
+      ])
+      if (pastRes.error) throw pastRes.error
+      if (futureRes.error) throw futureRes.error
+      return [...(futureRes.data ?? []), ...(pastRes.data ?? [])] as Meeting[]
+    },
+    enabled: !!user,
+  })
+}
+
+export function useUpcomingMeetings(limit = 5) {
+  const { user } = useAuth()
+
+  useRealtimeSubscription({
+    table: 'meetings',
+    queryKey: ['meetings'],
+  })
+
+  return useQuery({
+    queryKey: ['meetings', 'upcoming', limit],
+    queryFn: async () => {
+      const nowIso = new Date().toISOString()
+      const weekOutIso = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
-        .order('start_time', { ascending: false, nullsFirst: false })
-        .limit(100)
+        .gte('start_time', nowIso)
+        .lte('start_time', weekOutIso)
+        .order('start_time', { ascending: true, nullsFirst: false })
+        .limit(limit)
       if (error) throw error
       return data as Meeting[]
     },

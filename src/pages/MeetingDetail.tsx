@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft, Upload, Loader2, CheckCircle, HelpCircle, Inbox, Trash2, ChevronRight, Check, Plus, Archive, Radio, Lightbulb, Eye, X, AlertCircle } from 'lucide-react'
 import { useMeeting, useUploadTranscript, useDeleteMeeting, useUpdateMeeting, type MeetingImportMode } from '../hooks/useMeetings'
@@ -62,19 +62,24 @@ export default function MeetingDetail() {
   const createItem = useCreateItem()
   const [transcriptText, setTranscriptText] = useState('')
   const [showTranscriptInput, setShowTranscriptInput] = useState(true)
-  const [pendingMode, setPendingMode] = useState<MeetingImportMode>('active')
+  const [pendingModeDraft, setPendingModeDraft] = useState<{
+    meetingId: string | null
+    value: MeetingImportMode
+  }>({ meetingId: null, value: 'active' })
   // Tracks which open-question / decision indices have been converted into items
   const [createdFromQuestion, setCreatedFromQuestion] = useState<Map<number, Item>>(new Map())
   const [createdFromDecision, setCreatedFromDecision] = useState<Map<number, Item>>(new Map())
 
-  // Default the upload picker to the meeting's current mode whenever the
-  // meeting loads/changes, so a fresh visit shows the right pre-selection.
-  useEffect(() => {
-    if (meeting) setPendingMode(meeting.import_mode)
-  }, [meeting?.id, meeting?.import_mode])
-
   if (isLoading || !meeting) {
     return <div className="text-gray-400">Loading...</div>
+  }
+
+  const pendingMode =
+    pendingModeDraft.meetingId === meeting.id
+      ? pendingModeDraft.value
+      : meeting.import_mode
+  const setPendingMode = (value: MeetingImportMode) => {
+    setPendingModeDraft({ meetingId: meeting.id, value })
   }
 
   const pendingCount = meetingProposals?.filter((p) => p.status === 'pending').length ?? 0

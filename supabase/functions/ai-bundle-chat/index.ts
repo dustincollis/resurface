@@ -371,7 +371,7 @@ Bundle name: ${bundle.name}`;
     ];
 
     let finalResponse = "";
-    let totalUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const totalUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
     const t0 = Date.now();
 
     let currentMessages = messages;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Sparkles, X, Check, Loader2, FolderTree } from 'lucide-react'
 import { useProposals } from '../hooks/useProposals'
 import {
@@ -14,16 +14,18 @@ interface Props {
 
 export default function GroupingSuggestion({ group }: Props) {
   const { data: allProposals } = useProposals({ source_type: 'meeting', source_id: group.source_meeting_id })
-  const [title, setTitle] = useState(group.suggested_title)
+  const [titleDraft, setTitleDraft] = useState({
+    sourceTitle: group.suggested_title,
+    value: group.suggested_title,
+  })
   const acceptGroup = useAcceptProposalGroup()
   const rejectGroup = useRejectProposalGroup()
   const removeMember = useRemoveFromProposalGroup()
 
-  // Reset the editable title whenever the AI re-suggests a different one
-  // (e.g. realtime update after a re-process).
-  useEffect(() => {
-    setTitle(group.suggested_title)
-  }, [group.suggested_title])
+  const title =
+    titleDraft.sourceTitle === group.suggested_title
+      ? titleDraft.value
+      : group.suggested_title
 
   const memberProposals = useMemo(() => {
     const byId = new Map<string, Proposal>(
@@ -71,7 +73,12 @@ export default function GroupingSuggestion({ group }: Props) {
           <FolderTree size={14} className="flex-shrink-0 text-purple-400" />
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) =>
+              setTitleDraft({
+                sourceTitle: group.suggested_title,
+                value: e.target.value,
+              })
+            }
             disabled={isPending}
             placeholder="What is this work?"
             className="flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-white placeholder:text-gray-600 focus:border-purple-600 focus:outline-none disabled:opacity-50"

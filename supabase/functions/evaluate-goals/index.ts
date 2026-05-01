@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
             const { count: c } = await q;
             count = c ?? 0;
           } else if (entityType === "meeting") {
-            let q = admin.from("meetings").select("id", { count: "exact", head: true }).eq("user_id", userId);
+            const q = admin.from("meetings").select("id", { count: "exact", head: true }).eq("user_id", userId);
             if (config.filter_company_id) {
               // Would need to join through meeting_attendees → people → companies
               // For now, use title-based filter

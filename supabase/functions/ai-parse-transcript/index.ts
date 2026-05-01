@@ -1,7 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
 import {
-  resolveAttendees,
   createIdentityResolver,
 } from "../_shared/resolve-identity.ts";
 import { recordAiCall } from "../_shared/telemetry.ts";
@@ -1145,7 +1144,7 @@ async function handleActiveMode(
   function normalizeName(s: string): string {
     return s
       .toLowerCase()
-      .replace(/[._\-]+/g, " ")
+      .replace(/[._-]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   }

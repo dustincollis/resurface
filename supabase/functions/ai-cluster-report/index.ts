@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
 
     // Fetch meeting titles for context
     const meetingIds = [...new Set(ideas.map((i) => i.source_meeting_id).filter(Boolean))];
-    let meetingTitles: Record<string, string> = {};
+    const meetingTitles: Record<string, string> = {};
     if (meetingIds.length > 0) {
       const { data: meetings } = await adminClient
         .from("meetings")

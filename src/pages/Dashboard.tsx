@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import {
   Flag, Target, Handshake, CheckSquare, Calendar, AlertTriangle,
@@ -20,6 +20,7 @@ export default function Dashboard() {
   const { data: activeItems } = useItems({ status: ['open', 'in_progress', 'waiting'] })
   const { data: meetings } = useMeetings()
   const { data: pendingProposals } = useProposals({ status: 'pending' })
+  const [nowMs] = useState(() => Date.now())
 
   const openCommitments = useMemo(
     () => (allCommitments ?? []).filter((c) => c.status === 'open' || c.status === 'waiting'),
@@ -57,12 +58,12 @@ export default function Dashboard() {
 
   // Stale items (not touched in 3+ days)
   const staleItems = useMemo(() => {
-    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000
+    const threeDaysAgo = nowMs - 3 * 24 * 60 * 60 * 1000
     return (activeItems ?? [])
       .filter((i) => !i.tracking && new Date(i.last_touched_at).getTime() < threeDaysAgo)
       .sort((a, b) => new Date(a.last_touched_at).getTime() - new Date(b.last_touched_at).getTime())
       .slice(0, 5)
-  }, [activeItems])
+  }, [activeItems, nowMs])
 
   const nonTrackingItems = (activeItems ?? []).filter((i) => !i.tracking)
 
@@ -231,7 +232,7 @@ export default function Dashboard() {
             <Section title="Going stale" icon={<AlertTriangle size={14} className="text-yellow-500" />} linkTo="/focus">
               <div className="space-y-1">
                 {staleItems.map((item) => {
-                  const daysSince = Math.floor((Date.now() - new Date(item.last_touched_at).getTime()) / (1000 * 60 * 60 * 24))
+                  const daysSince = Math.floor((nowMs - new Date(item.last_touched_at).getTime()) / (1000 * 60 * 60 * 24))
                   return (
                     <button
                       key={item.id}

@@ -205,36 +205,55 @@ Deno.serve(async (req) => {
       timeZone: tz,
     }).format(briefingDateForDow);
 
-    // ---- Snapshot: return existing if force=false ----
-    if (!force) {
-      const { data: existing } = await adminClient
-        .from("morning_briefings")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("briefing_date", briefingDate)
-        .maybeSingle();
-      if (existing && existing.status === "ready") {
-        return jsonResponse(existing);
-      }
-    } else {
-      // Force-regenerate: blow away today's row so we don't trip the unique constraint.
-      await adminClient
-        .from("morning_briefings")
-        .delete()
-        .eq("user_id", userId)
-        .eq("briefing_date", briefingDate);
+    // ---- Snapshot row: return ready/generating rows, regenerate failed rows
+    // in place, and never insert into the unique (user_id, briefing_date)
+    // constraint when a row already exists.
+    const { data: existing } = await adminClient
+      .from("morning_briefings")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("briefing_date", briefingDate)
+      .maybeSingle();
+    if (!force && existing?.status === "ready") {
+      return jsonResponse(existing);
+    }
+    if (!force && existing?.status === "generating") {
+      return jsonResponse(existing);
     }
 
-    // Insert a stub row in 'generating' state so the frontend can poll if it wants.
-    const { data: stub, error: stubErr } = await adminClient
-      .from("morning_briefings")
-      .insert({
-        user_id: userId,
-        briefing_date: briefingDate,
-        status: "generating",
-      })
-      .select()
-      .single();
+    const resetFields = {
+      intro_text: null,
+      meetings_data: [],
+      follow_ups_data: [],
+      commitments_data: [],
+      tasks_data: [],
+      status: "generating",
+      error_text: null,
+      ai_model: null,
+      ai_input_tokens: 0,
+      ai_output_tokens: 0,
+      ai_cache_read_tokens: 0,
+      ai_latency_ms: null,
+    };
+
+    const { data: stub, error: stubErr } = existing
+      ? await adminClient
+          .from("morning_briefings")
+          .update(resetFields)
+          .eq("id", existing.id)
+          .select()
+          .single()
+      : await adminClient
+          .from("morning_briefings")
+          .upsert({
+            user_id: userId,
+            briefing_date: briefingDate,
+            ...resetFields,
+          }, {
+            onConflict: "user_id,briefing_date",
+          })
+          .select()
+          .single();
     if (stubErr) throw stubErr;
     const briefingId = stub.id;
 

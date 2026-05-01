@@ -472,7 +472,7 @@ server.tool(
       const meetingIds = Array.from(
         new Set(rows.map((r: { source_meeting_id: string }) => r.source_meeting_id))
       )
-      let titlesById = new Map<string, { title: string | null; start_time: string | null }>()
+      const titlesById = new Map<string, { title: string | null; start_time: string | null }>()
       if (meetingIds.length > 0) {
         const { data: meetings } = await supabase
           .from('meetings')

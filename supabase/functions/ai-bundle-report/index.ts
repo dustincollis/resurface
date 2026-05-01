@@ -443,50 +443,6 @@ async function callClaude(
   return { text, usage: data.usage ?? {} };
 }
 
-async function callClaudeWithTool<T>(
-  anthropicKey: string,
-  system: string,
-  userContent: string,
-  toolName: string,
-  toolDescription: string,
-  inputSchema: Record<string, unknown>,
-  maxTokens: number
-): Promise<{ input: T; usage: Record<string, number> }> {
-  const body: Record<string, unknown> = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
-    tool_choice: { type: "tool", name: toolName },
-    messages: [{ role: "user", content: userContent }],
-  };
-
-  const res = await fetch(ANTHROPIC_API, {
-    method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Claude API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  const toolBlock = (data.content as { type: string; name?: string; input?: unknown }[])
-    .find((b) => b.type === "tool_use" && b.name === toolName);
-
-  if (!toolBlock || typeof toolBlock.input !== "object" || toolBlock.input === null) {
-    throw new Error(`Expected tool_use block '${toolName}' not found`);
-  }
-
-  return { input: toolBlock.input as T, usage: data.usage ?? {} };
-}
-
 // ============================================================
 // Background worker
 // ============================================================
