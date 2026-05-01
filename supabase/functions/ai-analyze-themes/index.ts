@@ -310,7 +310,13 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 8000,
+        // Adaptive thinking and output share this budget. With Opus 4.7
+        // thinking up to ~10k tokens on a long corpus, the structured
+        // JSON output (themes + evidence arrays + one-offs) needs real
+        // headroom on top. 8000 was getting truncated mid-evidence in
+        // the first real run; 32000 leaves plenty of room while keeping
+        // single-run cost predictable (~$0.50 worst case at full budget).
+        max_tokens: 32000,
         // Adaptive thinking: Claude decides when and how much to think.
         // Right for open-ended judgment over a long corpus. Note that on
         // Opus 4.7 temperature/top_p are not accepted with adaptive
