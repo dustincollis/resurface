@@ -37,6 +37,10 @@ import MicrosoftCallback from './pages/MicrosoftCallback'
 import BundleLayout from './components/BundleLayout'
 import Events from './pages/Events'
 import EventDetail from './pages/EventDetail'
+import PreBriefs from './pages/utility/PreBriefs'
+import Momentum from './pages/utility/Momentum'
+import Quiet from './pages/utility/Quiet'
+import Similar from './pages/utility/Similar'
 
 export default function App() {
   return (
@@ -66,6 +70,10 @@ export default function App() {
               <Route path="goals/:id" element={<GoalDetail />} />
               <Route path="ideas" element={<Ideas />} />
               <Route path="themes" element={<Themes />} />
+              <Route path="utility/prebriefs" element={<PreBriefs />} />
+              <Route path="utility/momentum" element={<Momentum />} />
+              <Route path="utility/quiet" element={<Quiet />} />
+              <Route path="utility/similar" element={<Similar />} />
               <Route path="people" element={<People />} />
               <Route path="people/:id" element={<PersonDetail />} />
               <Route path="companies" element={<Companies />} />

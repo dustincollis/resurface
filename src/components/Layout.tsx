@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Navigate, NavLink, Outlet } from 'react-router-dom'
 import { Search, LogOut, ChevronRight, ChevronDown, Plus, Menu, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useStreams } from '../hooks/useStreams'
@@ -32,6 +32,13 @@ const directoryItems = [
   { to: '/streams', label: 'Streams' },
 ]
 
+const utilityItems = [
+  { to: '/utility/prebriefs', label: 'Pre-Briefs' },
+  { to: '/utility/momentum', label: 'Momentum' },
+  { to: '/utility/quiet', label: 'Going Quiet' },
+  { to: '/utility/similar', label: 'Similar' },
+]
+
 function formatSidebarTimestamp(d: Date): string {
   const day = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()
   const mon = d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()
@@ -51,11 +58,11 @@ export default function Layout() {
   const { data: ideaCounts } = useIdeaCounts()
   const [searchOpen, setSearchOpen] = useState(false)
   const [directoryOpen, setDirectoryOpen] = useState(false)
+  const [utilityOpen, setUtilityOpen] = useState(false)
   // Mobile drawer state. On lg+ the sidebar is always visible; this is
   // ignored. On phone, the sidebar is a slide-in overlay controlled by
   // a hamburger button in the top bar.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const location = useLocation()
   const surfacedCount = ideaCounts?.surfaced ?? 0
 
   // Cmd+K / Ctrl+K to open search
@@ -69,12 +76,6 @@ export default function Layout() {
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [])
-
-  // Close mobile drawer whenever the route changes — tapping a nav link
-  // dismisses it without the user having to manually close.
-  useEffect(() => {
-    setMobileNavOpen(false)
-  }, [location.pathname])
 
   if (loading) {
     return (
@@ -189,6 +190,7 @@ export default function Layout() {
               key={to}
               to={to}
               end={to === '/'}
+              onClick={() => setMobileNavOpen(false)}
               className={({ isActive }) =>
                 `flex items-center rounded-lg px-3 py-1.5 text-sm transition-colors ${
                   isActive
@@ -222,6 +224,38 @@ export default function Layout() {
                 <NavLink
                   key={to}
                   to={to}
+                  onClick={() => setMobileNavOpen(false)}
+                  className={({ isActive }) =>
+                    `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                      isActive
+                        ? 'bg-gray-800 text-white'
+                        : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                    }`
+                  }
+                >
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Utility — collapsible section for analytical surfaces */}
+        <div className="border-t border-gray-800 px-2 pt-2">
+          <button
+            onClick={() => setUtilityOpen(!utilityOpen)}
+            className="flex w-full items-center gap-2 px-3 py-1 text-xs font-medium uppercase tracking-wider text-gray-600 hover:text-gray-400"
+          >
+            {utilityOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            Utility
+          </button>
+          {utilityOpen && (
+            <div className="mt-0.5 space-y-0.5">
+              {utilityItems.map(({ to, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  onClick={() => setMobileNavOpen(false)}
                   className={({ isActive }) =>
                     `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                       isActive
@@ -243,6 +277,7 @@ export default function Layout() {
             <NavLink
               key={stream.id}
               to={`/stream/${stream.id}`}
+              onClick={() => setMobileNavOpen(false)}
               className={({ isActive }) =>
                 `flex items-center gap-2 rounded-lg px-3 py-1 text-sm transition-colors ${
                   isActive
@@ -260,6 +295,7 @@ export default function Layout() {
           ))}
           <NavLink
             to="/stream/uncategorized"
+            onClick={() => setMobileNavOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-2 rounded-lg px-3 py-1 text-sm transition-colors ${
                 isActive
@@ -283,6 +319,7 @@ export default function Layout() {
           <NavLink
             to="/settings"
             end
+            onClick={() => setMobileNavOpen(false)}
             className={({ isActive }) =>
               `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 isActive
@@ -295,6 +332,7 @@ export default function Layout() {
           </NavLink>
           <NavLink
             to="/settings/analytics"
+            onClick={() => setMobileNavOpen(false)}
             className={({ isActive }) =>
               `block rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 isActive
