@@ -87,8 +87,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    let synced = 0;
-    let updated = 0;
     let skipped = 0;
 
     // Helper: parse semicolon-separated email strings (Power Automate format)
@@ -174,96 +172,72 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Batch-check which external IDs already exist
-    const externalIds = rows
-      .map((r) => r.externalId)
-      .filter((id): id is string => id !== null);
+    // Bulk upsert — single round-trip for the whole batch. The unique
+    // partial index on (user_id, external_source_id) WHERE external_source_id
+    // IS NOT NULL (migration 20260409020000) handles the conflict resolution.
+    // Rows without an external_source_id always insert (NULL is not equal
+    // to NULL in unique constraints), which is the right behavior for
+    // events that lack an Outlook ID.
+    //
+    // .select() returns the upserted rows so we know which meetings to
+    // run identity resolution against, instead of scanning every
+    // calendar_sync row in the table.
+    const upsertPayload = rows.map((r) => r.data);
+    let upserted: Array<{ id: string; attendees: string[] | null }> = [];
 
-    const existingMap = new Map<string, string>();
-    if (externalIds.length > 0) {
-      const { data: existingRows } = await adminClient
+    if (upsertPayload.length > 0) {
+      const { data, error: upsertErr } = await adminClient
         .from("meetings")
-        .select("id, external_source_id")
-        .eq("user_id", userId)
-        .in("external_source_id", externalIds);
-      for (const row of existingRows ?? []) {
-        existingMap.set(row.external_source_id, row.id);
+        .upsert(upsertPayload, {
+          onConflict: "user_id,external_source_id",
+          ignoreDuplicates: false,
+        })
+        .select("id, attendees");
+
+      if (upsertErr) {
+        console.error("[calendar-sync] upsert error:", upsertErr);
+        return new Response(
+          JSON.stringify({
+            error: "Bulk upsert failed",
+            detail: upsertErr.message,
+            code: (upsertErr as { code?: string }).code ?? null,
+          }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-    }
-
-    // Process rows — updates and inserts
-    for (const row of rows) {
-      const existingId = row.externalId ? existingMap.get(row.externalId) : undefined;
-
-      if (existingId) {
-        await adminClient
-          .from("meetings")
-          .update({
-            title: row.data.title,
-            start_time: row.data.start_time,
-            end_time: row.data.end_time,
-            location: row.data.location,
-            attendees: row.data.attendees,
-          })
-          .eq("id", existingId);
-        updated++;
-        continue;
-      }
-
-      const { error: insertErr } = await adminClient
-        .from("meetings")
-        .insert(row.data);
-
-      if (insertErr) {
-        const code = (insertErr as { code?: string }).code;
-        if (code === "23505") { skipped++; continue; }
-        console.error("[calendar-sync] insert error:", insertErr);
-        skipped++;
-        continue;
-      }
-
-      synced++;
+      upserted = (data ?? []) as Array<{ id: string; attendees: string[] | null }>;
     }
 
     // Resolve attendees → people and link via meeting_attendees junction.
-    // Run async after the main sync to avoid slowing down the response.
-    // We process all meetings that were synced or updated this run.
+    // Scoped to just the rows we touched this run, not every calendar_sync
+    // row that ever existed. Failures here don't fail the whole sync —
+    // identity resolution is best-effort backfill.
     try {
-      const allMeetingIds: string[] = [];
-
-      // Collect meeting IDs for newly inserted rows
-      if (synced > 0 || updated > 0) {
-        const { data: syncedMeetings } = await adminClient
-          .from("meetings")
-          .select("id, attendees")
-          .eq("user_id", userId)
-          .eq("source", "calendar_sync")
-          .not("attendees", "is", null);
-
-        for (const m of syncedMeetings ?? []) {
-          const attendees: string[] = m.attendees ?? [];
-          if (attendees.length === 0) continue;
-
-          const personIds = await resolveAttendees(adminClient, userId, attendees);
-          if (personIds.length > 0) {
-            const junctionRows = personIds.map((pid: string) => ({
-              meeting_id: m.id,
-              person_id: pid,
-            }));
-            await adminClient.from("meeting_attendees").upsert(junctionRows, {
-              onConflict: "meeting_id,person_id",
-              ignoreDuplicates: true,
-            });
-          }
-        }
+      for (const m of upserted) {
+        const attendees = m.attendees ?? [];
+        if (attendees.length === 0) continue;
+        const personIds = await resolveAttendees(adminClient, userId, attendees);
+        if (personIds.length === 0) continue;
+        const junctionRows = personIds.map((pid: string) => ({
+          meeting_id: m.id,
+          person_id: pid,
+        }));
+        await adminClient.from("meeting_attendees").upsert(junctionRows, {
+          onConflict: "meeting_id,person_id",
+          ignoreDuplicates: true,
+        });
       }
     } catch (linkErr) {
-      // Don't fail the whole sync if identity resolution has issues
       console.warn("[calendar-sync] identity resolution warning:", linkErr);
     }
 
     return new Response(
-      JSON.stringify({ ok: true, synced, updated, skipped, total: events.length }),
+      JSON.stringify({
+        ok: true,
+        processed: upserted.length,
+        skipped,
+        total: events.length,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
