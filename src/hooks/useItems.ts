@@ -169,6 +169,30 @@ export function useItemsByDiscussion(meetingId: string) {
   })
 }
 
+// Bulk variant for the Focus page's meeting-grouping: given a set of
+// meeting IDs that have 2+ active items, fetch ALL items (including
+// done) for those meetings in one round trip. Used to render done
+// siblings grayed out inside the group card.
+export function useItemsByMeetings(meetingIds: string[]) {
+  // Stable cache key — sorted IDs joined into a single string so the
+  // same set in different orders still hits the same query.
+  const key = [...meetingIds].sort().join(',')
+  return useQuery({
+    queryKey: ['items', 'by_meetings', key],
+    queryFn: async () => {
+      if (meetingIds.length === 0) return [] as Item[]
+      const { data, error } = await supabase
+        .from('items')
+        .select('*, streams(*)')
+        .in('source_meeting_id', meetingIds)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return data as Item[]
+    },
+    enabled: meetingIds.length > 0,
+  })
+}
+
 export interface ProposedSubTask {
   title: string
   description: string

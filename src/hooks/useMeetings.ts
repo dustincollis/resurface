@@ -60,6 +60,26 @@ export function useMeetings() {
   })
 }
 
+// Lightweight: just titles for a set of IDs. Used by Focus's
+// meeting-grouping to label each group card.
+export function useMeetingTitlesByIds(ids: string[]) {
+  const { user } = useAuth()
+  const key = [...ids].sort().join(',')
+  return useQuery({
+    queryKey: ['meetings', 'titles_by_ids', key],
+    queryFn: async () => {
+      if (ids.length === 0) return [] as Array<{ id: string; title: string | null }>
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('id, title')
+        .in('id', ids)
+      if (error) throw error
+      return data as Array<{ id: string; title: string | null }>
+    },
+    enabled: !!user && ids.length > 0,
+  })
+}
+
 export function useMeeting(id: string) {
   return useQuery({
     queryKey: ['meetings', id],

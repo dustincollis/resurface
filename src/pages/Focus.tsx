@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Clock, Check, ChevronDown, ChevronUp, Sparkles, Play, Zap, Pin, AlarmClockOff, FolderTree, Plus } from 'lucide-react'
-import { useItems, useTouchItem, useUpdateItem, useUnsnoozeItem } from '../hooks/useItems'
+import { useItems, useTouchItem, useUpdateItem, useUnsnoozeItem, useItemsByMeetings } from '../hooks/useItems'
 import { useStreams } from '../hooks/useStreams'
+import { useMeetingTitlesByIds } from '../hooks/useMeetings'
+import MeetingGroupCard from '../components/MeetingGroupCard'
 import { useEasyButton, type EasyButtonResult } from '../hooks/useEasyButton'
 // ItemCard removed — focus mode uses compact FocusCards only
 import AddMenu from '../components/AddMenu'
@@ -13,6 +15,7 @@ import {
   getSuggestedMove,
   sortByPriority,
   effectiveStalenessLevel,
+  formatDueLabel,
   type SurfaceReason,
   type SuggestedMove,
 } from '../lib/priorityScore'
@@ -32,17 +35,6 @@ function ReasonChip({ reason }: { reason: SurfaceReason }) {
       {reason.label}
     </span>
   )
-}
-
-function formatDueLabel(dateStr: string): { text: string; tone: 'red' | 'orange' | 'gray' } {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  if (diffDays < 0) return { text: `${Math.abs(diffDays)}d overdue`, tone: 'red' }
-  if (diffDays === 0) return { text: 'Due today', tone: 'orange' }
-  if (diffDays === 1) return { text: 'Due tomorrow', tone: 'orange' }
-  if (diffDays <= 7) return { text: `Due in ${diffDays}d`, tone: 'gray' }
-  return { text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), tone: 'gray' }
 }
 
 // All three suggested actions get the same visual weight — they're equally
@@ -282,6 +274,76 @@ export default function Focus() {
     return [...pinned, ...unpinned.slice(0, remainingSlots)]
   }, [sortedActiveItems])
   const hiddenCount = sortedActiveItems.length - focusItems.length
+
+  // ---- Meeting grouping ----
+  // When 2+ active items share a source_meeting_id, render them as one
+  // card instead of disparate FocusCards. Light grouping that preserves
+  // per-task access. The group's anchor position in the priority list
+  // is the position of its highest-priority member.
+  const meetingToActiveItems = useMemo(() => {
+    const m = new Map<string, Item[]>()
+    if (!visibleActiveItems) return m
+    for (const item of visibleActiveItems) {
+      if (!item.source_meeting_id) continue
+      const arr = m.get(item.source_meeting_id) ?? []
+      arr.push(item)
+      m.set(item.source_meeting_id, arr)
+    }
+    return m
+  }, [visibleActiveItems])
+
+  const groupMeetingIds = useMemo(() => {
+    const ids: string[] = []
+    for (const [mid, items] of meetingToActiveItems.entries()) {
+      if (items.length >= 2) ids.push(mid)
+    }
+    return ids
+  }, [meetingToActiveItems])
+
+  // Pull ALL items (incl. done) for group meetings so we can render
+  // done siblings grayed out inside the group card.
+  const { data: allMeetingItems } = useItemsByMeetings(groupMeetingIds)
+  const { data: meetingTitleRows } = useMeetingTitlesByIds(groupMeetingIds)
+  const titlesById = useMemo(() => {
+    const m = new Map<string, string | null>()
+    for (const t of meetingTitleRows ?? []) m.set(t.id, t.title)
+    return m
+  }, [meetingTitleRows])
+  const allItemsByMeeting = useMemo(() => {
+    const m = new Map<string, Item[]>()
+    for (const item of allMeetingItems ?? []) {
+      if (!item.source_meeting_id) continue
+      const arr = m.get(item.source_meeting_id) ?? []
+      arr.push(item)
+      m.set(item.source_meeting_id, arr)
+    }
+    return m
+  }, [allMeetingItems])
+
+  // Build the focus render list: walk focusItems in priority order; for
+  // each item, emit either a solo FocusCard or — if the item is part
+  // of a group — the group ONCE (subsequent siblings are skipped, they
+  // render inside the group). Group's rank = its first-encountered
+  // member's position.
+  type RenderEntry =
+    | { kind: 'solo'; item: Item }
+    | { kind: 'group'; meetingId: string }
+  const renderEntries = useMemo(() => {
+    const entries: RenderEntry[] = []
+    const seenInGroup = new Set<string>()
+    const groupSet = new Set(groupMeetingIds)
+    for (const item of focusItems) {
+      if (seenInGroup.has(item.id)) continue
+      if (item.source_meeting_id && groupSet.has(item.source_meeting_id)) {
+        entries.push({ kind: 'group', meetingId: item.source_meeting_id })
+        const siblings = meetingToActiveItems.get(item.source_meeting_id) ?? []
+        for (const s of siblings) seenInGroup.add(s.id)
+      } else {
+        entries.push({ kind: 'solo', item })
+      }
+    }
+    return entries
+  }, [focusItems, groupMeetingIds, meetingToActiveItems])
   const snoozedItems = useMemo(() => {
     if (!activeItems) return []
     return activeItems.filter(
@@ -353,9 +415,26 @@ export default function Focus() {
       ) : focusItems.length > 0 ? (
         <>
           <div className="grid grid-cols-2 gap-3">
-            {focusItems.map((item, i) => (
-              <FocusCard key={item.id} item={item} rank={i + 1} />
-            ))}
+            {renderEntries.map((entry, i) =>
+              entry.kind === 'group' ? (
+                <div key={`grp-${entry.meetingId}`} className="col-span-2">
+                  <MeetingGroupCard
+                    meeting={{
+                      id: entry.meetingId,
+                      title: titlesById.get(entry.meetingId) ?? null,
+                    }}
+                    items={
+                      allItemsByMeeting.get(entry.meetingId) ??
+                      meetingToActiveItems.get(entry.meetingId) ??
+                      []
+                    }
+                    rank={i + 1}
+                  />
+                </div>
+              ) : (
+                <FocusCard key={entry.item.id} item={entry.item} rank={i + 1} />
+              ),
+            )}
           </div>
           {(hiddenCount > 0 || snoozedCount > 0) && (
             <div className="mt-3 text-center">

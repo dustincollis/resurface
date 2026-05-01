@@ -260,3 +260,16 @@ export function sortByPriority(items: Item[]): Item[] {
     return computePriority(b) - computePriority(a)
   })
 }
+
+// Render a due-date label with a tone hint. Used wherever items are
+// listed (Focus, MeetingGroupCard, etc).
+export function formatDueLabel(dateStr: string): { text: string; tone: 'red' | 'orange' | 'gray' } {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays < 0) return { text: `${Math.abs(diffDays)}d overdue`, tone: 'red' }
+  if (diffDays === 0) return { text: 'Due today', tone: 'orange' }
+  if (diffDays === 1) return { text: 'Due tomorrow', tone: 'orange' }
+  if (diffDays <= 7) return { text: `Due in ${diffDays}d`, tone: 'gray' }
+  return { text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), tone: 'gray' }
+}
