@@ -9,7 +9,10 @@ export interface PreBrief {
     start_time: string
     location: string | null
     attendees_raw: string[]
+    attendee_count: number
   }
+  context_status: 'ready' | 'skipped_large_meeting'
+  context_note: string | null
   attendees: Array<{
     raw: string
     person_id: string | null

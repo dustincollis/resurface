@@ -8,6 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
 
 const MAX_MEETINGS = 20;
+const LARGE_MEETING_ATTENDEE_THRESHOLD = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 interface MeetingRow {
@@ -90,7 +91,10 @@ interface PreBrief {
     start_time: string;
     location: string | null;
     attendees_raw: string[];
+    attendee_count: number;
   };
+  context_status: "ready" | "skipped_large_meeting";
+  context_note: string | null;
   attendees: PreBriefAttendee[];
   primary_company: {
     id: string;
@@ -256,6 +260,24 @@ Deno.serve(async (req) => {
 
     for (const meeting of meetings) {
       const rawAttendees = (meeting.attendees ?? []).filter((a) => a.trim().length > 0);
+      if (rawAttendees.length >= LARGE_MEETING_ATTENDEE_THRESHOLD) {
+        briefs.push({
+          meeting: {
+            id: meeting.id,
+            title: meeting.title,
+            start_time: meeting.start_time,
+            location: meeting.location,
+            attendees_raw: [],
+            attendee_count: rawAttendees.length,
+          },
+          context_status: "skipped_large_meeting",
+          context_note: `Large meeting with ${rawAttendees.length} attendees; attendee context skipped.`,
+          attendees: [],
+          primary_company: null,
+        });
+        continue;
+      }
+
       const attendeeContexts = await Promise.all(
         rawAttendees.map(async (raw): Promise<PreBriefAttendee> => {
           const person = resolveAttendee(raw, people);
@@ -443,7 +465,10 @@ Deno.serve(async (req) => {
           start_time: meeting.start_time,
           location: meeting.location,
           attendees_raw: rawAttendees,
+          attendee_count: rawAttendees.length,
         },
+        context_status: "ready",
+        context_note: null,
         attendees: attendeeContexts,
         primary_company: primaryCompany,
       });

@@ -42,6 +42,7 @@ function attendeeHasContext(attendee: PreBrief['attendees'][number]) {
 }
 
 function briefHasContext(brief: PreBrief) {
+  if (brief.context_status === 'skipped_large_meeting') return true
   const hasAttendeeContext = brief.attendees.some(attendeeHasContext)
   const hasCompanyContext = Boolean(
     brief.primary_company &&
@@ -233,6 +234,9 @@ function CompanyContext({ company }: { company: NonNullable<PreBrief['primary_co
 }
 
 function PreBriefCard({ brief }: { brief: PreBrief }) {
+  const attendeeCount = brief.meeting.attendee_count ?? brief.meeting.attendees_raw.length
+  const isLargeMeeting = brief.context_status === 'skipped_large_meeting'
+
   return (
     <article className="rounded-lg border border-gray-800 bg-gray-900 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -258,9 +262,23 @@ function PreBriefCard({ brief }: { brief: PreBrief }) {
         </div>
         <div className="inline-flex shrink-0 items-center gap-1 text-xs text-gray-500">
           <Users size={13} />
-          {brief.meeting.attendees_raw.length}
+          {attendeeCount}
         </div>
       </div>
+
+      {isLargeMeeting && (
+        <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950/45 px-3 py-2">
+          <div className="flex gap-2 text-xs text-gray-400">
+            <Users size={13} className="mt-0.5 shrink-0 text-gray-600" />
+            <div>
+              <div className="font-medium text-gray-300">Large meeting</div>
+              <div className="mt-0.5 text-gray-500">
+                {brief.context_note ?? 'Attendee context skipped for this meeting.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!briefHasContext(brief) && (
         <p className="mt-4 rounded-lg border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
@@ -274,15 +292,17 @@ function PreBriefCard({ brief }: { brief: PreBrief }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-3">
-        {brief.attendees.length > 0 ? (
-          brief.attendees.map((attendee) => (
-            <AttendeeBlock key={`${brief.meeting.id}:${attendee.raw}`} attendee={attendee} />
-          ))
-        ) : (
-          <p className="text-sm text-gray-600">No attendees on the invite.</p>
-        )}
-      </div>
+      {!isLargeMeeting && (
+        <div className="mt-4 grid gap-3">
+          {brief.attendees.length > 0 ? (
+            brief.attendees.map((attendee) => (
+              <AttendeeBlock key={`${brief.meeting.id}:${attendee.raw}`} attendee={attendee} />
+            ))
+          ) : (
+            <p className="text-sm text-gray-600">No attendees on the invite.</p>
+          )}
+        </div>
+      )}
     </article>
   )
 }
