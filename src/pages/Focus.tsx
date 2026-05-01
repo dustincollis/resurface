@@ -16,6 +16,7 @@ import {
   sortByPriority,
   effectiveStalenessLevel,
   formatDueLabel,
+  computePriority,
   type SurfaceReason,
   type SuggestedMove,
 } from '../lib/priorityScore'
@@ -266,14 +267,6 @@ export default function Focus() {
     () => sortByPriority(visibleActiveItems),
     [visibleActiveItems]
   )
-  // Always include pinned items + top FOCUS_LIMIT by priority
-  const focusItems = useMemo(() => {
-    const pinned = sortedActiveItems.filter((item) => item.pinned)
-    const unpinned = sortedActiveItems.filter((item) => !item.pinned)
-    const remainingSlots = Math.max(FOCUS_LIMIT - pinned.length, 0)
-    return [...pinned, ...unpinned.slice(0, remainingSlots)]
-  }, [sortedActiveItems])
-  const hiddenCount = sortedActiveItems.length - focusItems.length
 
   // ---- Meeting grouping ----
   // When 2+ active items share a source_meeting_id, render them as one
@@ -320,30 +313,88 @@ export default function Focus() {
     return m
   }, [allMeetingItems])
 
-  // Build the focus render list: walk focusItems in priority order; for
-  // each item, emit either a solo FocusCard or — if the item is part
-  // of a group — the group ONCE (subsequent siblings are skipped, they
-  // render inside the group). Group's rank = its first-encountered
-  // member's position.
+  // Build the focus render list. New model: groups ALWAYS show,
+  // regardless of whether their members would individually rank in the
+  // top FOCUS_LIMIT. Solo items still fill the remaining focus slots.
+  // Reasoning: when 5 sibling tasks exist for one meeting, treating each
+  // as an independent priority candidate scatters them — one might rank
+  // top-5, the others rank 30+ and disappear. Showing the group as a
+  // unit preserves the context the grouping is supposed to expose.
   type RenderEntry =
-    | { kind: 'solo'; item: Item }
-    | { kind: 'group'; meetingId: string }
+    | { kind: 'solo'; item: Item; priority: number; pinned: boolean }
+    | { kind: 'group'; meetingId: string; items: Item[]; priority: number; pinned: boolean }
   const renderEntries = useMemo(() => {
-    const entries: RenderEntry[] = []
-    const seenInGroup = new Set<string>()
+    if (!visibleActiveItems) return []
     const groupSet = new Set(groupMeetingIds)
-    for (const item of focusItems) {
-      if (seenInGroup.has(item.id)) continue
-      if (item.source_meeting_id && groupSet.has(item.source_meeting_id)) {
-        entries.push({ kind: 'group', meetingId: item.source_meeting_id })
-        const siblings = meetingToActiveItems.get(item.source_meeting_id) ?? []
-        for (const s of siblings) seenInGroup.add(s.id)
-      } else {
-        entries.push({ kind: 'solo', item })
+
+    // Build group entries (always included).
+    const groupedItemIds = new Set<string>()
+    const groupEntries: RenderEntry[] = []
+    for (const mid of groupSet) {
+      const siblings = meetingToActiveItems.get(mid) ?? []
+      if (siblings.length < 2) continue
+      let maxPriority = -Infinity
+      let hasPinned = false
+      for (const s of siblings) {
+        const p = computePriority(s)
+        if (p > maxPriority) maxPriority = p
+        if (s.pinned) hasPinned = true
+        groupedItemIds.add(s.id)
       }
+      groupEntries.push({
+        kind: 'group',
+        meetingId: mid,
+        items: siblings,
+        priority: maxPriority,
+        pinned: hasPinned,
+      })
     }
-    return entries
-  }, [focusItems, groupMeetingIds, meetingToActiveItems])
+
+    // Solo items = active items NOT inside any group.
+    const soloItems = visibleActiveItems.filter((i) => !groupedItemIds.has(i.id))
+    const pinnedSolos = soloItems.filter((i) => i.pinned)
+    const unpinnedSolos = soloItems
+      .filter((i) => !i.pinned)
+      .sort((a, b) => computePriority(b) - computePriority(a))
+
+    // Solo budget: focus limit minus pinned solos minus groups (each
+    // group occupies one slot in the focus surface).
+    const remainingSlots = Math.max(
+      FOCUS_LIMIT - pinnedSolos.length - groupEntries.length,
+      0,
+    )
+    const visibleSolos = [
+      ...pinnedSolos,
+      ...unpinnedSolos.slice(0, remainingSlots),
+    ]
+    const soloEntries: RenderEntry[] = visibleSolos.map((i) => ({
+      kind: 'solo',
+      item: i,
+      priority: computePriority(i),
+      pinned: i.pinned,
+    }))
+
+    // Combine + sort: pinned first, then by priority desc.
+    const all = [...groupEntries, ...soloEntries]
+    all.sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1
+      if (!a.pinned && b.pinned) return 1
+      return b.priority - a.priority
+    })
+    return all
+  }, [visibleActiveItems, groupMeetingIds, meetingToActiveItems])
+
+  // hiddenCount needs adjusting now that groups always show — count
+  // active items that didn't make it into any rendered entry.
+  const renderedItemIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const e of renderEntries) {
+      if (e.kind === 'group') for (const i of e.items) s.add(i.id)
+      else s.add(e.item.id)
+    }
+    return s
+  }, [renderEntries])
+  const hiddenCount = (visibleActiveItems?.length ?? 0) - renderedItemIds.size
   const snoozedItems = useMemo(() => {
     if (!activeItems) return []
     return activeItems.filter(
@@ -361,8 +412,7 @@ export default function Focus() {
 
   // Remaining items (not in focus), sorted by due date (calendar order)
   const remainingByDate = useMemo(() => {
-    const focusIds = new Set(focusItems.map((i) => i.id))
-    const remaining = sortedActiveItems.filter((i) => !focusIds.has(i.id))
+    const remaining = sortedActiveItems.filter((i) => !renderedItemIds.has(i.id))
     return remaining.slice().sort((a, b) => {
       // Items with due dates come first, sorted ascending
       if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
@@ -371,7 +421,7 @@ export default function Focus() {
       // No due date: fall back to created_at ascending
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     })
-  }, [sortedActiveItems, focusItems])
+  }, [sortedActiveItems, renderedItemIds])
 
   if (!streamsLoading && streams && streams.length === 0 && !onboardingDismissed) {
     return <OnboardingWizard onComplete={() => setOnboardingDismissed(true)} />
@@ -382,7 +432,7 @@ export default function Focus() {
       {/* Top bar: count + actions */}
       <div className="mb-3 flex items-center gap-3">
         <span className="text-xs text-gray-500">
-          {focusItems.length} of {sortedActiveItems.length} active
+          {renderedItemIds.size} of {sortedActiveItems.length} active
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -412,7 +462,7 @@ export default function Focus() {
 
       {isLoading ? (
         <div className="text-sm text-gray-500">Loading...</div>
-      ) : focusItems.length > 0 ? (
+      ) : renderEntries.length > 0 ? (
         <>
           <div className="grid grid-cols-2 gap-3">
             {renderEntries.map((entry, i) =>
