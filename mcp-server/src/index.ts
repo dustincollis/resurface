@@ -31,22 +31,29 @@ const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 
-let authedUserId: string | null = null
-
+// Verify a live session before each query rather than caching a userId
+// forever. The MCP process is long-lived (stdio stays open across many
+// tool calls); Supabase access tokens expire after ~1hr. The SDK's
+// autoRefreshToken flag is best-effort and can drift — when it does,
+// queries silently return [] under RLS instead of erroring, which is
+// the worst possible failure mode (you don't notice until you do).
+//
+// getSession() is a local, in-memory check — cheap. We only re-sign-in
+// when the session is missing or within 60s of expiry.
 async function ensureAuthed(): Promise<string> {
-  if (authedUserId) return authedUserId
+  const { data: { session } } = await supabase.auth.getSession()
+  const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0
+  const isFresh = session?.user && expiresAtMs > Date.now() + 60_000
+  if (isFresh) return session!.user.id
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: email!,
     password: password!,
   })
-
   if (error || !data.user) {
     throw new Error(`Supabase sign-in failed: ${error?.message ?? 'unknown error'}`)
   }
-
-  authedUserId = data.user.id
-  return authedUserId
+  return data.user.id
 }
 
 // ============================================================
