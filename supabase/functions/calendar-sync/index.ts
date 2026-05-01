@@ -14,7 +14,23 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 import { corsHeaders } from "../_shared/cors.ts";
-import { resolveAttendees } from "../_shared/resolve-identity.ts";
+import { createIdentityResolver } from "../_shared/resolve-identity.ts";
+
+// Power Automate's Outlook connector helpfully wraps email strings as
+// markdown links: "[name@x.com](mailto:name@x.com)". Strip back to the
+// raw email so identity resolution works (and we don't end up with
+// people rows whose names are markdown blobs).
+function unwrapMarkdownEmail(s: string): string {
+  const m = s.match(/^\[([^\]]+@[^\]]+)\]\(mailto:[^)]+\)$/);
+  return m ? m[1] : s;
+}
+
+// Above this attendee count, a meeting is a broadcast (all-hands, RTBs,
+// org-wide invites) and per-attendee identity resolution adds no signal —
+// we'd just be creating ephemeral people rows for every one-off recipient.
+// The meeting still upserts with the full attendees array intact; we just
+// don't try to resolve each name to a person record.
+const ATTENDEE_RESOLUTION_CAP = 30;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -91,9 +107,14 @@ Deno.serve(async (req) => {
 
     // Helper: parse semicolon-separated email strings (Power Automate format)
     // e.g. "Holly_Quinones@epam.com;Tomasz_Balcerek@epam.com;Dustin_Collis@epam.com;"
+    // Also handles markdown-wrapped emails that Power Automate's connector
+    // sometimes emits: "[name@x.com](mailto:name@x.com)" → "name@x.com".
     const parseSemicolonEmails = (raw: unknown): string[] => {
       if (typeof raw !== "string" || !raw.trim()) return [];
-      return raw.split(";").map((s) => s.trim()).filter(Boolean);
+      return raw
+        .split(";")
+        .map((s) => unwrapMarkdownEmail(s.trim()))
+        .filter(Boolean);
     };
 
     // Helper: parse a start/end time value
@@ -209,26 +230,59 @@ Deno.serve(async (req) => {
     }
 
     // Resolve attendees → people and link via meeting_attendees junction.
-    // Scoped to just the rows we touched this run, not every calendar_sync
-    // row that ever existed. Failures here don't fail the whole sync —
-    // identity resolution is best-effort backfill.
-    try {
-      for (const m of upserted) {
-        const attendees = m.attendees ?? [];
-        if (attendees.length === 0) continue;
-        const personIds = await resolveAttendees(adminClient, userId, attendees);
-        if (personIds.length === 0) continue;
-        const junctionRows = personIds.map((pid: string) => ({
-          meeting_id: m.id,
-          person_id: pid,
-        }));
-        await adminClient.from("meeting_attendees").upsert(junctionRows, {
-          onConflict: "meeting_id,person_id",
-          ignoreDuplicates: true,
-        });
+    // Run this in the background after responding — Power Automate's HTTP
+    // action gives up if we sit on the response while we resolve hundreds
+    // of attendees. The meeting upsert itself is already done; identity
+    // resolution is best-effort backfill that just connects already-stored
+    // attendees to person records.
+    //
+    // Three additional cost-control measures vs the prior implementation:
+    //   1. Share ONE resolver across all meetings — the old code created a
+    //      fresh resolver per meeting, which meant N full-table preloads of
+    //      people + companies. Now it's one preload for the whole batch.
+    //   2. Cap per-meeting at ATTENDEE_RESOLUTION_CAP. Above that threshold
+    //      the meeting is a broadcast (RTB, all-hands) and each attendee is
+    //      a one-off the user has no relationship with — resolving them
+    //      adds noise, not signal.
+    //   3. Failures don't propagate — log and continue.
+    const resolver = createIdentityResolver(adminClient, userId);
+    const backgroundWork = (async () => {
+      try {
+        await resolver.preload();
+        for (const m of upserted) {
+          const attendees = m.attendees ?? [];
+          if (attendees.length === 0) continue;
+          if (attendees.length > ATTENDEE_RESOLUTION_CAP) {
+            console.log(
+              `[calendar-sync] skipping identity resolution for meeting ${m.id} (${attendees.length} attendees, cap is ${ATTENDEE_RESOLUTION_CAP})`,
+            );
+            continue;
+          }
+          const personIds = await resolver.resolveAttendees(attendees);
+          if (personIds.length === 0) continue;
+          const junctionRows = personIds.map((pid: string) => ({
+            meeting_id: m.id,
+            person_id: pid,
+          }));
+          await adminClient.from("meeting_attendees").upsert(junctionRows, {
+            onConflict: "meeting_id,person_id",
+            ignoreDuplicates: true,
+          });
+        }
+      } catch (linkErr) {
+        console.warn("[calendar-sync] identity resolution warning:", linkErr);
       }
-    } catch (linkErr) {
-      console.warn("[calendar-sync] identity resolution warning:", linkErr);
+    })();
+
+    // Hand the background promise to the runtime so it isn't killed when
+    // we return. Falls through cleanly on local dev / older runtimes that
+    // don't expose EdgeRuntime — there the work just runs in-line because
+    // we still hold a reference to the promise (but the response is sent
+    // first, so Power Automate isn't blocked either way).
+    // deno-lint-ignore no-explicit-any
+    const er = (globalThis as any).EdgeRuntime;
+    if (er && typeof er.waitUntil === "function") {
+      er.waitUntil(backgroundWork);
     }
 
     return new Response(
