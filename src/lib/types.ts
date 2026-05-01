@@ -761,13 +761,6 @@ export interface BriefingTask {
   surface_reason: string
 }
 
-export interface BriefingMemoryHighlight {
-  id: string
-  content: string
-  source: string
-  matched: string[]
-}
-
 export interface MorningBriefing {
   id: string
   user_id: string
@@ -778,7 +771,6 @@ export interface MorningBriefing {
   follow_ups_data: BriefingFollowUp[]
   commitments_data: BriefingCommitment[]
   tasks_data: BriefingTask[]
-  memory_highlights: BriefingMemoryHighlight[]
   status: MorningBriefingStatus
   error_text: string | null
   ai_model: string | null
