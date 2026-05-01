@@ -47,12 +47,17 @@ export function useMeetings() {
   return useQuery({
     queryKey: ['meetings'],
     queryFn: async () => {
+      // No transcript/processed-at filter: calendar-sync'd future events have
+      // neither (they're just title + time + attendees), but the user still
+      // wants to see them on /meetings as a "what's coming up" view. Sorting
+      // by start_time desc with nulls last means future events float to the
+      // top of the list naturally, past meetings sit below — date grouping
+      // in the page handles the visual separation.
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
-        .or('processed_at.not.is.null,transcript.not.is.null')
         .order('start_time', { ascending: false, nullsFirst: false })
-        .limit(50)
+        .limit(100)
       if (error) throw error
       return data as Meeting[]
     },
