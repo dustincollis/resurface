@@ -65,6 +65,15 @@ interface MeetingItem {
   } | null;
 }
 
+interface MemoryHighlight {
+  id: string;
+  content: string;
+  source: string;
+  // Which of today's people/companies this memory mentions — drives the
+  // "matched against X" framing on the card.
+  matched: string[];
+}
+
 interface FollowUpItem {
   id: string;
   source_meeting_id: string;
@@ -255,6 +264,14 @@ Deno.serve(async (req) => {
         meetings
       );
 
+      // Pull memories that mention people or companies on today's calendar.
+      // Verbatim recall — this is the "wake the brain up" surface.
+      const memoryHighlights = await fetchRelevantMemories(
+        adminClient,
+        userId,
+        meetingsWithContext
+      );
+
       // ---- AI synthesis: short intro paragraph ----
       const promptStart = Date.now();
       const aiResult = await synthesizeIntro({
@@ -281,6 +298,7 @@ Deno.serve(async (req) => {
           follow_ups_data: followUps,
           commitments_data: commitments,
           tasks_data: tasks,
+          memory_highlights: memoryHighlights,
           status: "ready",
           ai_model: MODEL,
           ai_input_tokens: aiResult.usage?.input_tokens ?? 0,
@@ -593,6 +611,136 @@ async function fetchTodaysTasks(
       (b.stakes ?? 0) - (a.stakes ?? 0)
   );
   return out.slice(0, 25);
+}
+
+// ----------------------------------------------------------------------------
+// Memory highlights: pull memories matching people/companies today
+// ----------------------------------------------------------------------------
+//
+// Goal is "wake the brain up", not synthesis. Surface 2-4 memories whose
+// content references someone (or some company) on today's calendar,
+// verbatim. The user will recognize them; we don't need to paraphrase.
+//
+// Matching:
+//   - For each attendee on today's calendar, build candidate name keys:
+//     full name, first name (≥3 chars), last name (≥3 chars), and the
+//     person's company.
+//   - For each memory, count how many distinct keys appear (word-boundary
+//     match, case-insensitive). Score = number of matches.
+//   - Sort by score desc, then created_at desc, take top 4.
+//   - Don't include memories that ONLY match the user themselves.
+
+async function fetchRelevantMemories(
+  db: Db,
+  userId: string,
+  meetings: MeetingItem[]
+): Promise<MemoryHighlight[]> {
+  // Build match keys per person/company. Each person has multiple lookup
+  // keys (full, first, last) but ONE canonical display name — that's
+  // what we surface in `matched`, not three variants of the same person.
+  type Subject = { keys: string[]; displayName: string };
+  const peopleSubjects = new Map<string, Subject>(); // canonical → Subject
+  const companies = new Map<string, string>(); // lowercase → display
+
+  // Skip the user's own employer in company matching — it's noise (every
+  // attendee will be from EPAM in this user's calendar).
+  const SKIP_COMPANIES = new Set(["epam"]);
+
+  for (const m of meetings) {
+    if (m.is_recurring_noise) continue;
+    for (const a of m.attendee_context) {
+      const full = a.name.trim();
+      if (!full) continue;
+      const fullLower = full.toLowerCase();
+      if (peopleSubjects.has(fullLower)) continue;
+      const keys = [fullLower];
+      const parts = full.split(/\s+/);
+      if (parts.length > 1) {
+        if (parts[0].length >= 3) keys.push(parts[0].toLowerCase());
+        const last = parts[parts.length - 1];
+        if (last.length >= 3) keys.push(last.toLowerCase());
+      }
+      peopleSubjects.set(fullLower, { keys, displayName: full });
+      if (a.company) {
+        const cLower = a.company.toLowerCase();
+        if (!SKIP_COMPANIES.has(cLower)) companies.set(cLower, a.company);
+      }
+    }
+  }
+
+  if (peopleSubjects.size === 0 && companies.size === 0) return [];
+
+  const { data: memories } = await db
+    .from("memories")
+    .select("id, content, source, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (!memories || memories.length === 0) return [];
+
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = (text: string, key: string): boolean =>
+    new RegExp(`\\b${escapeRe(key)}\\b`, "i").test(text);
+
+  type Scored = {
+    memory: Record<string, unknown>;
+    score: number;
+    primarySubject: string; // canonical key of the highest-priority match
+    matched: string[]; // display names only, deduped
+  };
+  const scored: Scored[] = [];
+
+  for (const mem of memories) {
+    const text = (mem.content as string) ?? "";
+    const matchedSubjects: string[] = [];
+    let primary = "";
+    for (const [canonical, subj] of peopleSubjects.entries()) {
+      if (subj.keys.some((k) => matches(text, k))) {
+        matchedSubjects.push(subj.displayName);
+        if (!primary) primary = canonical;
+      }
+    }
+    for (const [cLower, display] of companies.entries()) {
+      if (matches(text, cLower)) {
+        matchedSubjects.push(display);
+        if (!primary) primary = `co:${cLower}`;
+      }
+    }
+    if (matchedSubjects.length === 0) continue;
+    scored.push({
+      memory: mem,
+      score: matchedSubjects.length,
+      primarySubject: primary,
+      matched: matchedSubjects,
+    });
+  }
+
+  // Highest-scoring first; ties broken by recency.
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      new Date(b.memory.created_at as string).getTime() -
+        new Date(a.memory.created_at as string).getTime()
+  );
+
+  // Dedupe: only one memory per primary subject. If three memories all
+  // primarily concern Kiley Groves, take the most-relevant-then-most-recent
+  // one and skip the others.
+  const seenPrimary = new Set<string>();
+  const out: MemoryHighlight[] = [];
+  for (const s of scored) {
+    if (seenPrimary.has(s.primarySubject)) continue;
+    seenPrimary.add(s.primarySubject);
+    out.push({
+      id: s.memory.id as string,
+      content: s.memory.content as string,
+      source: (s.memory.source as string) ?? "user_added",
+      matched: s.matched,
+    });
+    if (out.length >= 4) break;
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------

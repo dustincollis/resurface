@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { Loader2, RefreshCw, AlertCircle, Clock, Mail, AlertTriangle, ListTodo, Users } from 'lucide-react'
+import { Loader2, RefreshCw, AlertCircle, Clock, Mail, AlertTriangle, ListTodo, Users, Lightbulb } from 'lucide-react'
 import {
   useMorningBriefing,
   useRegenerateMorningBriefing,
@@ -9,6 +9,7 @@ import type {
   BriefingFollowUp,
   BriefingCommitment,
   BriefingTask,
+  BriefingMemoryHighlight,
 } from '../lib/types'
 
 // Light theme override. This page is read in the morning, often on a phone.
@@ -171,6 +172,23 @@ function Briefing({
                 {para}
               </p>
             ))}
+        </section>
+      )}
+
+      {/* Worth recalling — verbatim memories about people/companies on
+          today's calendar. Goal is to prime, not to summarize. Capped
+          at 4 by the edge function. */}
+      {briefing.memory_highlights && briefing.memory_highlights.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-stone-500">
+            <Lightbulb size={16} />
+            Worth recalling
+          </h2>
+          <ul className="space-y-2.5">
+            {briefing.memory_highlights.map((mem) => (
+              <MemoryRow key={mem.id} memory={mem} />
+            ))}
+          </ul>
         </section>
       )}
 
@@ -394,6 +412,19 @@ function MeetingCard({ meeting }: { meeting: BriefingMeeting }) {
       )}
       {meeting.is_recurring_noise && (
         <p className="mt-2 text-xs italic text-stone-400">recurring cadence</p>
+      )}
+    </li>
+  )
+}
+
+function MemoryRow({ memory }: { memory: BriefingMemoryHighlight }) {
+  return (
+    <li className="rounded-lg border border-stone-200 bg-white px-3 py-2.5">
+      <p className="text-sm text-stone-800">{memory.content}</p>
+      {memory.matched.length > 0 && (
+        <p className="mt-1 text-[11px] text-stone-400">
+          {memory.matched.join(' · ')}
+        </p>
       )}
     </li>
   )
