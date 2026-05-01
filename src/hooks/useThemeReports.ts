@@ -34,10 +34,14 @@ export interface OneOff {
   why_watch: string
 }
 
+export type ThemeReportStatus = 'generating' | 'ready' | 'failed'
+
 export interface ThemeReport {
   id: string
   user_id: string
   report_type: string
+  status: ThemeReportStatus
+  error_text: string | null
   intro: string | null
   themes: Theme[]
   one_offs: OneOff[]
@@ -47,6 +51,7 @@ export interface ThemeReport {
     commitments_count: number
     claude_ms?: number
     usage?: { input_tokens?: number; output_tokens?: number }
+    stage?: string
   } | null
   model: string | null
   created_at: string
@@ -66,6 +71,16 @@ export function useThemeReports() {
       return data as ThemeReport[]
     },
     enabled: !!user,
+    // Poll while any visible report is still generating. The Edge
+    // Function returns the stub immediately and runs the analysis in
+    // the background; the row's status flips when it's done. Stop
+    // polling otherwise so we're not hammering the DB.
+    refetchInterval: (query) => {
+      const data = query.state.data as ThemeReport[] | undefined
+      if (!data) return false
+      const anyGenerating = data.some((r) => r.status === 'generating')
+      return anyGenerating ? 3000 : false
+    },
   })
 }
 

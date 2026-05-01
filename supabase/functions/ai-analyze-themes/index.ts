@@ -297,19 +297,130 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
     const userMessage = `Here is the corpus. Analyze it. Return JSON only.\n\n${corpusBlock}`;
 
     // ============================================================
-    // Call Claude
+    // Insert stub row, return it to the caller, run AI in background
     // ============================================================
+    //
+    // Opus 4.7 with adaptive thinking on a real corpus can run 90s+;
+    // the Supabase Edge Function gateway times out before that and
+    // returns 504 even though the function itself can keep running.
+    // To survive: insert a generating-state row, return it immediately,
+    // do the heavy work in EdgeRuntime.waitUntil, and update the row
+    // when ready. The client polls this row's status.
 
-    const claudeStart = Date.now();
+    const { data: stub, error: stubErr } = await adminClient
+      .from("theme_reports")
+      .insert({
+        user_id: userId,
+        report_type: "general",
+        status: "generating",
+        themes: [],
+        one_offs: [],
+        model: MODEL,
+      })
+      .select()
+      .single();
 
-    // Set max_tokens to the model ceiling. Adaptive thinking and the
-    // structured-JSON output share the budget; the model has no reason
-    // to use tokens it doesn't need, so making the cap big can't hurt
-    // throughput, only un-cap correctness. Above ~21k tokens Anthropic
-    // requires streaming, so we use SSE and collect the chunks server-
-    // side. The function still returns one consolidated JSON response
-    // to its caller — streaming is purely an API-side mechanic.
-    const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
+    if (stubErr || !stub) {
+      console.error("[ai-analyze-themes] failed to insert stub row:", stubErr);
+      return new Response(
+        JSON.stringify({ error: "Failed to insert stub", detail: stubErr?.message ?? "unknown" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const reportId = stub.id;
+
+    const backgroundWork = (async () => {
+      const claudeStart = Date.now();
+      try {
+        const result = await runAnalysisAndPersist({
+          adminClient,
+          anthropicKey,
+          systemPrompt,
+          userMessage,
+          reportId,
+          ideas,
+          memories,
+          commitments,
+          claudeStart,
+        });
+        if (!result.ok) {
+          await adminClient
+            .from("theme_reports")
+            .update({
+              status: "failed",
+              error_text: result.error,
+              input_summary: {
+                ideas_count: ideas.length,
+                memories_count: memories.length,
+                commitments_count: commitments.length,
+                claude_ms: Date.now() - claudeStart,
+                stage: result.stage,
+              },
+            })
+            .eq("id", reportId);
+        }
+      } catch (err) {
+        console.error("[ai-analyze-themes] background error:", err);
+        await adminClient
+          .from("theme_reports")
+          .update({
+            status: "failed",
+            error_text: err instanceof Error ? err.message : String(err),
+          })
+          .eq("id", reportId);
+      }
+    })();
+
+    // deno-lint-ignore no-explicit-any
+    const er = (globalThis as any).EdgeRuntime;
+    if (er && typeof er.waitUntil === "function") {
+      er.waitUntil(backgroundWork);
+    }
+
+    return new Response(
+      JSON.stringify({ ok: true, report: stub }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (err) {
+    console.error("[ai-analyze-themes] error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(
+      JSON.stringify({ error: "Internal server error", detail: message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
+
+// ============================================================
+// Background analysis runner. Calls Claude, parses output, updates
+// the report row in place. Returns a result discriminator so the
+// caller can write a useful error_text on failure.
+// ============================================================
+
+async function runAnalysisAndPersist(opts: {
+  adminClient: ReturnType<typeof createClient>;
+  anthropicKey: string;
+  systemPrompt: string;
+  userMessage: string;
+  reportId: string;
+  ideas: IdeaRow[];
+  memories: MemoryRow[];
+  commitments: CommitmentRow[];
+  claudeStart: number;
+}): Promise<
+  | { ok: true }
+  | { ok: false; stage: "claude_http" | "claude_stream" | "json_parse" | "update_row"; error: string }
+> {
+  const { adminClient, anthropicKey, systemPrompt, userMessage, reportId, ideas, memories, commitments, claudeStart } = opts;
+
+  // Set max_tokens to the model ceiling. Adaptive thinking and the
+  // structured-JSON output share the budget; the model has no reason
+  // to use tokens it doesn't need, so making the cap big can't hurt
+  // throughput, only un-cap correctness. Above ~21k tokens Anthropic
+  // requires streaming, so we use SSE and collect the chunks server-
+  // side.
+  const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -326,139 +437,103 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
       }),
     });
 
-    if (!aiResp.ok || !aiResp.body) {
-      const errText = await aiResp.text();
-      console.error("[ai-analyze-themes] Claude API error:", errText);
-      return new Response(
-        JSON.stringify({ error: "Claude API error", detail: errText.substring(0, 1000) }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+  if (!aiResp.ok || !aiResp.body) {
+    const errText = await aiResp.text();
+    console.error("[ai-analyze-themes] Claude API error:", errText);
+    return { ok: false, stage: "claude_http", error: errText.substring(0, 1000) };
+  }
 
-    // Parse the SSE stream. We accumulate text deltas from text blocks
-    // (ignoring thinking-delta blocks — those are reasoning we don't want
-    // to JSON.parse), and grab the final usage from message_delta or
-    // message_start events.
-    const reader = aiResp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let textBlocks = "";
-    let usage: Record<string, number> | null = null;
-    let stopReason: string | null = null;
-    let currentBlockType: string | null = null;
-    let streamErr: { type?: string; message?: string } | null = null;
+  // Parse the SSE stream. We accumulate text deltas from text blocks
+  // (ignoring thinking-delta blocks — those are reasoning, not the
+  // output JSON we need to parse), and grab the final usage from
+  // message_delta or message_start events.
+  const reader = aiResp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let textBlocks = "";
+  let usage: Record<string, number> | null = null;
+  let stopReason: string | null = null;
+  let currentBlockType: string | null = null;
+  let streamErr: { type?: string; message?: string } | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const payload = line.slice(6).trim();
-        if (!payload || payload === "[DONE]") continue;
-        try {
-          const ev = JSON.parse(payload);
-          if (ev.type === "content_block_start") {
-            currentBlockType = ev.content_block?.type ?? null;
-          } else if (ev.type === "content_block_delta") {
-            // Only collect text deltas. Thinking deltas (reasoning) are
-            // not part of the output JSON.
-            if (currentBlockType === "text" && ev.delta?.type === "text_delta") {
-              textBlocks += ev.delta.text ?? "";
-            }
-          } else if (ev.type === "content_block_stop") {
-            currentBlockType = null;
-          } else if (ev.type === "message_start") {
-            usage = ev.message?.usage ?? null;
-          } else if (ev.type === "message_delta") {
-            // message_delta carries final usage (output_tokens) and stop_reason.
-            if (ev.usage) usage = { ...(usage ?? {}), ...ev.usage };
-            if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
-          } else if (ev.type === "error") {
-            streamErr = ev.error ?? { message: "stream error" };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const ev = JSON.parse(payload);
+        if (ev.type === "content_block_start") {
+          currentBlockType = ev.content_block?.type ?? null;
+        } else if (ev.type === "content_block_delta") {
+          if (currentBlockType === "text" && ev.delta?.type === "text_delta") {
+            textBlocks += ev.delta.text ?? "";
           }
-        } catch {
-          // Malformed payload — skip rather than fail the whole stream.
+        } else if (ev.type === "content_block_stop") {
+          currentBlockType = null;
+        } else if (ev.type === "message_start") {
+          usage = ev.message?.usage ?? null;
+        } else if (ev.type === "message_delta") {
+          if (ev.usage) usage = { ...(usage ?? {}), ...ev.usage };
+          if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+        } else if (ev.type === "error") {
+          streamErr = ev.error ?? { message: "stream error" };
         }
+      } catch {
+        // Malformed payload — skip rather than fail the whole stream.
       }
     }
-
-    if (streamErr) {
-      console.error("[ai-analyze-themes] stream error:", streamErr);
-      return new Response(
-        JSON.stringify({ error: "Claude stream error", detail: streamErr.message ?? "unknown" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const claudeMs = Date.now() - claudeStart;
-    if (stopReason && stopReason !== "end_turn") {
-      console.warn(`[ai-analyze-themes] stop_reason=${stopReason} (output may be incomplete)`);
-    }
-
-    let parsed: { intro?: string; themes?: unknown[]; one_offs?: unknown[] };
-    try {
-      // Strip ```json fences if the model added them despite the prompt.
-      const cleaned = textBlocks.replace(/^```(?:json)?\s*\n?|\n?```\s*$/g, "").trim();
-      parsed = JSON.parse(cleaned);
-    } catch (parseErr) {
-      console.error("[ai-analyze-themes] JSON parse failed:", parseErr, "raw:", textBlocks.substring(0, 500));
-      return new Response(
-        JSON.stringify({
-          error: "AI returned invalid JSON",
-          detail: textBlocks.substring(0, 1000),
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ============================================================
-    // Persist
-    // ============================================================
-
-    const inputSummary = {
-      ideas_count: ideas.length,
-      memories_count: memories.length,
-      commitments_count: commitments.length,
-      claude_ms: claudeMs,
-      usage,
-      stop_reason: stopReason,
-    };
-
-    const { data: report, error: insertErr } = await adminClient
-      .from("theme_reports")
-      .insert({
-        user_id: userId,
-        report_type: "general",
-        intro: parsed.intro ?? null,
-        themes: parsed.themes ?? [],
-        one_offs: parsed.one_offs ?? [],
-        input_summary: inputSummary,
-        model: MODEL,
-      })
-      .select()
-      .single();
-
-    if (insertErr) {
-      console.error("[ai-analyze-themes] insert error:", insertErr);
-      return new Response(
-        JSON.stringify({ error: "Failed to persist report", detail: insertErr.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({ ok: true, report }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err) {
-    console.error("[ai-analyze-themes] error:", err);
-    const message = err instanceof Error ? err.message : String(err);
-    return new Response(
-      JSON.stringify({ error: "Internal server error", detail: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
   }
-});
+
+  if (streamErr) {
+    console.error("[ai-analyze-themes] stream error:", streamErr);
+    return { ok: false, stage: "claude_stream", error: streamErr.message ?? "unknown" };
+  }
+
+  const claudeMs = Date.now() - claudeStart;
+  if (stopReason && stopReason !== "end_turn") {
+    console.warn(`[ai-analyze-themes] stop_reason=${stopReason} (output may be incomplete)`);
+  }
+
+  let parsed: { intro?: string; themes?: unknown[]; one_offs?: unknown[] };
+  try {
+    const cleaned = textBlocks.replace(/^```(?:json)?\s*\n?|\n?```\s*$/g, "").trim();
+    parsed = JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error("[ai-analyze-themes] JSON parse failed:", parseErr, "raw:", textBlocks.substring(0, 500));
+    return { ok: false, stage: "json_parse", error: textBlocks.substring(0, 1000) };
+  }
+
+  const inputSummary = {
+    ideas_count: ideas.length,
+    memories_count: memories.length,
+    commitments_count: commitments.length,
+    claude_ms: claudeMs,
+    usage,
+    stop_reason: stopReason,
+  };
+
+  const { error: updateErr } = await adminClient
+    .from("theme_reports")
+    .update({
+      status: "ready",
+      intro: parsed.intro ?? null,
+      themes: parsed.themes ?? [],
+      one_offs: parsed.one_offs ?? [],
+      input_summary: inputSummary,
+      error_text: null,
+    })
+    .eq("id", reportId);
+
+  if (updateErr) {
+    console.error("[ai-analyze-themes] update error:", updateErr);
+    return { ok: false, stage: "update_row", error: updateErr.message };
+  }
+
+  return { ok: true };
+}

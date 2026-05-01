@@ -142,6 +142,10 @@ export default function ThemeAnalysis() {
 
   const latest = reports && reports.length > 0 ? reports[0] : null
   const older = reports ? reports.slice(1) : []
+  // The button is "running" when either the mutation is in flight (pre-stub)
+  // or the most-recent report is still in 'generating' state (stub returned,
+  // background analysis in progress on the server).
+  const isAnalyzing = run.isPending || latest?.status === 'generating'
 
   return (
     <section className="mb-8 rounded-xl border border-gray-800 bg-gray-950/40 p-5">
@@ -157,10 +161,10 @@ export default function ThemeAnalysis() {
         </div>
         <button
           onClick={() => run.mutate()}
-          disabled={run.isPending}
+          disabled={isAnalyzing}
           className="flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
         >
-          {run.isPending ? (
+          {isAnalyzing ? (
             <>
               <Loader2 size={14} className="animate-spin" />
               Analyzing...
@@ -191,7 +195,37 @@ export default function ThemeAnalysis() {
         </p>
       )}
 
-      {latest && (
+      {latest && latest.status === 'generating' && (
+        <div className="rounded-lg border border-purple-900/40 bg-purple-950/20 px-4 py-3 text-sm text-purple-200">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            <span>Analyzing your corpus…</span>
+          </div>
+          <p className="mt-1.5 text-xs text-purple-300/70">
+            Started {fmtTs(latest.created_at)}. Opus 4.7 reading deeply usually takes
+            60–120 seconds. The page will update automatically when it's ready — no
+            need to refresh.
+          </p>
+        </div>
+      )}
+
+      {latest && latest.status === 'failed' && (
+        <div className="rounded-lg border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={14} />
+            <span>Last run failed</span>
+          </div>
+          <p className="mt-1.5 text-xs text-red-300/80 break-words">
+            {latest.error_text ?? 'No error message recorded.'}
+            {latest.input_summary?.stage ? ` (stage: ${latest.input_summary.stage})` : ''}
+          </p>
+          <p className="mt-1.5 text-[11px] text-red-300/60">
+            Failed at {fmtTs(latest.created_at)}. Click "Run again" to retry.
+          </p>
+        </div>
+      )}
+
+      {latest && latest.status === 'ready' && (
         <>
           <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-500">
             <span>Latest</span>
