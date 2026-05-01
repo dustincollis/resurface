@@ -382,10 +382,14 @@ server.tool(
         ? new Date(end_date).toISOString()
         : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
+      // Lean payload for list view: drop transcript_summary (often
+      // multi-paragraph) — a week of meetings with summaries inline can
+      // blow past tool-response budgets. Callers who need the summary
+      // should fetch a single meeting via get_discussion.
       const { data, error } = await supabase
         .from('meetings')
         .select(
-          'id, title, start_time, end_time, location, attendees, transcript_summary, processed_at'
+          'id, title, start_time, end_time, location, attendees, processed_at'
         )
         .or(`start_time.gte.${start},start_time.is.null`)
         .or(`start_time.lte.${end},start_time.is.null`)
