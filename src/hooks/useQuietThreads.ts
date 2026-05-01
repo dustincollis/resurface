@@ -21,7 +21,7 @@ export function useQuietThreads() {
       const { data, error } = await supabase.rpc('get_quiet_threads', {
         searching_user_id: user.id,
       })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return (data ?? []) as QuietThread[]
     },
     enabled: !!user,
