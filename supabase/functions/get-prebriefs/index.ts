@@ -11,6 +11,12 @@ const MAX_MEETINGS = 20;
 const LARGE_MEETING_ATTENDEE_THRESHOLD = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// Topic-context (semantic) thresholds. We embed-match the meeting against
+// the rest of the corpus via find_similar; anything below this is noise
+// not signal.
+const TOPIC_MIN_SIMILARITY = 0.55;
+const TOPIC_MAX_RESULTS = 8;
+
 interface MeetingRow {
   id: string;
   title: string;
@@ -47,10 +53,12 @@ interface MemoryRow {
   created_at: string;
 }
 
-interface IdeaRow {
-  id: string;
+interface TopicContextItem {
+  source_table: "ideas" | "memories" | "commitments" | "meetings";
+  source_id: string;
   title: string;
-  created_at: string;
+  snippet: string;
+  similarity: number;
 }
 
 interface CompanyIdeaRow {
@@ -80,7 +88,6 @@ interface PreBriefAttendee {
   company_name: string | null;
   open_commitments: Array<{ id: string; title: string; do_by: string | null; status: string }>;
   recent_memories: MemoryRow[];
-  recent_ideas: IdeaRow[];
   prior_meetings: PriorMeetingRow[];
 }
 
@@ -95,6 +102,15 @@ interface PreBrief {
   };
   context_status: "ready" | "skipped_large_meeting";
   context_note: string | null;
+  // Topic-similarity context — semantic matches against the meeting itself
+  // via find_similar / pgvector. The previous "ideas this person originated"
+  // matcher was finding the wrong dimension (identity, not topic), and
+  // produced noisy results that didn't reflect what the meeting was about.
+  // This block answers a different question: given what this meeting is
+  // ABOUT (via the meeting's title + transcript_summary embedding), what
+  // does the rest of the corpus say about that topic? Drawn from ideas,
+  // memories, commitments, and prior meetings.
+  topic_context: TopicContextItem[];
   attendees: PreBriefAttendee[];
   primary_company: {
     id: string;
@@ -194,6 +210,58 @@ function dedupeCompanyCommitments(
     .map((row) => ({ id: row.id, title: row.title, status: row.status }));
 }
 
+async function fetchTopicContext(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+  meetingId: string,
+): Promise<TopicContextItem[]> {
+  // find_similar(source_table, source_id, searching_user_id, max_results)
+  // returns up to N nearest neighbors across ideas/memories/commitments/
+  // meetings ordered by cosine similarity desc. If the meeting has no
+  // embedding yet (insert trigger raced, or pre-trigger row never
+  // backfilled), the RPC returns no rows and we degrade gracefully.
+  try {
+    const { data, error } = await admin.rpc("find_similar", {
+      source_table: "meetings",
+      source_id: meetingId,
+      searching_user_id: userId,
+      max_results: 20,
+    });
+    if (error || !data) return [];
+    const rows = data as Array<{
+      result_table: string;
+      result_id: string;
+      title: string;
+      snippet: string;
+      similarity: number;
+    }>;
+    const filtered: TopicContextItem[] = [];
+    for (const row of rows) {
+      if (row.similarity < TOPIC_MIN_SIMILARITY) continue;
+      if (
+        row.result_table !== "ideas" &&
+        row.result_table !== "memories" &&
+        row.result_table !== "commitments" &&
+        row.result_table !== "meetings"
+      ) {
+        continue;
+      }
+      filtered.push({
+        source_table: row.result_table,
+        source_id: row.result_id,
+        title: row.title ?? "",
+        snippet: row.snippet ?? "",
+        similarity: row.similarity,
+      });
+      if (filtered.length >= TOPIC_MAX_RESULTS) break;
+    }
+    return filtered;
+  } catch (err) {
+    console.warn("[get-prebriefs] topic_context fetch failed:", err);
+    return [];
+  }
+}
+
 async function resolveUserId(req: Request, adminClient: ReturnType<typeof createClient>, serviceRoleKey: string) {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
@@ -260,6 +328,11 @@ Deno.serve(async (req) => {
 
     for (const meeting of meetings) {
       const rawAttendees = (meeting.attendees ?? []).filter((a) => a.trim().length > 0);
+      // Topic context — semantic matches against the meeting itself. Runs
+      // for every meeting (including large ones; topic context is
+      // independent of attendee-list noise).
+      const topicContext = await fetchTopicContext(admin, userId, meeting.id);
+
       if (rawAttendees.length >= LARGE_MEETING_ATTENDEE_THRESHOLD) {
         briefs.push({
           meeting: {
@@ -272,6 +345,7 @@ Deno.serve(async (req) => {
           },
           context_status: "skipped_large_meeting",
           context_note: `Large meeting with ${rawAttendees.length} attendees; attendee context skipped.`,
+          topic_context: topicContext,
           attendees: [],
           primary_company: null,
         });
@@ -291,7 +365,6 @@ Deno.serve(async (req) => {
               company_name: null,
               open_commitments: [],
               recent_memories: [],
-              recent_ideas: [],
               prior_meetings: [],
             };
           }
@@ -317,7 +390,7 @@ Deno.serve(async (req) => {
               .limit(5),
           ];
 
-          const [byPersonRes, byNameRes, memoriesRes, ideasRes, priorMeetingsRes] =
+          const [byPersonRes, byNameRes, memoriesRes, priorMeetingsRes] =
             await Promise.all([
               ...commitmentQueries,
               admin
@@ -325,14 +398,6 @@ Deno.serve(async (req) => {
                 .select("id, content, created_at")
                 .eq("user_id", userId)
                 .ilike("content", `%${person.name}%`)
-                .order("created_at", { ascending: false })
-                .limit(3),
-              admin
-                .from("ideas")
-                .select("id, title, created_at")
-                .eq("user_id", userId)
-                .ilike("originated_by", person.name)
-                .not("status", "in", '("dismissed","archived")')
                 .order("created_at", { ascending: false })
                 .limit(3),
               admin
@@ -346,7 +411,6 @@ Deno.serve(async (req) => {
           if (byPersonRes.error) throw byPersonRes.error;
           if (byNameRes.error) throw byNameRes.error;
           if (memoriesRes.error) throw memoriesRes.error;
-          if (ideasRes.error) throw ideasRes.error;
           if (priorMeetingsRes.error) throw priorMeetingsRes.error;
 
           const priorMeetings = ((priorMeetingsRes.data ?? []) as unknown[])
@@ -379,7 +443,6 @@ Deno.serve(async (req) => {
             company_name: company?.name ?? null,
             open_commitments: openCommitments,
             recent_memories: (memoriesRes.data ?? []) as MemoryRow[],
-            recent_ideas: (ideasRes.data ?? []) as IdeaRow[],
             prior_meetings: priorMeetings,
           };
         })
@@ -469,6 +532,7 @@ Deno.serve(async (req) => {
         },
         context_status: "ready",
         context_note: null,
+        topic_context: topicContext,
         attendees: attendeeContexts,
         primary_company: primaryCompany,
       });

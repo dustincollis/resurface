@@ -9,9 +9,9 @@ import {
   ChevronRight,
   CheckCircle2,
   Clock,
-  Lightbulb,
   Loader2,
   MapPin,
+  Sparkles,
   Users,
 } from 'lucide-react'
 import { usePreBriefs, type PreBrief } from '../../hooks/usePreBriefs'
@@ -38,7 +38,6 @@ function attendeeHasContext(attendee: PreBrief['attendees'][number]) {
   return (
     attendee.open_commitments.length > 0 ||
     attendee.recent_memories.length > 0 ||
-    attendee.recent_ideas.length > 0 ||
     attendee.prior_meetings.length > 0
   )
 }
@@ -51,7 +50,56 @@ function briefHasContext(brief: PreBrief) {
       (brief.primary_company.open_company_ideas.length > 0 ||
         brief.primary_company.open_company_commitments.length > 0),
   )
-  return hasAttendeeContext || hasCompanyContext
+  const hasTopicContext = brief.topic_context.length > 0
+  return hasAttendeeContext || hasCompanyContext || hasTopicContext
+}
+
+const TOPIC_TABLE_LABEL: Record<PreBrief['topic_context'][number]['source_table'], string> = {
+  ideas: 'idea',
+  memories: 'memory',
+  commitments: 'commitment',
+  meetings: 'meeting',
+}
+
+const TOPIC_TABLE_HREF: Record<PreBrief['topic_context'][number]['source_table'], (id: string) => string> = {
+  ideas: () => `/ideas`,
+  memories: () => `/settings`,
+  commitments: () => `/commitments`,
+  meetings: (id) => `/meetings/${id}`,
+}
+
+function TopicContext({ items }: { items: PreBrief['topic_context'] }) {
+  if (items.length === 0) return null
+  return (
+    <div className="rounded-lg border border-purple-900/40 bg-purple-950/15 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-purple-400/80">
+        <Sparkles size={13} />
+        About this topic
+      </div>
+      <div className="space-y-1.5">
+        {items.map((item) => (
+          <Link
+            key={`${item.source_table}-${item.source_id}`}
+            to={TOPIC_TABLE_HREF[item.source_table](item.source_id)}
+            className="block rounded border border-purple-900/30 bg-purple-950/20 px-2.5 py-1.5 text-xs hover:border-purple-700/40 hover:bg-purple-900/30"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="rounded bg-purple-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-purple-300">
+                {TOPIC_TABLE_LABEL[item.source_table]}
+              </span>
+              <span className="text-[10px] text-purple-400/60">
+                {(item.similarity * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="mt-1 text-gray-200">{item.title}</div>
+            {item.snippet && item.snippet !== item.title && (
+              <p className="mt-0.5 line-clamp-2 leading-relaxed text-gray-400">{item.snippet}</p>
+            )}
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function ContextLine({
@@ -129,22 +177,6 @@ function AttendeeBlock({ attendee }: { attendee: PreBrief['attendees'][number] }
                   <p key={memory.id} className="line-clamp-2 leading-relaxed text-gray-300">
                     {memory.content}
                   </p>
-                ))}
-              </div>
-            </ContextLine>
-          )}
-
-          {attendee.recent_ideas.length > 0 && (
-            <ContextLine icon={<Lightbulb size={13} />}>
-              <div className="space-y-1">
-                {attendee.recent_ideas.map((idea) => (
-                  <Link
-                    key={idea.id}
-                    to="/ideas"
-                    className="block truncate text-gray-300 hover:text-white"
-                  >
-                    {idea.title}
-                  </Link>
                 ))}
               </div>
             </ContextLine>
@@ -324,6 +356,12 @@ function PreBriefCard({
         <p className="mt-4 rounded-lg border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
           no prior context
         </p>
+      )}
+
+      {!isCollapsed && brief.topic_context.length > 0 && (
+        <div className="mt-4">
+          <TopicContext items={brief.topic_context} />
+        </div>
       )}
 
       {!isCollapsed && brief.primary_company && (

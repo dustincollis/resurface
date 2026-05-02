@@ -13,6 +13,13 @@ export interface PreBrief {
   }
   context_status: 'ready' | 'skipped_large_meeting'
   context_note: string | null
+  topic_context: Array<{
+    source_table: 'ideas' | 'memories' | 'commitments' | 'meetings'
+    source_id: string
+    title: string
+    snippet: string
+    similarity: number
+  }>
   attendees: Array<{
     raw: string
     person_id: string | null
@@ -21,7 +28,6 @@ export interface PreBrief {
     company_name: string | null
     open_commitments: Array<{ id: string; title: string; do_by: string | null; status: string }>
     recent_memories: Array<{ id: string; content: string; created_at: string }>
-    recent_ideas: Array<{ id: string; title: string; created_at: string }>
     prior_meetings: Array<{ id: string; title: string; start_time: string }>
   }>
   primary_company: {
