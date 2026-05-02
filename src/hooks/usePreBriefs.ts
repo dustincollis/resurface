@@ -2,6 +2,51 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 
+export type PreBriefMeetingKind = 'one_off' | 'recurring' | 'large_meeting'
+export type PreBriefContextStatus = 'ready' | 'no_embedding'
+
+export interface TopicItem {
+  id: string
+  title: string
+  snippet: string
+  similarity: number
+  created_at: string
+}
+
+export interface TopicCommitment extends TopicItem {
+  status: string
+  do_by: string | null
+}
+
+export interface TopicMeeting {
+  id: string
+  title: string
+  start_time: string
+  similarity: number
+}
+
+export interface SeriesOpenItem {
+  source_type: 'commitment' | 'idea' | 'task'
+  id: string
+  title: string
+  status: string
+  do_by: string | null
+  source_meeting_id: string
+  source_meeting_title: string
+  source_meeting_date: string
+}
+
+export interface PreBriefAttendee {
+  raw: string
+  person_id: string
+  name: string
+  company_id: string | null
+  company_name: string | null
+  open_commitments: Array<{ id: string; title: string; do_by: string | null; status: string }>
+  recent_memories: Array<{ id: string; content: string; created_at: string }>
+  prior_meeting_count: number
+}
+
 export interface PreBrief {
   meeting: {
     id: string
@@ -11,31 +56,23 @@ export interface PreBrief {
     attendees_raw: string[]
     attendee_count: number
   }
-  context_status: 'ready' | 'skipped_large_meeting'
+  meeting_kind: PreBriefMeetingKind
+  context_status: PreBriefContextStatus
   context_note: string | null
-  topic_context: Array<{
-    source_table: 'ideas' | 'memories' | 'commitments' | 'meetings'
-    source_id: string
-    title: string
-    snippet: string
-    similarity: number
-  }>
-  attendees: Array<{
-    raw: string
-    person_id: string | null
-    name: string
-    company_id: string | null
-    company_name: string | null
-    open_commitments: Array<{ id: string; title: string; do_by: string | null; status: string }>
-    recent_memories: Array<{ id: string; content: string; created_at: string }>
-    prior_meetings: Array<{ id: string; title: string; start_time: string }>
-  }>
-  primary_company: {
-    id: string
-    name: string
-    open_company_ideas: Array<{ id: string; title: string }>
-    open_company_commitments: Array<{ id: string; title: string; status: string }>
-  } | null
+
+  // one_off branch
+  topic_ideas?: TopicItem[]
+  topic_memories?: TopicItem[]
+  topic_commitments?: TopicCommitment[]
+  similar_meetings?: TopicMeeting[]
+
+  // recurring branch
+  series_open_items?: SeriesOpenItem[]
+  series_prior_instance_count?: number
+
+  // both
+  attendee_context: PreBriefAttendee[]
+  unresolved_attendee_count: number
 }
 
 export function usePreBriefs() {

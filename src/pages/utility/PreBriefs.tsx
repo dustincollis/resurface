@@ -3,18 +3,26 @@ import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   BriefcaseBusiness,
-  Building2,
   CalendarDays,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CheckCircle2,
   Clock,
+  Lightbulb,
   Loader2,
   MapPin,
+  Repeat,
   Sparkles,
   Users,
 } from 'lucide-react'
-import { usePreBriefs, type PreBrief } from '../../hooks/usePreBriefs'
+import {
+  usePreBriefs,
+  type PreBrief,
+  type SeriesOpenItem,
+  type TopicCommitment,
+  type TopicItem,
+  type TopicMeeting,
+} from '../../hooks/usePreBriefs'
 
 function formatMeetingTime(iso: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -26,89 +34,42 @@ function formatMeetingTime(iso: string) {
   }).format(new Date(iso))
 }
 
-function formatDate(iso: string | null) {
+function formatShortDate(iso: string | null) {
   if (!iso) return null
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(iso))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+    new Date(iso),
+  )
 }
 
-function attendeeHasContext(attendee: PreBrief['attendees'][number]) {
+function attendeeHasContext(attendee: PreBrief['attendee_context'][number]) {
   return (
     attendee.open_commitments.length > 0 ||
     attendee.recent_memories.length > 0 ||
-    attendee.prior_meetings.length > 0
+    attendee.prior_meeting_count > 0
   )
 }
 
-function briefHasContext(brief: PreBrief) {
-  if (brief.context_status === 'skipped_large_meeting') return true
-  const hasAttendeeContext = brief.attendees.some(attendeeHasContext)
-  const hasCompanyContext = Boolean(
-    brief.primary_company &&
-      (brief.primary_company.open_company_ideas.length > 0 ||
-        brief.primary_company.open_company_commitments.length > 0),
-  )
-  const hasTopicContext = brief.topic_context.length > 0
-  return hasAttendeeContext || hasCompanyContext || hasTopicContext
-}
-
-const TOPIC_TABLE_LABEL: Record<PreBrief['topic_context'][number]['source_table'], string> = {
-  ideas: 'idea',
-  memories: 'memory',
-  commitments: 'commitment',
-  meetings: 'meeting',
-}
-
-const TOPIC_TABLE_HREF: Record<PreBrief['topic_context'][number]['source_table'], (id: string) => string> = {
-  ideas: () => `/ideas`,
-  memories: () => `/settings`,
-  commitments: () => `/commitments`,
-  meetings: (id) => `/meetings/${id}`,
-}
-
-function TopicContext({ items }: { items: PreBrief['topic_context'] }) {
-  if (items.length === 0) return null
-  return (
-    <div className="rounded-lg border border-purple-900/40 bg-purple-950/15 p-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-purple-400/80">
-        <Sparkles size={13} />
-        About this topic
-      </div>
-      <div className="space-y-1.5">
-        {items.map((item) => (
-          <Link
-            key={`${item.source_table}-${item.source_id}`}
-            to={TOPIC_TABLE_HREF[item.source_table](item.source_id)}
-            className="block rounded border border-purple-900/30 bg-purple-950/20 px-2.5 py-1.5 text-xs hover:border-purple-700/40 hover:bg-purple-900/30"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="rounded bg-purple-900/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-purple-300">
-                {TOPIC_TABLE_LABEL[item.source_table]}
-              </span>
-              <span className="text-[10px] text-purple-400/60">
-                {(item.similarity * 100).toFixed(0)}%
-              </span>
-            </div>
-            <div className="mt-1 text-gray-200">{item.title}</div>
-            {item.snippet && item.snippet !== item.title && (
-              <p className="mt-0.5 line-clamp-2 leading-relaxed text-gray-400">{item.snippet}</p>
-            )}
-          </Link>
-        ))}
-      </div>
-    </div>
+function briefHasOneOffContent(brief: PreBrief) {
+  return Boolean(
+    (brief.topic_ideas && brief.topic_ideas.length > 0) ||
+      (brief.topic_memories && brief.topic_memories.length > 0) ||
+      (brief.topic_commitments && brief.topic_commitments.length > 0) ||
+      (brief.similar_meetings && brief.similar_meetings.length > 0),
   )
 }
 
-function ContextLine({
-  icon,
-  children,
-}: {
-  icon: ReactNode
-  children: ReactNode
-}) {
+function briefHasContent(brief: PreBrief) {
+  if (brief.meeting_kind === 'recurring') {
+    return Boolean(brief.series_open_items && brief.series_open_items.length > 0) ||
+      brief.attendee_context.some(attendeeHasContext)
+  }
+  if (brief.meeting_kind === 'large_meeting') {
+    return briefHasOneOffContent(brief)
+  }
+  return briefHasOneOffContent(brief) || brief.attendee_context.some(attendeeHasContext)
+}
+
+function ContextLine({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <div className="flex gap-2 text-xs text-gray-400">
       <span className="mt-0.5 shrink-0 text-gray-600">{icon}</span>
@@ -117,336 +78,495 @@ function ContextLine({
   )
 }
 
-function AttendeeBlock({ attendee }: { attendee: PreBrief['attendees'][number] }) {
-  const company = attendee.company_name
-
-  return (
-    <div className="rounded-lg border border-gray-800 bg-gray-950/45 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-gray-100">{attendee.name}</div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500">
-            {company && attendee.company_id && (
-              <Link to={`/companies/${attendee.company_id}`} className="hover:text-gray-300">
-                {company}
-              </Link>
-            )}
-            {!attendee.person_id && <span>name only</span>}
-            {attendee.raw !== attendee.name && <span className="truncate">{attendee.raw}</span>}
-          </div>
-        </div>
-        {attendee.person_id && (
-          <Link
-            to={`/people/${attendee.person_id}`}
-            className="shrink-0 text-[11px] text-purple-400 hover:text-purple-300"
-          >
-            profile
-          </Link>
-        )}
-      </div>
-
-      {attendeeHasContext(attendee) ? (
-        <div className="mt-3 space-y-2">
-          {attendee.open_commitments.length > 0 && (
-            <ContextLine icon={<CheckCircle2 size={13} />}>
-              <div className="space-y-1">
-                {attendee.open_commitments.slice(0, 3).map((commitment) => {
-                  const due = formatDate(commitment.do_by)
-                  return (
-                    <div key={commitment.id} className="leading-relaxed">
-                      <Link to="/commitments" className="text-gray-300 hover:text-white">
-                        {commitment.title}
-                      </Link>
-                      {due && <span className="text-gray-500"> due {due}</span>}
-                    </div>
-                  )
-                })}
-                {attendee.open_commitments.length > 3 && (
-                  <div className="text-gray-500">
-                    {attendee.open_commitments.length - 3} more open commitments
-                  </div>
-                )}
-              </div>
-            </ContextLine>
-          )}
-
-          {attendee.recent_memories.length > 0 && (
-            <ContextLine icon={<BriefcaseBusiness size={13} />}>
-              <div className="space-y-1">
-                {attendee.recent_memories.slice(0, 2).map((memory) => (
-                  <p key={memory.id} className="line-clamp-2 leading-relaxed text-gray-300">
-                    {memory.content}
-                  </p>
-                ))}
-              </div>
-            </ContextLine>
-          )}
-
-          {attendee.prior_meetings.length > 0 && (
-            <ContextLine icon={<Clock size={13} />}>
-              <div className="space-y-1">
-                {attendee.prior_meetings.slice(0, 3).map((meeting) => (
-                  <Link
-                    key={meeting.id}
-                    to={`/meetings/${meeting.id}`}
-                    className="block truncate text-gray-300 hover:text-white"
-                  >
-                    {meeting.title}
-                    <span className="text-gray-500"> - {formatDate(meeting.start_time)}</span>
-                  </Link>
-                ))}
-                {attendee.prior_meetings.length > 3 && (
-                  <div className="text-gray-500">
-                    {attendee.prior_meetings.length} prior meetings total
-                  </div>
-                )}
-              </div>
-            </ContextLine>
-          )}
-        </div>
-      ) : (
-        <p className="mt-3 text-xs italic text-gray-600">no prior context</p>
-      )}
-    </div>
-  )
-}
-
-function CompanyContext({ company }: { company: NonNullable<PreBrief['primary_company']> }) {
-  const hasContext =
-    company.open_company_ideas.length > 0 || company.open_company_commitments.length > 0
-
-  if (!hasContext) return null
-
-  return (
-    <div className="rounded-lg border border-gray-800 bg-gray-950/45 p-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-500">
-        <Building2 size={13} />
-        <Link to={`/companies/${company.id}`} className="hover:text-gray-300">
-          {company.name}
-        </Link>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {company.open_company_commitments.length > 0 && (
-          <div>
-            <div className="mb-1 text-[11px] uppercase tracking-wider text-gray-600">
-              Open commitments
-            </div>
-            <div className="space-y-1">
-              {company.open_company_commitments.map((commitment) => (
-                <Link
-                  key={commitment.id}
-                  to="/commitments"
-                  className="block truncate text-xs text-gray-300 hover:text-white"
-                >
-                  {commitment.title}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-        {company.open_company_ideas.length > 0 && (
-          <div>
-            <div className="mb-1 text-[11px] uppercase tracking-wider text-gray-600">
-              Surfaced ideas
-            </div>
-            <div className="space-y-1">
-              {company.open_company_ideas.map((idea) => (
-                <Link
-                  key={idea.id}
-                  to="/ideas"
-                  className="block truncate text-xs text-gray-300 hover:text-white"
-                >
-                  {idea.title}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function PreBriefCard({
-  brief,
-  expanded,
-  onToggle,
+// Generic helper for rendering a labeled section heading inside a brief.
+function SectionHeader({
+  icon,
+  label,
+  hint,
 }: {
-  brief: PreBrief
-  expanded: boolean
-  onToggle: () => void
+  icon: ReactNode
+  label: string
+  hint?: string
 }) {
-  const attendeeCount = brief.meeting.attendee_count ?? brief.meeting.attendees_raw.length
-  const isLargeMeeting = brief.context_status === 'skipped_large_meeting'
-  const isCollapsible = attendeeCount > 5
-  const isCollapsed = isCollapsible && !expanded
-
   return (
-    <article className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-            <span className="inline-flex items-center gap-1">
-              <CalendarDays size={13} />
-              {formatMeetingTime(brief.meeting.start_time)}
-            </span>
-            {brief.meeting.location && (
-              <span className="inline-flex min-w-0 items-center gap-1">
-                <MapPin size={13} />
-                <span className="truncate">{brief.meeting.location}</span>
-              </span>
-            )}
-          </div>
-          <Link
-            to={`/meetings/${brief.meeting.id}`}
-            className="block truncate text-lg font-semibold text-white hover:text-purple-300"
-          >
-            {brief.meeting.title || '(untitled meeting)'}
-          </Link>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="inline-flex items-center gap-1 text-xs text-gray-500">
-            <Users size={13} />
-            {attendeeCount}
-          </div>
-          {isCollapsible && (
-            <button
-              type="button"
-              onClick={onToggle}
-              aria-expanded={!isCollapsed}
-              className="inline-flex items-center gap-1 rounded border border-gray-800 px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-white"
-            >
-              {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-              {isCollapsed ? 'Expand' : 'Collapse'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {isCollapsed && (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-950/45 px-3 py-2 text-left text-xs text-gray-500 hover:border-gray-700 hover:text-gray-300"
-        >
-          <span>
-            {isLargeMeeting
-              ? 'Large meeting - attendee context skipped'
-              : `${attendeeCount} attendees - expand for attendee context`}
-          </span>
-          <ChevronRight size={13} className="shrink-0" />
-        </button>
-      )}
-
-      {!isCollapsed && isLargeMeeting && (
-        <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950/45 px-3 py-2">
-          <div className="flex gap-2 text-xs text-gray-400">
-            <Users size={13} className="mt-0.5 shrink-0 text-gray-600" />
-            <div>
-              <div className="font-medium text-gray-300">Large meeting</div>
-              <div className="mt-0.5 text-gray-500">
-                {brief.context_note ?? 'Attendee context skipped for this meeting.'}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isCollapsed && !briefHasContext(brief) && (
-        <p className="mt-4 rounded-lg border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
-          no prior context
-        </p>
-      )}
-
-      {!isCollapsed && brief.topic_context.length > 0 && (
-        <div className="mt-4">
-          <TopicContext items={brief.topic_context} />
-        </div>
-      )}
-
-      {!isCollapsed && brief.primary_company && (
-        <div className="mt-4">
-          <CompanyContext company={brief.primary_company} />
-        </div>
-      )}
-
-      {!isCollapsed && !isLargeMeeting && (
-        <div className="mt-4 grid gap-3">
-          {brief.attendees.length > 0 ? (
-            brief.attendees.map((attendee) => (
-              <AttendeeBlock key={`${brief.meeting.id}:${attendee.raw}`} attendee={attendee} />
-            ))
-          ) : (
-            <p className="text-sm text-gray-600">No attendees on the invite.</p>
-          )}
-        </div>
-      )}
-    </article>
+    <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-gray-500">
+      {icon}
+      <span>{label}</span>
+      {hint && <span className="text-gray-700 normal-case tracking-normal">{hint}</span>}
+    </div>
   )
 }
 
-export default function PreBriefs() {
-  const { data: briefs, isLoading, error, refetch, isFetching } = usePreBriefs()
-  const [expandedBriefIds, setExpandedBriefIds] = useState<Set<string>>(() => new Set())
+// ------------------------------------------------------------
+// One-off render branch
+// ------------------------------------------------------------
 
-  function toggleBrief(id: string) {
-    setExpandedBriefIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+function TopicIdeas({ items }: { items: TopicItem[] }) {
+  if (items.length === 0) return null
+  return (
+    <section>
+      <SectionHeader icon={<Lightbulb size={12} />} label="Ideas you've had on this" />
+      <div className="space-y-1">
+        {items.map((it) => (
+          <Link
+            key={it.id}
+            to="/ideas"
+            className="block rounded border border-gray-800 bg-gray-950/45 px-2.5 py-1.5 hover:border-gray-700"
+          >
+            <div className="flex items-start justify-between gap-2 text-sm">
+              <span className="text-gray-200">{it.title}</span>
+              <span className="shrink-0 text-[10px] text-gray-600">
+                {(it.similarity * 100).toFixed(0)}%
+              </span>
+            </div>
+            {it.snippet && it.snippet !== it.title && (
+              <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-gray-500">
+                {it.snippet}
+              </p>
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TopicMemories({ items }: { items: TopicItem[] }) {
+  if (items.length === 0) return null
+  return (
+    <section>
+      <SectionHeader icon={<BriefcaseBusiness size={12} />} label="Things you've heard or noted" />
+      <div className="space-y-1">
+        {items.map((it) => (
+          <div
+            key={it.id}
+            className="rounded border border-gray-800 bg-gray-950/45 px-2.5 py-1.5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-gray-300 line-clamp-3 leading-relaxed">{it.snippet}</p>
+              <span className="shrink-0 text-[10px] text-gray-600">
+                {(it.similarity * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function TopicCommitments({ items }: { items: TopicCommitment[] }) {
+  if (items.length === 0) return null
+  return (
+    <section>
+      <SectionHeader icon={<CheckCircle2 size={12} />} label="Open commitments on this" />
+      <div className="space-y-1">
+        {items.map((c) => {
+          const due = formatShortDate(c.do_by)
+          return (
+            <Link
+              key={c.id}
+              to="/commitments"
+              className="block rounded border border-gray-800 bg-gray-950/45 px-2.5 py-1.5 hover:border-gray-700"
+            >
+              <div className="flex items-start justify-between gap-2 text-sm">
+                <span className="text-gray-200">{c.title}</span>
+                <span className="shrink-0 text-[10px] text-gray-600">
+                  {(c.similarity * 100).toFixed(0)}%
+                </span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-500">
+                <span className="uppercase tracking-wider">{c.status}</span>
+                {due && <span>· due {due}</span>}
+              </div>
+            </Link>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function SimilarMeetings({ items }: { items: TopicMeeting[] }) {
+  if (items.length === 0) return null
+  return (
+    <section>
+      <SectionHeader icon={<CalendarDays size={12} />} label="Past meeting on this" />
+      <div className="space-y-1">
+        {items.map((m) => {
+          const date = formatShortDate(m.start_time)
+          return (
+            <Link
+              key={m.id}
+              to={`/meetings/${m.id}`}
+              className="block rounded border border-gray-800 bg-gray-950/45 px-2.5 py-1.5 text-sm hover:border-gray-700"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-gray-200">{m.title}</span>
+                <span className="shrink-0 text-[10px] text-gray-600">
+                  {(m.similarity * 100).toFixed(0)}%
+                </span>
+              </div>
+              {date && <div className="mt-0.5 text-[11px] text-gray-500">{date}</div>}
+            </Link>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function OneOffBrief({ brief }: { brief: PreBrief }) {
+  const hasContent = briefHasOneOffContent(brief)
+
+  if (!hasContent && brief.context_status === 'no_embedding') {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-800 bg-gray-950/40 px-3 py-3 text-xs text-gray-500">
+        {brief.context_note}
+      </div>
+    )
+  }
+
+  if (!hasContent) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-800 bg-gray-950/40 px-3 py-3 text-xs italic text-gray-500">
+        No prior context on this topic — this is a new conversation.
+      </div>
+    )
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Pre-Briefs</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Upcoming meetings with the context already in Resurface.
-          </p>
+    <div className="space-y-4">
+      <TopicIdeas items={brief.topic_ideas ?? []} />
+      <TopicCommitments items={brief.topic_commitments ?? []} />
+      <TopicMemories items={brief.topic_memories ?? []} />
+      <SimilarMeetings items={brief.similar_meetings ?? []} />
+    </div>
+  )
+}
+
+// ------------------------------------------------------------
+// Recurring render branch — series open items grouped by source meeting
+// ------------------------------------------------------------
+
+const SERIES_TYPE_ICON: Record<SeriesOpenItem['source_type'], ReactNode> = {
+  commitment: <CheckCircle2 size={11} className="text-amber-400/70" />,
+  idea: <Lightbulb size={11} className="text-purple-400/70" />,
+  task: <Sparkles size={11} className="text-blue-400/70" />,
+}
+
+const SERIES_TYPE_LABEL: Record<SeriesOpenItem['source_type'], string> = {
+  commitment: 'commitment',
+  idea: 'idea',
+  task: 'task',
+}
+
+function SeriesOpenItemsBlock({ brief }: { brief: PreBrief }) {
+  const items = brief.series_open_items ?? []
+  const priorCount = brief.series_prior_instance_count ?? 0
+
+  if (items.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-800 bg-gray-950/40 px-3 py-3 text-xs italic text-gray-500">
+        Nothing still open from the last {priorCount} {priorCount === 1 ? 'instance' : 'instances'} of this meeting.
+      </div>
+    )
+  }
+
+  // Group by source meeting (each prior instance gets its own subhead)
+  const byMeeting = new Map<string, { date: string; title: string; entries: SeriesOpenItem[] }>()
+  for (const item of items) {
+    const existing = byMeeting.get(item.source_meeting_id)
+    if (existing) {
+      existing.entries.push(item)
+    } else {
+      byMeeting.set(item.source_meeting_id, {
+        date: item.source_meeting_date,
+        title: item.source_meeting_title,
+        entries: [item],
+      })
+    }
+  }
+
+  const groups = [...byMeeting.entries()].sort(([, a], [, b]) =>
+    b.date.localeCompare(a.date),
+  )
+
+  return (
+    <section>
+      <SectionHeader
+        icon={<Repeat size={12} />}
+        label="Still open from prior instances"
+        hint={`${priorCount} prior · this is a recurring meeting`}
+      />
+      <div className="space-y-3">
+        {groups.map(([meetingId, group]) => (
+          <div key={meetingId} className="rounded border border-gray-800 bg-gray-950/45 px-2.5 py-2">
+            <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px]">
+              <Link
+                to={`/meetings/${meetingId}`}
+                className="truncate text-gray-400 hover:text-gray-200"
+                title={group.title}
+              >
+                {formatShortDate(group.date)}
+              </Link>
+              <span className="text-gray-700">
+                {group.entries.length} item{group.entries.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="space-y-1">
+              {group.entries.map((entry) => {
+                const due = formatShortDate(entry.do_by)
+                const href =
+                  entry.source_type === 'commitment'
+                    ? '/commitments'
+                    : entry.source_type === 'task'
+                      ? `/items/${entry.id}`
+                      : '/ideas'
+                return (
+                  <Link
+                    key={`${entry.source_type}-${entry.id}`}
+                    to={href}
+                    className="flex items-center gap-2 text-sm leading-snug text-gray-300 hover:text-white"
+                  >
+                    {SERIES_TYPE_ICON[entry.source_type]}
+                    <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wider text-gray-600">
+                      {SERIES_TYPE_LABEL[entry.source_type]}
+                    </span>
+                    {due && (
+                      <span className="shrink-0 text-[10px] text-gray-600">due {due}</span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ------------------------------------------------------------
+// Attendee context — applies to both branches, but only when there's
+// real signal beyond identity. Self is dropped server-side.
+// ------------------------------------------------------------
+
+function AttendeeBlock({ attendee }: { attendee: PreBrief['attendee_context'][number] }) {
+  return (
+    <div className="rounded border border-gray-800 bg-gray-950/45 p-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-gray-100">{attendee.name}</div>
+          {attendee.company_name && (
+            <div className="mt-0.5 text-[11px] text-gray-500">
+              {attendee.company_id ? (
+                <Link to={`/companies/${attendee.company_id}`} className="hover:text-gray-300">
+                  {attendee.company_name}
+                </Link>
+              ) : (
+                attendee.company_name
+              )}
+            </div>
+          )}
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="rounded-lg border border-gray-800 px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        <Link
+          to={`/people/${attendee.person_id}`}
+          className="shrink-0 text-[10px] text-purple-400 hover:text-purple-300"
         >
-          {isFetching ? 'Refreshing' : 'Refresh'}
-        </button>
+          profile
+        </Link>
+      </div>
+
+      <div className="mt-2 space-y-1.5">
+        {attendee.open_commitments.length > 0 && (
+          <ContextLine icon={<CheckCircle2 size={11} />}>
+            <div className="space-y-0.5">
+              {attendee.open_commitments.slice(0, 3).map((c) => {
+                const due = formatShortDate(c.do_by)
+                return (
+                  <div key={c.id} className="leading-relaxed">
+                    <Link to="/commitments" className="text-gray-300 hover:text-white">
+                      {c.title}
+                    </Link>
+                    {due && <span className="text-gray-500"> · due {due}</span>}
+                  </div>
+                )
+              })}
+              {attendee.open_commitments.length > 3 && (
+                <div className="text-gray-500">
+                  +{attendee.open_commitments.length - 3} more open
+                </div>
+              )}
+            </div>
+          </ContextLine>
+        )}
+        {attendee.recent_memories.length > 0 && (
+          <ContextLine icon={<BriefcaseBusiness size={11} />}>
+            <div className="space-y-0.5">
+              {attendee.recent_memories.map((m) => (
+                <p key={m.id} className="line-clamp-2 leading-relaxed text-gray-400">
+                  {m.content}
+                </p>
+              ))}
+            </div>
+          </ContextLine>
+        )}
+        {attendee.prior_meeting_count > 0 && (
+          <ContextLine icon={<Clock size={11} />}>
+            <span className="text-gray-500">
+              {attendee.prior_meeting_count} prior meeting
+              {attendee.prior_meeting_count === 1 ? '' : 's'} in last 60 days
+            </span>
+          </ContextLine>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AttendeesSection({ brief }: { brief: PreBrief }) {
+  const visible = brief.attendee_context.filter(attendeeHasContext)
+  const totalUnresolved = brief.unresolved_attendee_count
+  const droppedNoContext = brief.attendee_context.length - visible.length
+
+  if (visible.length === 0) return null
+
+  return (
+    <section>
+      <SectionHeader
+        icon={<Users size={12} />}
+        label="Who's there with context"
+        hint={
+          totalUnresolved > 0 || droppedNoContext > 0
+            ? `+${totalUnresolved + droppedNoContext} other${totalUnresolved + droppedNoContext === 1 ? '' : 's'} without context`
+            : undefined
+        }
+      />
+      <div className="grid gap-1.5">
+        {visible.map((a) => (
+          <AttendeeBlock key={a.person_id} attendee={a} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ------------------------------------------------------------
+// Card shell — meeting metadata + the right body for the kind
+// ------------------------------------------------------------
+
+function BriefCard({ brief, defaultOpen }: { brief: PreBrief; defaultOpen: boolean }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+  const isLargeMeeting = brief.meeting_kind === 'large_meeting'
+  const isRecurring = brief.meeting_kind === 'recurring'
+  const hasContent = briefHasContent(brief)
+
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        className="flex w-full items-start justify-between gap-3 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-gray-500">
+            <span>{formatMeetingTime(brief.meeting.start_time)}</span>
+            {isRecurring && (
+              <span className="flex items-center gap-1 rounded bg-blue-950/40 px-1.5 py-0.5 text-blue-300">
+                <Repeat size={10} /> recurring
+              </span>
+            )}
+            {isLargeMeeting && (
+              <span className="flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5 text-gray-400">
+                <Users size={10} /> {brief.meeting.attendee_count}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-0.5 text-base font-semibold leading-snug text-white">
+            {brief.meeting.title}
+          </h3>
+          {brief.meeting.location && (
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
+              <MapPin size={11} />
+              <span className="truncate">{brief.meeting.location}</span>
+            </div>
+          )}
+        </div>
+        <span className="mt-1 shrink-0 text-gray-600">
+          {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
+
+      {isOpen && (
+        <div className="mt-4 space-y-4">
+          {brief.context_note && (
+            <div className="flex items-start gap-2 rounded border border-gray-800 bg-gray-950/45 px-3 py-2 text-xs text-gray-400">
+              <AlertCircle size={12} className="mt-0.5 shrink-0 text-gray-600" />
+              <span>{brief.context_note}</span>
+            </div>
+          )}
+          {isRecurring ? (
+            <SeriesOpenItemsBlock brief={brief} />
+          ) : (
+            <OneOffBrief brief={brief} />
+          )}
+          <AttendeesSection brief={brief} />
+          {!hasContent && !brief.context_note && (
+            <p className="text-xs italic text-gray-600">
+              No prior context — this is a new conversation.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ------------------------------------------------------------
+// Page
+// ------------------------------------------------------------
+
+export default function PreBriefs() {
+  const { data: briefs, isLoading, error } = usePreBriefs()
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-5">
+        <h1 className="flex items-center gap-2 text-2xl font-semibold text-white">
+          <CalendarDays size={20} className="text-purple-400" />
+          Pre-Briefs
+        </h1>
+        <p className="mt-1 text-xs text-gray-500">
+          Context for your next 7 days of meetings — what you've thought, said, and promised
+          on each topic.
+        </p>
       </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 p-4 text-sm text-gray-400">
-          <Loader2 size={16} className="animate-spin" />
-          Loading pre-briefs...
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 size={14} className="animate-spin" />
+          Loading meetings...
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-900/60 bg-red-950/40 p-4 text-sm text-red-200">
-          <div className="mb-1 flex items-center gap-2 font-medium">
-            <AlertCircle size={16} />
-            Pre-briefs failed
-          </div>
-          <p className="text-red-200/80">{error instanceof Error ? error.message : 'Unknown error'}</p>
+        <div className="rounded-lg border border-red-900/40 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+          {(error as Error).message}
         </div>
       )}
 
-      {!isLoading && !error && briefs?.length === 0 && (
-        <div className="rounded-lg border border-gray-800 bg-gray-900 p-6 text-sm text-gray-500">
-          No meetings in the next 7 days.
-        </div>
+      {briefs && briefs.length === 0 && (
+        <p className="text-sm text-gray-500">No upcoming meetings in the next 7 days.</p>
       )}
 
-      {!isLoading && !error && briefs && briefs.length > 0 && (
-        <div className="space-y-4">
-          {briefs.map((brief) => (
-            <PreBriefCard
+      {briefs && briefs.length > 0 && (
+        <div className="space-y-3">
+          {briefs.map((brief, i) => (
+            <BriefCard
               key={brief.meeting.id}
               brief={brief}
-              expanded={expandedBriefIds.has(brief.meeting.id)}
-              onToggle={() => toggleBrief(brief.meeting.id)}
+              defaultOpen={i === 0 && briefHasContent(brief)}
             />
           ))}
         </div>
