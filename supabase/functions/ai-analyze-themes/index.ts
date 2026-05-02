@@ -20,12 +20,26 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 const MODEL = "claude-opus-4-7";
 
-// Corpus caps — sane defaults to avoid runaway context. The user can tune
-// these later if accumulation outgrows them. Opus 4.7 has 1M context, so
-// the cap exists mostly for cost predictability, not technical limits.
-const MAX_IDEAS = 300;
-const MAX_MEMORIES = 200;
-const MAX_COMMITMENTS = 200;
+// Corpus caps. With per-item semantic enrichment (top-K cross-corpus
+// neighbors attached inline), each item runs ~400 tokens including its
+// neighbor block. Caps at 700/300/700 = 1700 items × ~400 tokens fits
+// comfortably under Opus 4.7's 1M context with room for the system
+// prompt, adaptive thinking, and 64k output. The previous caps
+// (300/200/200) were leaving 80%+ of the user's corpus unread; these
+// raise coverage to about 40% while keeping prompt size predictable.
+const MAX_IDEAS = 700;
+const MAX_MEMORIES = 300;
+const MAX_COMMITMENTS = 700;
+
+// Semantic enrichment thresholds. Anything below MIN_NEIGHBOR_SIMILARITY
+// is dropped — a "least-bad" neighbor at 0.4 is noise, not signal, and
+// padding items with weak neighbors just costs tokens. Items with zero
+// qualifying neighbors get no enrichment block at all (saves space).
+const MIN_NEIGHBOR_SIMILARITY = 0.6;
+const MAX_NEIGHBORS_PER_ITEM = 4;
+// Concurrency for the find_similar RPC fan-out. Postgres will happily
+// service the IVFFlat queries; the limit is just connection pool sanity.
+const NEIGHBOR_FETCH_CONCURRENCY = 25;
 
 interface IdeaRow {
   id: string;
@@ -167,6 +181,80 @@ Deno.serve(async (req) => {
     const memories = (memoriesRes.data ?? []) as MemoryRow[];
     const commitments = (commitmentsRes.data ?? []) as CommitmentRow[];
 
+    // ============================================================
+    // Semantic enrichment — for each candidate, pull its top cross-corpus
+    // neighbors via the find_similar RPC. The model gets these inline
+    // alongside each item, so cross-table thematic bridges that used to
+    // be implicit (the model had to find them via reasoning across the
+    // whole corpus) are now explicit input. Saves the model thinking
+    // budget for the part it's actually good at — naming what reverberates.
+    //
+    // We call find_similar in parallel batches. Cosine similarity below
+    // MIN_NEIGHBOR_SIMILARITY is filtered out; an item with no
+    // qualifying neighbors gets no enrichment block.
+    // ============================================================
+
+    interface Neighbor {
+      table: string;
+      title: string;
+      similarity: number;
+    }
+    const neighborsByKey = new Map<string, Neighbor[]>();
+
+    async function fetchNeighborsBatch(
+      requests: Array<{ key: string; table: string; id: string }>,
+    ) {
+      await Promise.all(
+        requests.map(async (req) => {
+          try {
+            const { data, error } = await adminClient.rpc("find_similar", {
+              source_table: req.table,
+              source_id: req.id,
+              searching_user_id: userId,
+              max_results: 8,
+            });
+            if (error || !data) return;
+            const filtered: Neighbor[] = [];
+            for (const row of data as Array<{
+              result_table: string;
+              title: string;
+              similarity: number;
+            }>) {
+              if (row.similarity < MIN_NEIGHBOR_SIMILARITY) continue;
+              filtered.push({
+                table: row.result_table,
+                title: row.title ?? "",
+                similarity: row.similarity,
+              });
+              if (filtered.length >= MAX_NEIGHBORS_PER_ITEM) break;
+            }
+            if (filtered.length > 0) neighborsByKey.set(req.key, filtered);
+          } catch {
+            // A single neighbor-fetch failure is non-fatal — the item just
+            // gets no enrichment block and the analysis proceeds.
+          }
+        }),
+      );
+    }
+
+    const allNeighborRequests: Array<{ key: string; table: string; id: string }> = [
+      ...ideas.map((i) => ({ key: `ideas:${i.id}`, table: "ideas", id: i.id })),
+      ...memories.map((m) => ({ key: `memories:${m.id}`, table: "memories", id: m.id })),
+      ...commitments.map((c) => ({ key: `commitments:${c.id}`, table: "commitments", id: c.id })),
+    ];
+    for (let offset = 0; offset < allNeighborRequests.length; offset += NEIGHBOR_FETCH_CONCURRENCY) {
+      await fetchNeighborsBatch(allNeighborRequests.slice(offset, offset + NEIGHBOR_FETCH_CONCURRENCY));
+    }
+
+    function neighborBlock(key: string): string {
+      const neighbors = neighborsByKey.get(key);
+      if (!neighbors || neighbors.length === 0) return "";
+      const lines = neighbors
+        .map((n) => `       · ${n.table}: "${n.title}" (${(n.similarity * 100).toFixed(0)}%)`)
+        .join("\n");
+      return `\n     near:\n${lines}`;
+    }
+
     // Pull meeting metadata for any items that reference a meeting, so
     // the AI can ground its evidence in real meeting titles/dates rather
     // than UUIDs. One round trip for the whole corpus.
@@ -199,14 +287,14 @@ Deno.serve(async (req) => {
       const ev = i.evidence_text ? `\n     evidence: "${i.evidence_text}"` : "";
       return (
         `   - [idea ${i.id}] (${daysAgo(i.created_at)})${originator}${company}${meetingPart}${cat}\n` +
-        `     title: ${i.title}${desc}${ev}`
+        `     title: ${i.title}${desc}${ev}${neighborBlock(`ideas:${i.id}`)}`
       );
     }).join("\n");
 
     const memoryLines = memories.map((m) => {
       return (
         `   - [memory ${m.id}] (${daysAgo(m.created_at)}) source: ${m.source}\n` +
-        `     ${m.content}`
+        `     ${m.content}${neighborBlock(`memories:${m.id}`)}`
       );
     }).join("\n");
 
@@ -220,7 +308,7 @@ Deno.serve(async (req) => {
       const ev = c.evidence_text ? `\n     evidence: "${c.evidence_text}"` : "";
       return (
         `   - [commitment ${c.id}] (${daysAgo(c.created_at)}) status: ${c.status}${cp}${company}${meetingPart}${due}\n` +
-        `     title: ${c.title}${desc}${ev}`
+        `     title: ${c.title}${desc}${ev}${neighborBlock(`commitments:${c.id}`)}`
       );
     }).join("\n");
 
@@ -246,6 +334,8 @@ ${commitmentLines || "  (none)"}
 Your job is to find what reverberates. Not what's frequent — what matters. A theme is a pattern that recurs across multiple sources, multiple people, multiple contexts, in a way that suggests something is trying to surface. It doesn't matter who articulated it. If three different external clients independently raise the same concern, that's a louder signal than the user articulating it themselves once. If the user keeps coming back to an idea across six weeks of meetings, that's also signal even if no one else mentions it.
 
 Recency matters but is not the only signal. An idea from 60 days ago that hasn't been pursued may be more important than three from this week — unclaimed value sitting on the table.
+
+Many corpus items come with a "near:" block listing their semantic neighbors across all four corpus tables (ideas, memories, commitments, meetings) along with a similarity percentage. Treat these neighbor lists as evidence of cross-corpus reverberation: when an idea's neighbors include memories of clients saying similar things and commitments to act on the same domain, that's a stronger pattern than the idea standing alone. Items without a "near:" block are semantically isolated — that doesn't disqualify them, but isolation is itself a signal worth noting.
 
 WRITE LIKE THIS:
 - Sharp, specific, in plain English the user would actually say.
@@ -342,6 +432,7 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
           ideas,
           memories,
           commitments,
+          neighborsCount: neighborsByKey.size,
           claudeStart,
         });
         if (!result.ok) {
@@ -354,6 +445,7 @@ Themes have at least 2 evidence items. One-offs have exactly 1. If something has
                 ideas_count: ideas.length,
                 memories_count: memories.length,
                 commitments_count: commitments.length,
+                enriched_items: neighborsByKey.size,
                 claude_ms: Date.now() - claudeStart,
                 stage: result.stage,
               },
@@ -407,12 +499,13 @@ async function runAnalysisAndPersist(opts: {
   ideas: IdeaRow[];
   memories: MemoryRow[];
   commitments: CommitmentRow[];
+  neighborsCount: number;
   claudeStart: number;
 }): Promise<
   | { ok: true }
   | { ok: false; stage: "claude_http" | "claude_stream" | "json_parse" | "update_row"; error: string }
 > {
-  const { adminClient, anthropicKey, systemPrompt, userMessage, reportId, ideas, memories, commitments, claudeStart } = opts;
+  const { adminClient, anthropicKey, systemPrompt, userMessage, reportId, ideas, memories, commitments, neighborsCount, claudeStart } = opts;
 
   // Set max_tokens to the model ceiling. Adaptive thinking and the
   // structured-JSON output share the budget; the model has no reason
@@ -513,6 +606,7 @@ async function runAnalysisAndPersist(opts: {
     ideas_count: ideas.length,
     memories_count: memories.length,
     commitments_count: commitments.length,
+    enriched_items: neighborsCount,
     claude_ms: claudeMs,
     usage,
     stop_reason: stopReason,

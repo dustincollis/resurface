@@ -49,6 +49,7 @@ export interface ThemeReport {
     ideas_count: number
     memories_count: number
     commitments_count: number
+    enriched_items?: number
     claude_ms?: number
     usage?: { input_tokens?: number; output_tokens?: number }
     stage?: string

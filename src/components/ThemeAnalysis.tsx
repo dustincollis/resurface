@@ -128,6 +128,9 @@ function ReportBody({ report }: { report: ThemeReport }) {
       {report.input_summary && (
         <p className="text-[11px] text-gray-700">
           Read {report.input_summary.ideas_count} ideas · {report.input_summary.memories_count} memories · {report.input_summary.commitments_count} commitments
+          {report.input_summary.enriched_items !== undefined
+            ? ` · ${report.input_summary.enriched_items} enriched with semantic neighbors`
+            : ''}
           {report.model ? ` · ${report.model}` : ''}
         </p>
       )}
