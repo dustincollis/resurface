@@ -15,10 +15,15 @@ import { useEntityMomentum, type EntityMomentum } from '../../hooks/useEntityMom
 type Filter = 'all' | 'person' | 'company'
 
 function trendFor(values: number[]) {
-  const recent = values.slice(-4).reduce((sum, v) => sum + v, 0)
-  const prior = values.slice(-8, -4).reduce((sum, v) => sum + v, 0)
-  if (recent > prior) return 'up'
-  if (recent < prior) return 'down'
+  const lastTwo = values.slice(-2).reduce((sum, v) => sum + v, 0)
+  const previousTwo = values.slice(-4, -2).reduce((sum, v) => sum + v, 0)
+  const recentFour = values.slice(-4).reduce((sum, v) => sum + v, 0)
+  const priorFour = values.slice(-8, -4).reduce((sum, v) => sum + v, 0)
+
+  if (recentFour === 0) return 'quiet'
+  if (lastTwo === 0) return 'down'
+  if (lastTwo >= 2 && lastTwo > previousTwo && recentFour >= priorFour) return 'up'
+  if (lastTwo < previousTwo || recentFour < priorFour) return 'down'
   return 'flat'
 }
 
@@ -26,6 +31,7 @@ function trendLabel(values: number[]) {
   const trend = trendFor(values)
   if (trend === 'up') return { label: 'warming', icon: TrendingUp, className: 'text-emerald-300' }
   if (trend === 'down') return { label: 'cooling', icon: TrendingDown, className: 'text-amber-300' }
+  if (trend === 'quiet') return { label: 'quiet', icon: Minus, className: 'text-gray-600' }
   return { label: 'steady', icon: Minus, className: 'text-gray-500' }
 }
 
