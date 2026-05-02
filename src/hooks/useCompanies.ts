@@ -16,6 +16,37 @@ export function useCompanies() {
   })
 }
 
+/**
+ * Companies tagged as content partners — the platforms whose products
+ * EPAM sells/implements (Adobe, Sitecore, Contentful, etc.). Returns the
+ * company row plus a count of people you know there, so the list page
+ * can show roster size without N+1 queries. Sorted by name.
+ */
+export interface PartnerSummary extends Company {
+  people_count: number
+}
+
+export function usePartners() {
+  return useQuery({
+    queryKey: ['companies', 'partners'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*, people(count)')
+        .eq('kind', 'partner')
+        .order('name')
+      if (error) throw error
+      // Supabase nests the count under people: [{count: N}]; flatten it.
+      return ((data ?? []) as Array<Company & { people: Array<{ count: number }> }>).map(
+        (row) => ({
+          ...row,
+          people_count: row.people?.[0]?.count ?? 0,
+        }),
+      ) as PartnerSummary[]
+    },
+  })
+}
+
 export function useCompany(id: string | undefined) {
   return useQuery({
     queryKey: ['companies', id],

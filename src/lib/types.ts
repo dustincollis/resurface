@@ -312,6 +312,8 @@ export interface PursuitMember {
 // People & Companies — canonical identity layer
 // ============================================================
 
+export type CompanyKind = 'partner' | 'client' | 'internal' | 'other' | 'unknown'
+
 export interface Company {
   id: string
   user_id: string
@@ -319,6 +321,7 @@ export interface Company {
   aliases: string[]
   domain: string | null
   notes: string | null
+  kind: CompanyKind
   created_at: string
   updated_at: string
 }

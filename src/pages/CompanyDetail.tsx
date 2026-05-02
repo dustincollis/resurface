@@ -23,7 +23,7 @@ import {
   useUpdateCompany,
   type CompanyRollup,
 } from '../hooks/useCompanies'
-import type { CommitmentStatus, PursuitStatus } from '../lib/types'
+import type { CommitmentStatus, CompanyKind, PursuitStatus } from '../lib/types'
 import Sparkline from '../components/Sparkline'
 
 const PURSUIT_STYLE: Record<PursuitStatus, string> = {
@@ -32,6 +32,24 @@ const PURSUIT_STYLE: Record<PursuitStatus, string> = {
   lost: 'bg-red-900/30 text-red-300',
   archived: 'bg-gray-800 text-gray-500',
 }
+
+const KIND_LABEL: Record<CompanyKind, string> = {
+  partner: 'Partner',
+  client: 'Client',
+  internal: 'Internal',
+  other: 'Other',
+  unknown: 'Untagged',
+}
+
+const KIND_BADGE_STYLE: Record<CompanyKind, string> = {
+  partner: 'bg-purple-900/30 text-purple-300 border-purple-800/50',
+  client: 'bg-blue-900/30 text-blue-300 border-blue-800/50',
+  internal: 'bg-gray-800 text-gray-400 border-gray-700',
+  other: 'bg-gray-800 text-gray-400 border-gray-700',
+  unknown: 'bg-gray-900 text-gray-600 border-gray-800',
+}
+
+const KIND_OPTIONS: CompanyKind[] = ['partner', 'client', 'internal', 'other', 'unknown']
 
 const COMMITMENT_STYLE: Record<CommitmentStatus, string> = {
   open: 'bg-yellow-900/30 text-yellow-300',
@@ -179,12 +197,14 @@ export default function CompanyDetail() {
   const [editName, setEditName] = useState('')
   const [editDomain, setEditDomain] = useState('')
   const [editNotes, setEditNotes] = useState('')
+  const [editKind, setEditKind] = useState<CompanyKind>('unknown')
 
   const startEdit = () => {
     if (!company) return
     setEditName(company.name)
     setEditDomain(company.domain ?? '')
     setEditNotes(company.notes ?? '')
+    setEditKind(company.kind)
     setEditing(true)
   }
 
@@ -195,6 +215,7 @@ export default function CompanyDetail() {
       name: editName.trim(),
       domain: editDomain.trim() || null,
       notes: editNotes.trim() || null,
+      kind: editKind,
     })
     setEditing(false)
   }
@@ -230,9 +251,23 @@ export default function CompanyDetail() {
               value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)}
               placeholder="Notes..."
-              rows={2}
+              rows={3}
               className="w-full resize-y rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
             />
+            <div className="flex items-center gap-2">
+              <label className="text-xs uppercase tracking-wider text-gray-500">Kind</label>
+              <select
+                value={editKind}
+                onChange={(e) => setEditKind(e.target.value as CompanyKind)}
+                className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-purple-500 focus:outline-none"
+              >
+                {KIND_OPTIONS.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex gap-2">
               <button onClick={saveEdit} className="flex items-center gap-1 rounded bg-purple-600 px-3 py-1.5 text-sm text-white hover:bg-purple-500">
                 <Check size={14} /> Save
@@ -245,14 +280,23 @@ export default function CompanyDetail() {
         ) : (
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-white">{company.name}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-semibold text-white">{company.name}</h1>
+                {company.kind !== 'unknown' && (
+                  <span
+                    className={`rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${KIND_BADGE_STYLE[company.kind]}`}
+                  >
+                    {KIND_LABEL[company.kind]}
+                  </span>
+                )}
+              </div>
               <div className="mt-1 flex items-center gap-3 text-sm text-gray-400">
                 {company.domain && <span>{company.domain}</span>}
                 <span>{(people ?? []).length} people</span>
                 <span>{(pursuits ?? []).length} pursuits</span>
               </div>
               {company.notes && (
-                <p className="mt-2 text-sm text-gray-400">{company.notes}</p>
+                <p className="mt-2 whitespace-pre-line text-sm text-gray-400">{company.notes}</p>
               )}
             </div>
             <button onClick={startEdit} className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300">

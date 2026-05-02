@@ -29,6 +29,7 @@ const navItems = [
 const directoryItems = [
   { to: '/people', label: 'People' },
   { to: '/companies', label: 'Companies' },
+  { to: '/partners', label: 'Partners' },
   { to: '/streams', label: 'Streams' },
 ]
 

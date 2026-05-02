@@ -31,6 +31,7 @@ import People from './pages/People'
 import PersonDetail from './pages/PersonDetail'
 import Companies from './pages/Companies'
 import CompanyDetail from './pages/CompanyDetail'
+import Partners from './pages/Partners'
 import ProposalAnalytics from './pages/ProposalAnalytics'
 import Settings from './pages/Settings'
 import MicrosoftCallback from './pages/MicrosoftCallback'
@@ -78,6 +79,7 @@ export default function App() {
               <Route path="people/:id" element={<PersonDetail />} />
               <Route path="companies" element={<Companies />} />
               <Route path="companies/:id" element={<CompanyDetail />} />
+              <Route path="partners" element={<Partners />} />
               <Route path="settings" element={<Settings />} />
               <Route path="settings/analytics" element={<Analytics />} />
               <Route path="settings/analytics/landscape" element={<Landscape />} />
