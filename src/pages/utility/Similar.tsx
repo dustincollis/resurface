@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, Sparkles, AlertCircle } from 'lucide-react'
 import SimilarPanel from '../../components/SimilarPanel'
 import {
   useSimilarSources,
   type SimilarSourceTable,
 } from '../../hooks/useSimilarItems'
+import {
+  useEmbeddingStatus,
+  useRunEmbeddingBackfill,
+} from '../../hooks/useEmbeddingBackfill'
 
 const TABLE_LABEL: Record<SimilarSourceTable, string> = {
   ideas: 'idea',
@@ -45,6 +49,8 @@ export default function Similar() {
       <div className="mb-5">
         <h1 className="text-2xl font-semibold text-white">Similar</h1>
       </div>
+
+      <EmbeddingStatusBar />
 
       <div className="mb-5 rounded-lg border border-gray-800 bg-gray-900 p-4">
         <div className="relative">
@@ -104,6 +110,77 @@ export default function Similar() {
           sourceId={selected.source_id}
           title={`Similar to ${TABLE_LABEL[selected.source_table]}`}
         />
+      )}
+    </div>
+  )
+}
+
+// Surfaces how much of the corpus has embeddings and lets the user trigger
+// a backfill from the browser. The Edge Function processes 200 rows per
+// call; the hook loops until the function reports zero remaining. While a
+// backfill is running, the bar shows running totals and the missing-counts
+// query revalidates between batches.
+function EmbeddingStatusBar() {
+  const { data: status, isLoading } = useEmbeddingStatus()
+  const backfill = useRunEmbeddingBackfill()
+
+  if (isLoading || !status) return null
+  const missing = status.total_missing
+  const total = status.total_rows
+
+  if (missing === 0 && !backfill.isPending && backfill.progress.embedded === 0) {
+    return (
+      <div className="mb-5 rounded-lg border border-emerald-900/40 bg-emerald-950/20 px-4 py-2.5 text-xs text-emerald-300">
+        Corpus fully embedded — {total.toLocaleString()} rows ready for similarity search.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-5 rounded-lg border border-amber-900/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-medium">
+            {missing.toLocaleString()} of {total.toLocaleString()} rows still need embeddings.
+          </div>
+          <div className="mt-0.5 text-xs text-amber-300/70">
+            ideas {status.ideas.missing}/{status.ideas.total}
+            {' · '}memories {status.memories.missing}/{status.memories.total}
+            {' · '}commitments {status.commitments.missing}/{status.commitments.total}
+            {' · '}meetings {status.meetings.missing}/{status.meetings.total}
+          </div>
+        </div>
+        <button
+          onClick={() => backfill.mutate()}
+          disabled={backfill.isPending || missing === 0}
+          className="flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-amber-50 hover:bg-amber-500 disabled:opacity-50"
+        >
+          {backfill.isPending ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              Embedding...
+            </>
+          ) : (
+            <>
+              <Sparkles size={14} />
+              Run backfill
+            </>
+          )}
+        </button>
+      </div>
+
+      {(backfill.isPending || backfill.progress.runs > 0) && (
+        <div className="mt-2 text-xs text-amber-300/80">
+          {backfill.progress.embedded.toLocaleString()} embedded across {backfill.progress.runs} {backfill.progress.runs === 1 ? 'batch' : 'batches'}
+          {backfill.progress.done && missing === 0 ? ' — done.' : '...'}
+        </div>
+      )}
+
+      {backfill.error && (
+        <div className="mt-2 flex items-start gap-2 text-xs text-red-300">
+          <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+          <span>{(backfill.error as Error).message}</span>
+        </div>
       )}
     </div>
   )

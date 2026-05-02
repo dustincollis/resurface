@@ -184,10 +184,23 @@ async function embedSingle(
 async function embedBackfill(
   admin: ReturnType<typeof createClient>,
   caller: Caller,
+  defaultUserId: string | null,
 ) {
-  if (caller.kind !== "service_role") {
-    return jsonResponse({ error: "Backfill requires service-role authorization" }, 403);
+  // Backfill is gated to callers that own a user_id we can scope by. Service
+  // role mode operates over the entire single-user database (no scope
+  // filter); authenticated user mode runs only against that user's rows.
+  // Anonymous callers can fall back to RESURFACE_DEFAULT_USER_ID since this
+  // is a single-user app — same posture as the single-mode embed path.
+  let scopeUserId: string | null = null;
+  if (caller.kind === "user") {
+    scopeUserId = caller.userId;
+  } else if (caller.kind === "anonymous") {
+    if (!defaultUserId) {
+      return jsonResponse({ error: "Backfill requires authentication" }, 401);
+    }
+    scopeUserId = defaultUserId;
   }
+  // service_role: scopeUserId stays null, query is unscoped.
 
   const candidates: Array<{ table: CorpusTable; row: CorpusRow; text: string }> = [];
   const skippedBlank: Record<CorpusTable, number> = {
@@ -201,12 +214,15 @@ async function embedBackfill(
     const remaining = BACKFILL_LIMIT - candidates.length;
     if (remaining <= 0) break;
 
-    const { data, error } = await admin
+    let query = admin
       .from(table)
       .select(selectColumns(table))
       .is("embedding", null)
       .order("created_at", { ascending: false })
       .limit(remaining);
+    if (scopeUserId) query = query.eq("user_id", scopeUserId);
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -265,7 +281,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.mode === "backfill") {
-      return await embedBackfill(admin, caller);
+      return await embedBackfill(admin, caller, defaultUserId);
     }
 
     return jsonResponse({ error: "mode must be single or backfill" }, 400);
