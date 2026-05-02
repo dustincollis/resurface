@@ -1,8 +1,30 @@
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Users, Target, Handshake, Edit2, Check, X, ChevronRight } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Activity,
+  CalendarDays,
+  ChevronRight,
+  Check,
+  Edit2,
+  Handshake,
+  Lightbulb,
+  Target,
+  Users,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
-import { useCompany, useCompanyPeople, useCompanyPursuits, useCompanyCommitments, useUpdateCompany } from '../hooks/useCompanies'
+import {
+  useCompany,
+  useCompanyPeople,
+  useCompanyPursuits,
+  useCompanyCommitments,
+  useCompanyRollup,
+  useUpdateCompany,
+  type CompanyRollup,
+} from '../hooks/useCompanies'
 import type { CommitmentStatus, PursuitStatus } from '../lib/types'
+import Sparkline from '../components/Sparkline'
 
 const PURSUIT_STYLE: Record<PursuitStatus, string> = {
   active: 'bg-purple-900/30 text-purple-300',
@@ -20,6 +42,129 @@ const COMMITMENT_STYLE: Record<CommitmentStatus, string> = {
   historical: 'bg-gray-800/50 text-gray-400',
 }
 
+function formatShortDate(iso: string | null | undefined) {
+  if (!iso) return null
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(iso))
+}
+
+function RollupList({
+  title,
+  icon,
+  children,
+  isEmpty,
+  empty,
+}: {
+  title: string
+  icon: ReactNode
+  children: ReactNode
+  isEmpty: boolean
+  empty: string
+}) {
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-gray-500">
+        {icon}
+        {title}
+      </h3>
+      <div className="space-y-1">
+        {isEmpty ? <p className="text-xs italic text-gray-600">{empty}</p> : children}
+      </div>
+    </section>
+  )
+}
+
+function CompanyRollupCard({ rollup }: { rollup: CompanyRollup | null | undefined }) {
+  if (!rollup) return null
+
+  return (
+    <div className="mb-6 rounded-xl border border-gray-800 bg-gray-900 p-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+          <div className="text-[11px] uppercase tracking-wider text-gray-600">People</div>
+          <div className="mt-1 text-xl font-semibold text-white">{rollup.people_count}</div>
+        </div>
+        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+          <div className="text-[11px] uppercase tracking-wider text-gray-600">Open</div>
+          <div className="mt-1 text-xl font-semibold text-white">
+            {rollup.open_commitments_count}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+          <div className="text-[11px] uppercase tracking-wider text-gray-600">Ideas</div>
+          <div className="mt-1 text-xl font-semibold text-white">{rollup.open_ideas_count}</div>
+        </div>
+        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+          <div className="mb-1 flex items-center gap-1 text-[11px] uppercase tracking-wider text-gray-600">
+            <Activity size={11} />
+            Momentum
+          </div>
+          <Sparkline values={rollup.weekly_momentum} className="text-purple-300" />
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <RollupList
+          title="Recent Meetings"
+          icon={<CalendarDays size={12} />}
+          isEmpty={rollup.recent_meetings.length === 0}
+          empty="No recent meetings."
+        >
+          {rollup.recent_meetings.slice(0, 5).map((meeting) => (
+            <Link
+              key={meeting.id}
+              to={`/meetings/${meeting.id}`}
+              className="block truncate text-xs text-gray-300 hover:text-white"
+            >
+              {meeting.title}
+              <span className="text-gray-500"> - {formatShortDate(meeting.start_time)}</span>
+            </Link>
+          ))}
+        </RollupList>
+
+        <RollupList
+          title="Open Commitments"
+          icon={<Handshake size={12} />}
+          isEmpty={rollup.open_commitments.length === 0}
+          empty="No open commitments."
+        >
+          {rollup.open_commitments.slice(0, 5).map((commitment) => (
+            <Link
+              key={commitment.id}
+              to="/commitments"
+              className="block truncate text-xs text-gray-300 hover:text-white"
+            >
+              {commitment.title}
+              {commitment.do_by && (
+                <span className="text-gray-500"> - {formatShortDate(commitment.do_by)}</span>
+              )}
+            </Link>
+          ))}
+        </RollupList>
+
+        <RollupList
+          title="Surfaced Ideas"
+          icon={<Lightbulb size={12} />}
+          isEmpty={rollup.surfaced_ideas.length === 0}
+          empty="No surfaced ideas."
+        >
+          {rollup.surfaced_ideas.slice(0, 5).map((idea) => (
+            <Link
+              key={idea.id}
+              to="/ideas"
+              className="block truncate text-xs text-gray-300 hover:text-white"
+            >
+              {idea.title}
+            </Link>
+          ))}
+        </RollupList>
+      </div>
+    </div>
+  )
+}
+
 export default function CompanyDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -27,6 +172,7 @@ export default function CompanyDetail() {
   const { data: people } = useCompanyPeople(id)
   const { data: pursuits } = useCompanyPursuits(id)
   const { data: commitments } = useCompanyCommitments(id)
+  const { data: rollup } = useCompanyRollup(id)
   const updateCompany = useUpdateCompany()
 
   const [editing, setEditing] = useState(false)
@@ -115,6 +261,8 @@ export default function CompanyDetail() {
           </div>
         )}
       </div>
+
+      <CompanyRollupCard rollup={rollup} />
 
       {/* People */}
       <section className="mb-6">

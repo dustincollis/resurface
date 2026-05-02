@@ -83,6 +83,35 @@ export function useCompanyCommitments(companyId: string | undefined) {
   })
 }
 
+export interface CompanyRollup {
+  people_count: number
+  open_commitments_count: number
+  open_ideas_count: number
+  recent_meetings: Array<{ id: string; title: string; start_time: string }>
+  open_commitments: Array<{ id: string; title: string; status: string; do_by: string | null }>
+  surfaced_ideas: Array<{ id: string; title: string; status: string; created_at: string }>
+  weekly_momentum: number[]
+}
+
+export function useCompanyRollup(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['companies', companyId, 'rollup'],
+    enabled: !!companyId,
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+
+      const { data, error } = await supabase.rpc('get_company_rollup', {
+        p_company_id: companyId!,
+        searching_user_id: user.id,
+      })
+      if (error) throw new Error(error.message)
+      return ((data ?? [])[0] ?? null) as CompanyRollup | null
+    },
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
 export function useUpdateCompany() {
   const qc = useQueryClient()
   return useMutation({
