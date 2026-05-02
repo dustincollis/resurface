@@ -11,6 +11,7 @@ import {
   REPORT_TYPE_DESCRIPTIONS,
   type ClusterReportType,
 } from '../hooks/useClusterReports'
+import SimilarPanel from '../components/SimilarPanel'
 import type { Idea, IdeaCategory, IdeaQuality } from '../lib/types'
 
 const QUALITY_STYLE: Record<IdeaQuality, string> = {
@@ -534,6 +535,9 @@ function IdeaTimelineRow({
                 </button>
               )}
             </div>
+          </div>
+          <div className="mt-3">
+            <SimilarPanel sourceTable="ideas" sourceId={idea.id} />
           </div>
         </div>
       )}

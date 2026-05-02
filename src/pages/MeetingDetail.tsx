@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth'
 import StatusBadge from '../components/StatusBadge'
 import InlineEditable from '../components/InlineEditable'
 import MeetingBriefing from '../components/MeetingBriefing'
+import SimilarPanel from '../components/SimilarPanel'
 import type { Item } from '../lib/types'
 
 // Render inline markdown: **bold**, *italic*, `code`
@@ -328,6 +329,12 @@ export default function MeetingDetail() {
                 return <p key={i}>{renderInline(trimmed)}</p>
               })}
             </div>
+          </div>
+        )}
+
+        {meeting.transcript_summary && (
+          <div className="border-b border-gray-800 px-6 py-4">
+            <SimilarPanel sourceTable="meetings" sourceId={meeting.id} />
           </div>
         )}
 
