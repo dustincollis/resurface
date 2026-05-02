@@ -143,6 +143,43 @@ export function useCompanyRollup(companyId: string | undefined) {
   })
 }
 
+/**
+ * Joint pursuits for a partner company — every pursuit whose meetings,
+ * commitments, or items reference this partner. Returned with a per-
+ * channel touch breakdown so the UI can show "5 touches: 3 meetings, 2
+ * items" rather than a flat number. Active pursuits sort first.
+ *
+ * Only meaningful when the company is kind='partner'; the page gates
+ * the call accordingly.
+ */
+export interface JointPursuit {
+  pursuit_id: string
+  pursuit_name: string
+  pursuit_status: string
+  touch_count: number
+  via_meetings: number
+  via_commitments: number
+  via_items: number
+  most_recent_touch: string
+}
+
+export function useCompanyJointPursuits(companyId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['companies', companyId, 'joint_pursuits'],
+    enabled: !!companyId && enabled,
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+      const { data, error } = await supabase.rpc('get_partner_joint_pursuits', {
+        partner_id: companyId!,
+        searching_user_id: user.id,
+      })
+      if (error) throw error
+      return (data ?? []) as JointPursuit[]
+    },
+  })
+}
+
 export function useUpdateCompany() {
   const qc = useQueryClient()
   return useMutation({

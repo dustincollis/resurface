@@ -20,8 +20,10 @@ import {
   useCompanyPursuits,
   useCompanyCommitments,
   useCompanyRollup,
+  useCompanyJointPursuits,
   useUpdateCompany,
   type CompanyRollup,
+  type JointPursuit,
 } from '../hooks/useCompanies'
 import type { CommitmentStatus, CompanyKind, PursuitStatus } from '../lib/types'
 import Sparkline from '../components/Sparkline'
@@ -91,6 +93,37 @@ function RollupList({
         {isEmpty ? <p className="text-xs italic text-gray-600">{empty}</p> : children}
       </div>
     </section>
+  )
+}
+
+function JointPursuitRow({ jp }: { jp: JointPursuit }) {
+  const status = jp.pursuit_status as PursuitStatus
+  const breakdownParts: string[] = []
+  if (jp.via_meetings > 0) breakdownParts.push(`${jp.via_meetings} meeting${jp.via_meetings === 1 ? '' : 's'}`)
+  if (jp.via_commitments > 0)
+    breakdownParts.push(`${jp.via_commitments} commitment${jp.via_commitments === 1 ? '' : 's'}`)
+  if (jp.via_items > 0) breakdownParts.push(`${jp.via_items} item${jp.via_items === 1 ? '' : 's'}`)
+
+  return (
+    <Link
+      to={`/pursuits/${jp.pursuit_id}`}
+      className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 px-3 py-2 transition-colors hover:border-gray-700"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-white">{jp.pursuit_name}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${PURSUIT_STYLE[status] ?? 'bg-gray-800 text-gray-400'}`}>
+            {status}
+          </span>
+        </div>
+        {breakdownParts.length > 0 && (
+          <div className="mt-0.5 text-[11px] text-gray-500">
+            {jp.touch_count} touch{jp.touch_count === 1 ? '' : 'es'} · {breakdownParts.join(', ')}
+          </div>
+        )}
+      </div>
+      <ChevronRight size={14} className="shrink-0 text-gray-600" />
+    </Link>
   )
 }
 
@@ -191,6 +224,8 @@ export default function CompanyDetail() {
   const { data: pursuits } = useCompanyPursuits(id)
   const { data: commitments } = useCompanyCommitments(id)
   const { data: rollup } = useCompanyRollup(id)
+  const isPartner = company?.kind === 'partner'
+  const { data: jointPursuits } = useCompanyJointPursuits(id, isPartner)
   const updateCompany = useUpdateCompany()
 
   const [editing, setEditing] = useState(false)
@@ -307,6 +342,33 @@ export default function CompanyDetail() {
       </div>
 
       <CompanyRollupCard rollup={rollup} />
+
+      {/* Joint pursuits — partner-only section. Pursuits where this
+          partner is mentioned or shared across meetings, commitments,
+          or items. Active pursuits surface first; closed/lost are still
+          shown so the user can see historical engagement. */}
+      {isPartner && jointPursuits && jointPursuits.length > 0 && (
+        <section className="mb-6">
+          <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+            <Handshake size={12} /> Joint pursuits ({jointPursuits.length})
+          </h2>
+          <div className="space-y-1.5">
+            {jointPursuits.map((jp) => (
+              <JointPursuitRow key={jp.pursuit_id} jp={jp} />
+            ))}
+          </div>
+        </section>
+      )}
+      {isPartner && jointPursuits && jointPursuits.length === 0 && (
+        <section className="mb-6">
+          <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+            <Handshake size={12} /> Joint pursuits
+          </h2>
+          <p className="rounded border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
+            No active pursuits mention this partner yet.
+          </p>
+        </section>
+      )}
 
       {/* People */}
       <section className="mb-6">
