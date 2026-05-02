@@ -145,21 +145,34 @@ Deno.serve(async (req) => {
     // Pull the corpus
     // ============================================================
 
+    // Memories decay faster than ideas/commitments — they're soft facts about
+    // people and relationships, and a memory from 6 months ago about an
+    // attendee's role is often stale. Cap at 90 days to keep the corpus
+    // weighted toward current reality. Older memories still surface via
+    // semantic enrichment if they're related to a recent item.
+    const memoryCutoffIso = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
     const [ideasRes, memoriesRes, commitmentsRes] = await Promise.all([
       adminClient
         .from("ideas")
         .select(
-          "id, title, description, evidence_text, source_meeting_id, originated_by, company_name, category, status, created_at"
+          "id, title, description, evidence_text, source_meeting_id, originated_by, company_name, category, status, quality, created_at"
         )
         .eq("user_id", userId)
         .neq("status", "dismissed")
         .neq("status", "archived")
+        // Quality triage already exists (high/medium/low/null). Drop low —
+        // those are parser noise: tactical minutiae, off-topic asides, weak
+        // attributions. Untriaged (null) ideas stay in; medium and high
+        // are obviously kept.
+        .or("quality.neq.low,quality.is.null")
         .order("created_at", { ascending: false })
         .limit(MAX_IDEAS),
       adminClient
         .from("memories")
         .select("id, content, source, created_at")
         .eq("user_id", userId)
+        .gte("created_at", memoryCutoffIso)
         .order("created_at", { ascending: false })
         .limit(MAX_MEMORIES),
       adminClient
@@ -333,7 +346,7 @@ ${commitmentLines || "  (none)"}
 
 Your job is to find what reverberates. Not what's frequent — what matters. A theme is a pattern that recurs across multiple sources, multiple people, multiple contexts, in a way that suggests something is trying to surface. It doesn't matter who articulated it. If three different external clients independently raise the same concern, that's a louder signal than the user articulating it themselves once. If the user keeps coming back to an idea across six weeks of meetings, that's also signal even if no one else mentions it.
 
-Recency matters but is not the only signal. An idea from 60 days ago that hasn't been pursued may be more important than three from this week — unclaimed value sitting on the table.
+Weight recent material heavily. Items from the last 21 days are primary evidence — those are what's actively reverberating. Items 22-60 days old are supporting context. Items older than 60 days should anchor a theme only when the same idea is also surfacing in recent material; a theme made entirely of 60+ day old items is a stale pattern, and you should either drop it or call it out explicitly as a theme that's gone quiet but might be worth revisiting. Use the "(Nd ago)" tag on each corpus item to assess this directly. Recency dominates, but doesn't completely override: an unclaimed idea from 90 days ago that's reappearing in this week's meetings is more important than three from this week that nobody has touched again.
 
 Many corpus items come with a "near:" block listing their semantic neighbors across all four corpus tables (ideas, memories, commitments, meetings) along with a similarity percentage. Treat these neighbor lists as evidence of cross-corpus reverberation: when an idea's neighbors include memories of clients saying similar things and commitments to act on the same domain, that's a stronger pattern than the idea standing alone. Items without a "near:" block are semantically isolated — that doesn't disqualify them, but isolation is itself a signal worth noting.
 
@@ -360,7 +373,7 @@ OUTPUT FORMAT (strict JSON, nothing else, no markdown fence):
           "source_type": "idea" | "memory" | "commitment",
           "source_id": "the UUID from the corpus",
           "meeting_title": "the meeting it came from, or empty string if no source meeting",
-          "meeting_date": "YYYY-MM-DD or empty string",
+          "meeting_date": "REQUIRED. YYYY-MM-DD format. Pull from the corpus item's meeting context or the item's own (Nd ago) tag converted to a real date. Do NOT leave this empty — if you can't determine a date, don't use the item as evidence. The date is how the user judges whether evidence is current or stale, so it's load-bearing.",
           "quote": "the actual evidence text or quote — keep verbatim where possible",
           "person": "name of the person, or empty string if unknown/N-A",
           "company": "company name, or empty string if N/A"
