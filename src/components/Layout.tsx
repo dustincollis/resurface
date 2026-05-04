@@ -20,7 +20,7 @@ const navItems = [
   { to: '/commitments', label: 'Commitments' },
   { to: '/pursuits', label: 'Pursuits' },
   { to: '/goals', label: 'Goals' },
-  { to: '/ideas', label: 'Ideas' },
+  { to: '/partners', label: 'Partners' },
   { to: '/themes', label: 'Themes' },
   { to: '/meetings', label: 'Discussions' },
   { to: '/events', label: 'Events' },
@@ -29,7 +29,6 @@ const navItems = [
 const directoryItems = [
   { to: '/people', label: 'People' },
   { to: '/companies', label: 'Companies' },
-  { to: '/partners', label: 'Partners' },
   { to: '/streams', label: 'Streams' },
 ]
 

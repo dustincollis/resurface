@@ -9,11 +9,13 @@ import {
   Edit2,
   Handshake,
   Lightbulb,
+  ListChecks,
+  Mail,
   Target,
   Users,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   useCompany,
   useCompanyPeople,
@@ -21,9 +23,12 @@ import {
   useCompanyCommitments,
   useCompanyRollup,
   useCompanyJointPursuits,
+  useCompanyPartnerActivity,
   useUpdateCompany,
   type CompanyRollup,
   type JointPursuit,
+  type PartnerActivityCompany,
+  type PartnerMeetingActivity,
 } from '../hooks/useCompanies'
 import type { CommitmentStatus, CompanyKind, PursuitStatus } from '../lib/types'
 import Sparkline from '../components/Sparkline'
@@ -216,6 +221,88 @@ function CompanyRollupCard({ rollup }: { rollup: CompanyRollup | null | undefine
   )
 }
 
+// Window: meetings within this many days are "recent" and shown by
+// default. Older ones are hidden behind "Show more". Single source of
+// truth so the toggle and label stay in sync.
+const PARTNER_ACTIVITY_RECENT_DAYS = 30
+
+function relatedCompanyChipStyle(kind: PartnerActivityCompany['kind']): string {
+  switch (kind) {
+    case 'client':
+      return 'bg-blue-900/30 text-blue-300 border-blue-800/50 hover:border-blue-700'
+    case 'partner':
+      return 'bg-purple-900/30 text-purple-300 border-purple-800/50 hover:border-purple-700'
+    case 'internal':
+      return 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-600'
+    default:
+      return 'bg-gray-900 text-gray-400 border-gray-800 hover:border-gray-700'
+  }
+}
+
+function MeetingActivityCard({ activity }: { activity: PartnerMeetingActivity }) {
+  const dateLabel = activity.start_time ? formatShortDate(activity.start_time) : null
+  const fu = activity.follow_ups_count
+  const items = activity.items_count
+  const commits = activity.commitments_count
+
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900 px-4 py-3 transition-colors hover:border-gray-700">
+      <div className="flex items-start justify-between gap-3">
+        <Link to={`/meetings/${activity.meeting_id}`} className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="truncate text-sm font-semibold text-white">
+              {activity.meeting_title || 'Untitled meeting'}
+            </span>
+            {dateLabel && <span className="shrink-0 text-[11px] text-gray-500">{dateLabel}</span>}
+          </div>
+        </Link>
+        <ChevronRight size={14} className="mt-1 shrink-0 text-gray-600" />
+      </div>
+
+      {activity.related_companies.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-gray-600">Mentions</span>
+          {activity.related_companies.map((rc) => (
+            <Link
+              key={rc.id}
+              to={`/companies/${rc.id}`}
+              className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${relatedCompanyChipStyle(rc.kind)}`}
+            >
+              {rc.name}
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {(fu > 0 || items > 0 || commits > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-gray-400">
+          {fu > 0 && (
+            <Link
+              to={`/follow-ups?meeting=${activity.meeting_id}`}
+              className="flex items-center gap-1 hover:text-white"
+            >
+              <Mail size={11} />
+              {fu} follow-up{fu === 1 ? '' : 's'}
+            </Link>
+          )}
+          {items > 0 && (
+            <span className="flex items-center gap-1">
+              <ListChecks size={11} />
+              {items} action item{items === 1 ? '' : 's'}
+            </span>
+          )}
+          {commits > 0 && (
+            <span className="flex items-center gap-1">
+              <Handshake size={11} />
+              {commits} commitment{commits === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CompanyDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -226,7 +313,26 @@ export default function CompanyDetail() {
   const { data: rollup } = useCompanyRollup(id)
   const isPartner = company?.kind === 'partner'
   const { data: jointPursuits } = useCompanyJointPursuits(id, isPartner)
+  const { data: partnerActivity } = useCompanyPartnerActivity(id, isPartner)
   const updateCompany = useUpdateCompany()
+  // "Show all" toggles between the 30-day window and the full result set.
+  const [showAllActivity, setShowAllActivity] = useState(false)
+
+  // Partition activity into recent (≤ 30 days) and older. The RPC already
+  // returns up to 100 meetings sorted desc; we just slice client-side so
+  // the toggle is instant and we don't refetch.
+  const { recentActivity, olderActivity } = useMemo(() => {
+    const all = partnerActivity ?? []
+    const cutoff = Date.now() - PARTNER_ACTIVITY_RECENT_DAYS * 24 * 60 * 60 * 1000
+    const recent: PartnerMeetingActivity[] = []
+    const older: PartnerMeetingActivity[] = []
+    for (const a of all) {
+      const ts = a.start_time ? new Date(a.start_time).getTime() : 0
+      if (ts >= cutoff) recent.push(a)
+      else older.push(a)
+    }
+    return { recentActivity: recent, olderActivity: older }
+  }, [partnerActivity])
 
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState('')
@@ -367,6 +473,55 @@ export default function CompanyDetail() {
           <p className="rounded border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
             No active pursuits mention this partner yet.
           </p>
+        </section>
+      )}
+
+      {/* Partner Activity — meetings the partner attended, with related
+          accounts called out and follow-ups linkable. Default window is
+          last 30 days; "Show more" reveals older meetings client-side. */}
+      {isPartner && partnerActivity && (
+        <section className="mb-6">
+          <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+            <CalendarDays size={12} /> Partner activity
+            {partnerActivity.length > 0 && (
+              <span className="text-gray-600">
+                · last {PARTNER_ACTIVITY_RECENT_DAYS} days
+              </span>
+            )}
+          </h2>
+
+          {recentActivity.length === 0 && olderActivity.length === 0 && (
+            <p className="rounded border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
+              No meetings with this partner on record.
+            </p>
+          )}
+
+          {recentActivity.length === 0 && olderActivity.length > 0 && (
+            <p className="rounded border border-dashed border-gray-800 px-3 py-2 text-xs italic text-gray-600">
+              No meetings in the last {PARTNER_ACTIVITY_RECENT_DAYS} days.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {recentActivity.map((a) => (
+              <MeetingActivityCard key={a.meeting_id} activity={a} />
+            ))}
+            {showAllActivity &&
+              olderActivity.map((a) => (
+                <MeetingActivityCard key={a.meeting_id} activity={a} />
+              ))}
+          </div>
+
+          {olderActivity.length > 0 && (
+            <button
+              onClick={() => setShowAllActivity((v) => !v)}
+              className="mt-2 text-xs text-purple-400 hover:text-purple-300"
+            >
+              {showAllActivity
+                ? 'Show fewer'
+                : `Show ${olderActivity.length} older meeting${olderActivity.length === 1 ? '' : 's'}`}
+            </button>
+          )}
         </section>
       )}
 

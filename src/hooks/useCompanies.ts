@@ -180,6 +180,48 @@ export function useCompanyJointPursuits(companyId: string | undefined, enabled: 
   })
 }
 
+/**
+ * Partner activity feed — meetings the partner attended, with the
+ * cross-references resolved server-side: follow-up count, items count,
+ * commitments count, and related companies (other accounts mentioned in
+ * the meeting). Most-recent first; the UI windows to last 30 days by
+ * default and reveals older on "Show more".
+ *
+ * Only meaningful when company.kind='partner'; the page gates the call.
+ */
+export interface PartnerActivityCompany {
+  id: string
+  name: string
+  kind: 'partner' | 'client' | 'internal' | 'other' | 'unknown'
+}
+
+export interface PartnerMeetingActivity {
+  meeting_id: string
+  meeting_title: string
+  start_time: string | null
+  follow_ups_count: number
+  items_count: number
+  commitments_count: number
+  related_companies: PartnerActivityCompany[]
+}
+
+export function useCompanyPartnerActivity(companyId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['companies', companyId, 'partner_activity'],
+    enabled: !!companyId && enabled,
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+      const { data, error } = await supabase.rpc('get_partner_activity', {
+        partner_id: companyId!,
+        searching_user_id: user.id,
+      })
+      if (error) throw error
+      return (data ?? []) as PartnerMeetingActivity[]
+    },
+  })
+}
+
 export function useUpdateCompany() {
   const qc = useQueryClient()
   return useMutation({
