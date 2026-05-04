@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="org-chart-svg" width="725" height="677.5">
+<style>
+svg {
+    font-family: "Adobe Clean", "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    --spectrum-global-color-gray-50: #ffffff;
+    --spectrum-global-color-gray-100: #f8f8f8;
+    --spectrum-global-color-gray-200: #e6e6e6;
+    --spectrum-global-color-gray-300: #d5d5d5;
+    --spectrum-global-color-gray-400: #b1b1b1;
+    --spectrum-global-color-gray-500: #909090;
+    --spectrum-global-color-gray-600: #6d6d6d;
+    --spectrum-global-color-gray-700: #464646;
+    --spectrum-global-color-gray-800: #222222;
+    --spectrum-global-color-gray-900: #000000;
+    --spectrum-global-color-static-gray-50: #ffffff;
+    --spectrum-global-color-static-gray-100: #f8f8f8;
+    --spectrum-global-color-static-gray-200: #e6e6e6;
+    --spectrum-global-color-static-gray-300: #d5d5d5;
+    --spectrum-global-color-static-gray-400: #b1b1b1;
+    --spectrum-global-color-static-gray-500: #909090;
+    --spectrum-global-color-static-gray-600: #6d6d6d;
+    --spectrum-global-color-static-gray-700: #464646;
+    --spectrum-global-color-static-gray-800: #222222;
+    --spectrum-global-color-static-gray-900: #000000;
+    --spectrum-global-color-blue-400: rgb(20, 122, 243);
+    --spectrum-global-color-orange-400: rgb(246, 133, 17);
+    --spectrum-global-color-red-300: rgb(255, 205, 195);
+}
+
+    .node .icon {
+        stroke: var(--spectrum-global-color-gray-400);
+        stroke-width: 1px;
+    }
+
+    .node path.shape {
+        fill: var(--spectrum-global-color-static-gray-300);
+        stroke: none;
+    }
+
+    .node text {
+        fill: var(--spectrum-global-color-gray-800);
+    }
+
+    .node.selected text,
+    .node.in-common-check text {
+        fill: var(--spectrum-global-color-gray-50);
+    }
+
+    .node text.text1,
+    .node text.text2,
+    .node.selected text.text1,
+    .node.selected text.text2 {
+        text-anchor: middle;
+        fill: var(--spectrum-global-color-static-gray-700);
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    .node,
+    .back-button {
+        cursor: pointer;
+    }
+
+    .node .background,
+    .back-button .background {
+        fill: var(--spectrum-global-color-gray-50);
+    }
+
+    .node:hover .background,
+    .back-button:hover .background {
+        fill: var(--spectrum-global-color-gray-200);
+    }
+
+    .node.moved .background,
+    .node.moved:hover .background {
+        fill: var(--spectrum-global-color-red-300);
+    }
+
+    .node.in-common-check .background,
+    .node.in-common-check:hover .background {
+        fill: var(--spectrum-global-color-blue-400);
+    }
+
+    .node.selected .background,
+    .node.selected:hover .background {
+        fill: var(--spectrum-global-color-orange-400);
+    }
+
+    .back-arrow {
+        fill: none;
+        stroke: var(--spectrum-global-color-gray-600);
+        stroke-width: 1.5px;
+    }
+
+    .manager .name {
+        font-weight: bold;
+    }
+
+    .count {
+        font-weight: 100;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    .link,
+    .more-reports-link {
+        fill: none;
+        stroke: var(--spectrum-global-color-gray-300);
+        stroke-width: 1.5px;
+    }
+
+    .in-common-check-link {
+        stroke: var(--spectrum-global-color-blue-400);
+        stroke-width: 5px;
+    }
+
+    .search-link {
+        stroke: var(--spectrum-global-color-orange-400);
+        stroke-width: 5px;
+    }
+
+    .glow {
+        filter: url(#glow);
+    }
+
+</style>
+
+                <defs>
+                    <filter id="glow" height="180%" y="-40%" filterUnits="userSpaceOnUse">
+                        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"></feGaussianBlur>
+                    </filter>
+                </defs>
+                <g class="tree" transform="translate(65, 338.75)">
+                    <text id="text-size" opacity="0" style="font-weight: 100; font-style: normal;"></text>
+                    <g class="links"><path class="link" d="M124.73380088806152,0L160,0C200,0,200,-256.25,240,-256.25" stroke-opacity="1"></path><path class="link" d="M124.73380088806152,0L160,0C200,0,200,-81.25,240,-81.25" stroke-opacity="1"></path><path class="link" d="M124.73380088806152,0L160,0C200,0,200,81.25,240,81.25" stroke-opacity="1"></path><path class="link" d="M124.73380088806152,0L160,0C200,0,200,231.25,240,231.25" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-318.75,480,-318.75" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-293.75,480,-293.75" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-268.75,480,-268.75" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-243.75,480,-243.75" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-218.75,480,-218.75" stroke-opacity="1"></path><path class="link" d="M377.76620960235596,-256.25L400,-256.25C440,-256.25,440,-193.75,480,-193.75" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-156.25,480,-156.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-131.25,480,-131.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-106.25,480,-106.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-81.25,480,-81.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-56.25,480,-56.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-31.25,480,-31.25" stroke-opacity="1"></path><path class="link" d="M361.1805591583252,-81.25L400,-81.25C440,-81.25,440,-6.25,480,-6.25" stroke-opacity="1"></path><path class="link" d="M349.16667556762695,81.25L400,81.25C440,81.25,440,31.25,480,31.25" stroke-opacity="1"></path><path class="link" d="M349.16667556762695,81.25L400,81.25C440,81.25,440,56.25,480,56.25" stroke-opacity="1"></path><path class="link" d="M349.16667556762695,81.25L400,81.25C440,81.25,440,81.25,480,81.25" stroke-opacity="1"></path><path class="link" d="M349.16667556762695,81.25L400,81.25C440,81.25,440,106.25,480,106.25" stroke-opacity="1"></path><path class="link" d="M349.16667556762695,81.25L400,81.25C440,81.25,440,131.25,480,131.25" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,168.75,480,168.75" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,193.75,480,193.75" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,218.75,480,218.75" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,243.75,480,243.75" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,268.75,480,268.75" stroke-opacity="1"></path><path class="link" d="M369.8611192703247,231.25L400,231.25C440,231.25,440,293.75,480,293.75" stroke-opacity="1"></path></g>
+                    <g class="nodes"><g class="node manager" transform="translate(0, 0)" stroke-opacity="1" fill-opacity="1" id="node-llathen"><line class="more-reports-link" x1="124.73380088806152" y1="0" x2="240" y2="0" opacity="0"></line><rect x="-2.5" y="-12.5" width="129.73380088806152" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><rect x="15" y="0" width="112.23380088806152" height="20" stroke-opacity="4" fill-opacity="4" class="background middle"></rect><rect x="15" y="8.5" width="112.78935623168945" height="30" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background bottom"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Luke Lathen</tspan><tspan class="count"> (28)</tspan><tspan x="25" dy="1.6em" style="font-weight: normal; font-style: italic;">US Greenfield</tspan></text><title>Click for more information
+Double-click to show this manager's organization</title></g><g class="node manager" transform="translate(240, -256.25)" stroke-opacity="1" fill-opacity="1" id="node-allane"><line class="more-reports-link" x1="137.76620960235596" y1="0" x2="240" y2="0" opacity="0"></line><rect x="-2.5" y="-12.5" width="142.76620960235596" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><rect x="15" y="0" width="125.26620960235596" height="20" stroke-opacity="4" fill-opacity="4" class="background middle"></rect><rect x="15" y="8.5" width="152.24537658691406" height="50" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background bottom"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Alexandra Lane</tspan><tspan class="count"> (6)</tspan><tspan x="25" dy="1.6em" style="font-weight: normal; font-style: italic;">DX Greenfield Enterprise</tspan><tspan x="25" dy="1.4em" style="font-weight: normal; font-style: italic;">Sales East</tspan></text><title>Click for more information
+Double-click to show this manager's organization</title></g><g class="node" transform="translate(480, -318.75)" stroke-opacity="1" fill-opacity="1" id="node-hemangm"><rect x="-2.5" y="-12.5" width="123.14815521240234" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Hemang Mehta</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -293.75)" stroke-opacity="1" fill-opacity="1" id="node-jlund"><rect x="-2.5" y="-12.5" width="90.1273193359375" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Jack Lund</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -268.75)" stroke-opacity="1" fill-opacity="1" id="node-kmclaughlin"><rect x="-2.5" y="-12.5" width="130.38195037841797" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Kate McLaughlin</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -243.75)" stroke-opacity="1" fill-opacity="1" id="node-matthewmille"><rect x="-2.5" y="-12.5" width="121.71296691894531" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Matthew Miller</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -218.75)" stroke-opacity="1" fill-opacity="1" id="node-stefanas"><rect x="-2.5" y="-12.5" width="133.76158142089844" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Stefana Simmons</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -193.75)" stroke-opacity="1" fill-opacity="1" id="node-tvaughn"><rect x="-2.5" y="-12.5" width="119.46759796142578" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Tiffany Vaughn</tspan></text><title>Click for more information</title></g><g class="node manager" transform="translate(240, -81.25)" stroke-opacity="1" fill-opacity="1" id="node-bunker"><line class="more-reports-link" x1="121.1805591583252" y1="0" x2="240" y2="0" opacity="0"></line><rect x="-2.5" y="-12.5" width="126.1805591583252" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><rect x="15" y="0" width="108.6805591583252" height="20" stroke-opacity="4" fill-opacity="4" class="background middle"></rect><rect x="15" y="8.5" width="152.24537658691406" height="50" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background bottom"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">UT</text><text x="10" dy="0.75em" font-size="10" class="text2">LH</text><text><tspan x="25" dy="0.35em" class="name">Brian Bunker</tspan><tspan class="count"> (7)</tspan><tspan x="25" dy="1.6em" style="font-weight: normal; font-style: italic;">DX Greenfield Enterprise</tspan><tspan x="25" dy="1.4em" style="font-weight: normal; font-style: italic;">Sales West</tspan></text><title>Click for more information
+Double-click to show this manager's organization</title></g><g class="node" transform="translate(480, -156.25)" stroke-opacity="1" fill-opacity="1" id="node-acarlson"><rect x="-2.5" y="-12.5" width="114.1898193359375" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Annie Carlson</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -131.25)" stroke-opacity="1" fill-opacity="1" id="node-jemathew"><rect x="-2.5" y="-12.5" width="129.12037658691406" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Jenelle Mathews</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -106.25)" stroke-opacity="1" fill-opacity="1" id="node-chope"><rect x="-2.5" y="-12.5" width="111.73611450195312" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Kelsey Chope</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -81.25)" stroke-opacity="1" fill-opacity="1" id="node-mfriedman"><rect x="-2.5" y="-12.5" width="136.13426971435547" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Marissa Friedman</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -56.25)" stroke-opacity="1" fill-opacity="1" id="node-mawarren"><rect x="-2.5" y="-12.5" width="108.94676208496094" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Mark Warren</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -31.25)" stroke-opacity="1" fill-opacity="1" id="node-masters"><rect x="-2.5" y="-12.5" width="110.63658142089844" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">CO</text><text x="10" dy="0.75em" font-size="10" class="text2">DV</text><text><tspan x="25" dy="0.35em" class="name">Riley Masters</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, -6.25)" stroke-opacity="1" fill-opacity="1" id="node-stucci"><rect x="-2.5" y="-12.5" width="124.38658142089844" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Samantha Tucci</tspan></text><title>Click for more information</title></g><g class="node manager" transform="translate(240, 81.25)" stroke-opacity="1" fill-opacity="1" id="node-treese"><line class="more-reports-link" x1="109.16667556762695" y1="0" x2="240" y2="0" opacity="0"></line><rect x="-2.5" y="-12.5" width="114.16667556762695" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><rect x="15" y="0" width="96.66667556762695" height="20" stroke-opacity="4" fill-opacity="4" class="background middle"></rect><rect x="15" y="8.5" width="152.24537658691406" height="50" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background bottom"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">CO</text><text x="10" dy="0.75em" font-size="10" class="text2">DV</text><text><tspan x="25" dy="0.35em" class="name">Tom Reese</tspan><tspan class="count"> (5)</tspan><tspan x="25" dy="1.6em" style="font-weight: normal; font-style: italic;">DX Greenfield Enterprise</tspan><tspan x="25" dy="1.4em" style="font-weight: normal; font-style: italic;">Sales Central</tspan></text><title>Click for more information
+Double-click to show this manager's organization</title></g><g class="node" transform="translate(480, 31.25)" stroke-opacity="1" fill-opacity="1" id="node-emartin"><rect x="-2.5" y="-12.5" width="113.42593383789062" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">CO</text><text x="10" dy="0.75em" font-size="10" class="text2">DV</text><text><tspan x="25" dy="0.35em" class="name">Emma Martin</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 56.25)" stroke-opacity="1" fill-opacity="1" id="node-mgriffin"><rect x="-2.5" y="-12.5" width="112.02546691894531" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Megan Griffin</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 81.25)" stroke-opacity="1" fill-opacity="1" id="node-prenderg"><rect x="-2.5" y="-12.5" width="134.3055648803711" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Ryan Prendergast</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 106.25)" stroke-opacity="1" fill-opacity="1" id="node-sknapp"><rect x="-2.5" y="-12.5" width="107.19908142089844" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Sarah Knapp</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 131.25)" stroke-opacity="1" fill-opacity="1" id="node-wpeterso"><rect x="-2.5" y="-12.5" width="120.47454071044922" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">UT</text><text x="10" dy="0.75em" font-size="10" class="text2">LH</text><text><tspan x="25" dy="0.35em" class="name">Wade Peterson</tspan></text><title>Click for more information</title></g><g class="node manager" transform="translate(240, 231.25)" stroke-opacity="1" fill-opacity="1" id="node-denboer"><line class="more-reports-link" x1="129.8611192703247" y1="0" x2="240" y2="0" opacity="0"></line><rect x="-2.5" y="-12.5" width="134.8611192703247" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><rect x="15" y="0" width="117.3611192703247" height="20" stroke-opacity="4" fill-opacity="4" class="background middle"></rect><rect x="15" y="8.5" width="117.3611192703247" height="30" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background bottom"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">UT</text><text x="10" dy="0.75em" font-size="10" class="text2">LH</text><text><tspan x="25" dy="0.35em" class="name">Tyler Denboer</tspan><tspan class="count"> (6)</tspan><tspan x="25" dy="1.6em" style="font-weight: normal; font-style: italic;">Digital Marketing</tspan></text><title>Click for more information
+Double-click to show this manager's organization</title></g><g class="node" transform="translate(480, 168.75)" stroke-opacity="1" fill-opacity="1" id="node-hbrodeur"><rect x="-2.5" y="-12.5" width="122.68518829345703" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">NY</text><text x="10" dy="0.75em" font-size="10" class="text2">NY</text><text><tspan x="25" dy="0.35em" class="name">Hayley Brodeur</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 193.75)" stroke-opacity="1" fill-opacity="1" id="node-jaclyngray"><rect x="-2.5" y="-12.5" width="98.44907760620117" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Jaclyn Gray</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 218.75)" stroke-opacity="1" fill-opacity="1" id="node-lentz"><rect x="-2.5" y="-12.5" width="101.19213104248047" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">CA</text><text x="10" dy="0.75em" font-size="10" class="text2">SF</text><text><tspan x="25" dy="0.35em" class="name">Justin Lentz</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 243.75)" stroke-opacity="1" fill-opacity="1" id="node-pabeck"><rect x="-2.5" y="-12.5" width="122.6388931274414" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="-0.05em" font-size="10" class="text1">UT</text><text x="10" dy="0.75em" font-size="10" class="text2">LH</text><text><tspan x="25" dy="0.35em" class="name">Paul Jared Beck</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 268.75)" stroke-opacity="1" fill-opacity="1" id="node-ricketso"><rect x="-2.5" y="-12.5" width="104.5023193359375" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">PJ Ricketson</tspan></text><title>Click for more information</title></g><g class="node" transform="translate(480, 293.75)" stroke-opacity="1" fill-opacity="1" id="node-rpalmer"><rect x="-2.5" y="-12.5" width="106.74768829345703" height="25" rx="12.5" ry="12.5" stroke-opacity="4" fill-opacity="4" class="background top"></rect><circle cx="10" r="10" class="icon role- " fill="#f0a8a8"></circle><path transform="translate(10)" d="" class="shape"></path><text x="10" dy="0.35em" font-size="10" class="text1">R</text><text x="10" dy="0.75em" font-size="10" class="text2"></text><text><tspan x="25" dy="0.35em" class="name">Ryan Palmer</tspan></text><title>Click for more information</title></g></g>
+                <g class="back-button" transform="translate(-45, 0)" fill-opacity="1" stroke-opacity="1"><rect class="background" x="0" y="-12.5" width="40" height="25" rx="12.5" ry="12.5"></rect><path class="back-arrow" d="M10,0 L30,0 M17,7 L10,0 17,-7"></path><title>Show manager</title></g></g>
+            </svg>

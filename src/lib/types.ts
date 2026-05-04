@@ -264,6 +264,51 @@ export interface UpdateCommitmentPayload extends Partial<CreateCommitmentPayload
 }
 
 // ============================================================
+// Partner reference documents
+// ============================================================
+
+export type PartnerDocumentKind =
+  | 'org_chart'
+  | 'team_structure'
+  | 'capability_brief'
+  | 'contract'
+  | 'other'
+
+export interface PartnerDocumentPerson {
+  name: string
+  role?: string | null
+  territory?: string | null
+  region?: string | null
+  email?: string | null
+  notes?: string | null
+}
+
+export interface PartnerDocumentAccountMention {
+  name: string
+  context?: string | null
+}
+
+export interface PartnerDocument {
+  id: string
+  user_id: string
+  company_id: string
+  title: string
+  kind: PartnerDocumentKind
+  original_filename: string
+  mime_type: string
+  storage_path: string
+  size_bytes: number | null
+  extracted_text: string | null
+  summary: string | null
+  extracted_people: PartnerDocumentPerson[]
+  extracted_accounts: PartnerDocumentAccountMention[]
+  processed_at: string | null
+  processing_error: string | null
+  uploaded_at: string
+  updated_at: string
+}
+
+// ============================================================
 // Pursuits — user-flagged threads of focus
 // ============================================================
 

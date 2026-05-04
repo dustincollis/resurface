@@ -7,15 +7,22 @@ import {
   ChevronRight,
   Check,
   Edit2,
+  FileText,
   Handshake,
   Lightbulb,
   ListChecks,
+  Loader2,
   Mail,
+  Paperclip,
+  RefreshCw,
   Target,
+  Trash2,
+  Upload,
   Users,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import type { PartnerDocument, PartnerDocumentKind } from '../lib/types'
 import {
   useCompany,
   useCompanyPeople,
@@ -24,6 +31,10 @@ import {
   useCompanyRollup,
   useCompanyJointPursuits,
   useCompanyPartnerActivity,
+  usePartnerDocuments,
+  useUploadPartnerDocument,
+  useDeletePartnerDocument,
+  useReprocessPartnerDocument,
   useUpdateCompany,
   type CompanyRollup,
   type JointPursuit,
@@ -225,6 +236,212 @@ function CompanyRollupCard({ rollup }: { rollup: CompanyRollup | null | undefine
 // default. Older ones are hidden behind "Show more". Single source of
 // truth so the toggle and label stay in sync.
 const PARTNER_ACTIVITY_RECENT_DAYS = 30
+
+const DOC_KIND_LABEL: Record<PartnerDocumentKind, string> = {
+  org_chart: 'Org chart',
+  team_structure: 'Team structure',
+  capability_brief: 'Capability brief',
+  contract: 'Contract',
+  other: 'Reference',
+}
+
+// Mime types we know how to extract from server-side. PPTX is deferred —
+// surfacing it here lets the user see "uploaded but not yet processed"
+// rather than silently failing.
+const ACCEPTED_DOC_TYPES =
+  '.pdf,.docx,.png,.jpg,.jpeg,.svg,.txt,.md,application/pdf,image/png,image/jpeg,image/svg+xml,text/plain'
+
+function PartnerDocumentCard({
+  doc,
+  onDelete,
+  onReprocess,
+}: {
+  doc: PartnerDocument
+  onDelete: () => void
+  onReprocess: () => void
+}) {
+  const inflight = !doc.processed_at && !doc.processing_error
+  const peopleCount = doc.extracted_people?.length ?? 0
+  const accountsCount = doc.extracted_accounts?.length ?? 0
+
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="truncate text-sm font-semibold text-white">{doc.title}</span>
+            <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-gray-400">
+              {DOC_KIND_LABEL[doc.kind]}
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-500">
+            <span className="truncate" title={doc.original_filename}>
+              {doc.original_filename}
+            </span>
+            {doc.size_bytes != null && (
+              <span>· {(doc.size_bytes / 1024).toFixed(0)} KB</span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <button
+            onClick={onReprocess}
+            disabled={inflight}
+            title="Re-extract"
+            className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-300 disabled:opacity-50"
+          >
+            <RefreshCw size={12} />
+          </button>
+          <button
+            onClick={onDelete}
+            title="Delete"
+            className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-red-400"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+
+      {inflight && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-500">
+          <Loader2 size={11} className="animate-spin" />
+          Processing…
+        </div>
+      )}
+
+      {doc.processing_error && (
+        <div className="mt-2 rounded border border-red-900/40 bg-red-950/30 px-2 py-1.5 text-[11px] text-red-300">
+          {doc.processing_error}
+        </div>
+      )}
+
+      {doc.summary && (
+        <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-gray-400">
+          {doc.summary}
+        </p>
+      )}
+
+      {(peopleCount > 0 || accountsCount > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-gray-400">
+          {peopleCount > 0 && (
+            <span className="flex items-center gap-1">
+              <Users size={11} />
+              {peopleCount} {peopleCount === 1 ? 'person' : 'people'} identified
+            </span>
+          )}
+          {accountsCount > 0 && (
+            <span className="flex items-center gap-1">
+              <Paperclip size={11} />
+              {accountsCount} account{accountsCount === 1 ? '' : 's'} mentioned
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReferenceMaterials({ companyId }: { companyId: string }) {
+  const { data: docs } = usePartnerDocuments(companyId)
+  const upload = useUploadPartnerDocument()
+  const del = useDeletePartnerDocument()
+  const reprocess = useReprocessPartnerDocument()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const handleFiles = async (files: FileList | File[]) => {
+    setUploadError(null)
+    const list = Array.from(files)
+    for (const file of list) {
+      try {
+        await upload.mutateAsync({ companyId, file })
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : String(err))
+      }
+    }
+  }
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files)
+  }
+
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <FileText size={12} /> Reference materials
+        {docs && docs.length > 0 && <span className="text-gray-600">· {docs.length}</span>}
+      </h2>
+
+      {/* Drop zone — also serves as the "no docs yet" empty state */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`mb-2 cursor-pointer rounded-lg border-2 border-dashed px-4 py-5 text-center transition-colors ${
+          dragging
+            ? 'border-purple-500 bg-purple-950/20'
+            : 'border-gray-800 hover:border-gray-700'
+        }`}
+      >
+        <Upload size={16} className="mx-auto text-gray-500" />
+        <p className="mt-1.5 text-xs text-gray-400">
+          Drop org charts, team alignments, capability briefs (PDF, DOCX, image)
+        </p>
+        <p className="mt-0.5 text-[10px] text-gray-600">
+          or click to choose files
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_DOC_TYPES}
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) handleFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+
+      {upload.isPending && (
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] text-gray-500">
+          <Loader2 size={11} className="animate-spin" />
+          Uploading…
+        </div>
+      )}
+
+      {uploadError && (
+        <div className="mb-2 rounded border border-red-900/40 bg-red-950/30 px-2 py-1.5 text-[11px] text-red-300">
+          {uploadError}
+        </div>
+      )}
+
+      {docs && docs.length > 0 && (
+        <div className="space-y-2">
+          {docs.map((doc) => (
+            <PartnerDocumentCard
+              key={doc.id}
+              doc={doc}
+              onDelete={() => {
+                if (confirm(`Delete "${doc.title}"? This cannot be undone.`)) {
+                  del.mutate({ id: doc.id, companyId, storagePath: doc.storage_path })
+                }
+              }}
+              onReprocess={() => reprocess.mutate({ id: doc.id, companyId })}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 function relatedCompanyChipStyle(kind: PartnerActivityCompany['kind']): string {
   switch (kind) {
@@ -535,6 +752,11 @@ export default function CompanyDetail() {
           )}
         </section>
       )}
+
+      {/* Reference materials — partner-only. Org charts, team alignments,
+          capability briefs. Processing extracts people via the identity
+          resolver, so the People section below picks up the results. */}
+      {isPartner && id && <ReferenceMaterials companyId={id} />}
 
       {/* People */}
       <section className="mb-6">

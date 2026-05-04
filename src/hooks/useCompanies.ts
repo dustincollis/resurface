@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import type { Company } from '../lib/types'
+import type { Company, PartnerDocument, PartnerDocumentKind } from '../lib/types'
 
 export function useCompanies() {
   return useQuery({
@@ -222,6 +222,135 @@ export function useCompanyPartnerActivity(companyId: string | undefined, enabled
       })
       if (error) throw error
       return (data ?? []) as PartnerMeetingActivity[]
+    },
+  })
+}
+
+// ============================================================
+// Partner reference documents — uploaded files (org charts, team
+// alignments, capability briefs) tied to a partner. Processing happens
+// server-side via the process-partner-document Edge Function, which
+// extracts text, summarizes, and uses the identity resolver to upsert
+// people rows tied to the partner.
+// ============================================================
+
+export function usePartnerDocuments(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['companies', companyId, 'documents'],
+    enabled: !!companyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('partner_documents')
+        .select('*')
+        .eq('company_id', companyId!)
+        .order('uploaded_at', { ascending: false })
+      if (error) throw error
+      return (data ?? []) as PartnerDocument[]
+    },
+  })
+}
+
+interface UploadPartnerDocArgs {
+  companyId: string
+  file: File
+  title?: string
+  kind?: PartnerDocumentKind
+}
+
+export function useUploadPartnerDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ companyId, file, title, kind }: UploadPartnerDocArgs) => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+
+      // Path convention: {user_id}/{company_id}/{uuid}-{filename}. RLS on
+      // storage.objects enforces that the first path segment matches the
+      // authenticated user, so users can only write to their own folder.
+      const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_')
+      const storagePath = `${user.id}/${companyId}/${crypto.randomUUID()}-${safeName}`
+
+      const { error: uploadErr } = await supabase
+        .storage
+        .from('partner-docs')
+        .upload(storagePath, file, { contentType: file.type, upsert: false })
+      if (uploadErr) throw uploadErr
+
+      const { data: row, error: insertErr } = await supabase
+        .from('partner_documents')
+        .insert({
+          user_id: user.id,
+          company_id: companyId,
+          title: title?.trim() || file.name,
+          kind: kind ?? 'other',
+          original_filename: file.name,
+          mime_type: file.type || 'application/octet-stream',
+          storage_path: storagePath,
+          size_bytes: file.size,
+        })
+        .select()
+        .single()
+      if (insertErr) throw insertErr
+      const doc = row as PartnerDocument
+
+      // Kick off processing — fire-and-forget. The function updates the
+      // row in place; the UI refetches when it sees processed_at populated.
+      // We don't await so the upload feels instant; failures land in
+      // processing_error and surface on the card.
+      supabase.functions
+        .invoke('process-partner-document', { body: { document_id: doc.id } })
+        .catch((err) => console.warn('[partner-doc] processing kickoff failed:', err))
+
+      return doc
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['companies', vars.companyId, 'documents'] })
+      qc.invalidateQueries({ queryKey: ['companies', vars.companyId, 'people'] })
+      qc.invalidateQueries({ queryKey: ['companies', vars.companyId, 'rollup'] })
+    },
+  })
+}
+
+export function useDeletePartnerDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, companyId, storagePath }: {
+      id: string
+      companyId: string
+      storagePath: string
+    }) => {
+      // Best-effort storage delete first; if it fails we still want the
+      // table row gone so the UI doesn't keep showing it.
+      await supabase.storage.from('partner-docs').remove([storagePath])
+      const { error } = await supabase.from('partner_documents').delete().eq('id', id)
+      if (error) throw error
+      return { id, companyId }
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['companies', data.companyId, 'documents'] })
+    },
+  })
+}
+
+export function useReprocessPartnerDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, companyId }: { id: string; companyId: string }) => {
+      // Clear any prior error + processed_at so the row shows as in-flight,
+      // then trigger the function again.
+      await supabase
+        .from('partner_documents')
+        .update({ processed_at: null, processing_error: null })
+        .eq('id', id)
+      const { error } = await supabase.functions.invoke('process-partner-document', {
+        body: { document_id: id },
+      })
+      if (error) throw error
+      return { id, companyId }
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['companies', data.companyId, 'documents'] })
+      qc.invalidateQueries({ queryKey: ['companies', data.companyId, 'people'] })
     },
   })
 }
