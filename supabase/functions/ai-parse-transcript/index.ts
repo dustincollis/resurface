@@ -493,6 +493,8 @@ Extract the following:
 
 9. **DISCUSSION COMPANY**: If the entire discussion is about one company/account, identify it.
 
+9b. **MENTIONED COMPANIES — accounts referenced in the conversation**: Return every distinct organization (client, prospect, partner, vendor, agency, competitor) named in the discussion, *other than* the discussion_company itself and ${userDisplayName}'s own employer. Use case: a partner sync where ${userDisplayName} talks about pitching the partner to several client accounts — those clients belong here even when the meeting's subject is the partner. Cleanest short form ("Walmart", "The Met"), no duplicates, no invented names, no generic "the client" references, no product names that aren't the company itself. Exclude internal-EPAM teams. Empty array is fine.
+
 10. **MEMORIES — STRICT CRITERIA**: Durable facts worth writing to long-term memory so future AI calls know them without re-discovery. BE CONSERVATIVE — 0-3 memories per meeting is typical.
 
     A memory COUNTS only if ALL are true:
@@ -522,6 +524,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   "summary": "string (markdown synopsis)",
   "title": "string",
   "company": "string or null",
+  "mentioned_companies": ["string"],
   "participants": [
     {"name": "string", "company": "string or null", "role": "string or null"}
   ],
@@ -695,6 +698,18 @@ Extract these elements:
 
 7. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
+7b. **Mentioned Companies — accounts referenced in the conversation**: Return a list of every distinct organization (client, prospect, partner, vendor, agency, competitor) that comes up by name in the discussion, *other than* the discussion_company itself and ${userDisplayName}'s own employer. The use case: a partner sync where ${userDisplayName} talks about pitching the partner to several client accounts — those clients should be captured here even though the meeting's subject is the partner.
+
+   STRICT criteria:
+   - Must be a real organization name spoken or written in the transcript. No invention.
+   - Use the cleanest short form ("Walmart", "The Met", "Mayo Clinic"), case as commonly written.
+   - Exclude generic references ("the client", "their team") that aren't tied to a name.
+   - Exclude product names that aren't the company itself ("Photoshop" — skip; "Adobe" — keep).
+   - Exclude the meeting's primary subject (already in discussion_company).
+   - Exclude internal-EPAM teams.
+   - Exclude duplicates and near-duplicates ("Walmart" + "Walmart Inc" → one entry).
+   - Empty array is fine. Don't reach for items just to fill it.
+
 8. **Suggested Title**: A short, descriptive title for this discussion, suitable as a meeting name. Aim for 4–10 words. Use the cleanest, most identifying form. Examples: "Adobe AEM cloud migration kickoff", "S&P pricing review with Holly", "Q3 planning standup". Avoid generic titles like "Meeting" or "Discussion". Capture the company and the topic when both are clear.
 
 9. **Memories — STRICT CRITERIA**: Durable facts worth persisting to long-term memory so future AI calls know them without re-discovery. BE CONSERVATIVE — 0-3 memories per meeting is typical.
@@ -771,6 +786,7 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   "summary": "<the markdown synopsis as a single string>",
   "title": "string (4-10 words, descriptive)",
   "company": "string or null",
+  "mentioned_companies": ["string"],
   "action_items": [
     {
       "title": "string",
@@ -881,6 +897,7 @@ async function handleHistoricalMode(
     extracted_decisions: parsed.decisions ?? [],
     extracted_open_questions: parsed.open_questions ?? [],
     extracted_topics: parsed.topics ?? [],
+    mentioned_companies: cleanMentionedCompanies(parsed.mentioned_companies, discussionCompany),
     processed_at: new Date().toISOString(),
   };
   if (isPlaceholderTitle && aiTitle) {
@@ -1087,6 +1104,7 @@ async function handleActiveMode(
     extracted_action_items: [],
     extracted_decisions: parsed.decisions ?? [],
     extracted_open_questions: parsed.open_questions ?? [],
+    mentioned_companies: cleanMentionedCompanies(parsed.mentioned_companies, discussionCompany),
     processed_at: new Date().toISOString(),
   };
   if (isPlaceholderTitle && aiTitle) {
@@ -1675,6 +1693,31 @@ Confidence must be between 0 and 1. Only return clusters with confidence >= 0.7.
 
 // Pursuit link suggestion is implemented in _shared/pursuit-matcher.ts
 // (shared with backfill-pursuit-links).
+
+// Normalize the parser's mentioned_companies output into the array we
+// persist. Drops empties, trims, de-dupes case-insensitively, and excludes
+// the discussion_company so the chips on the partner activity card don't
+// double up. Caps at 30 — reasonable upper bound for a single meeting.
+function cleanMentionedCompanies(
+  raw: unknown,
+  discussionCompany: string | null,
+): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  if (discussionCompany) seen.add(discussionCompany.trim().toLowerCase());
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const trimmed = v.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= 30) break;
+  }
+  return out;
+}
 
 // Prepend "Company: " to a title when a company is known and the title doesn't
 // already start with the company name. Word-boundary aware so "Ivoclar" matches

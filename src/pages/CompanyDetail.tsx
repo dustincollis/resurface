@@ -259,7 +259,7 @@ function MeetingActivityCard({ activity }: { activity: PartnerMeetingActivity })
         <ChevronRight size={14} className="mt-1 shrink-0 text-gray-600" />
       </div>
 
-      {activity.related_companies.length > 0 && (
+      {(activity.related_companies.length > 0 || activity.mentioned_only_names.length > 0) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wider text-gray-600">Mentions</span>
           {activity.related_companies.map((rc) => (
@@ -270,6 +270,17 @@ function MeetingActivityCard({ activity }: { activity: PartnerMeetingActivity })
             >
               {rc.name}
             </Link>
+          ))}
+          {/* Unresolved names — parser saw them in the transcript but no
+              matching companies row exists. Plain-text chip; not clickable. */}
+          {activity.mentioned_only_names.map((name) => (
+            <span
+              key={name}
+              title="Mentioned in transcript — no company record yet"
+              className="rounded border border-dashed border-gray-700 px-1.5 py-0.5 text-[11px] text-gray-400"
+            >
+              {name}
+            </span>
           ))}
         </div>
       )}

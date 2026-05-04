@@ -203,6 +203,10 @@ export interface PartnerMeetingActivity {
   items_count: number
   commitments_count: number
   related_companies: PartnerActivityCompany[]
+  // Names from the parser's mentioned_companies that don't resolve to a
+  // companies row. Surfaced as plain-text chips so the user can still see
+  // the mention before they create the company.
+  mentioned_only_names: string[]
 }
 
 export function useCompanyPartnerActivity(companyId: string | undefined, enabled: boolean) {
