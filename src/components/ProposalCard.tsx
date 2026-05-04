@@ -36,6 +36,7 @@ import type {
   ProposalType,
   TaskProposalPayload,
   CommitmentProposalPayload,
+  PursuitProposalPayload,
 } from '../lib/types'
 
 interface ProposalCardProps {
@@ -48,6 +49,7 @@ const TYPE_META: Record<
 > = {
   task: { icon: CheckSquare, label: 'Task', supported: true },
   commitment: { icon: Handshake, label: 'Commitment', supported: true },
+  pursuit: { icon: Target, label: 'Pursuit', supported: true },
   memory: { icon: Brain, label: 'Memory', supported: false },
   draft: { icon: FileEdit, label: 'Draft', supported: false },
   deadline_adjustment: { icon: CalendarClock, label: 'Deadline change', supported: false },
@@ -130,6 +132,12 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
     acceptMut.mutate({ proposal, acceptAs: 'task', pursuitId, markDone: true })
   }
 
+  const isPursuitProposal = proposal.proposal_type === 'pursuit'
+
+  const handleAcceptPursuit = () => {
+    acceptMut.mutate({ proposal, acceptAs: 'pursuit' })
+  }
+
   const handleTrack = () => {
     if (!pursuitId) {
       alert('Select a pursuit first — tracking without a pursuit has no home to show the item.')
@@ -194,7 +202,9 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
 
       {/* Structured interpretation */}
       <div className="px-4 py-3">
-        {parserSuggestion.supported ? (
+        {isPursuitProposal ? (
+          <PursuitInterpretation proposal={proposal} />
+        ) : parserSuggestion.supported ? (
           mode === 'edit' ? (
             showAsCommitment ? (
               <CommitmentEditor
@@ -244,8 +254,10 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
       </div>
 
       {/* Type + Pursuit selector — only shown in view mode (edit mode
-          embeds these decisions in its own form for clarity) */}
-      {parserSuggestion.supported && mode === 'view' && (
+          embeds these decisions in its own form for clarity).
+          Hidden for pursuit proposals — the proposal IS the pursuit;
+          there's no task/commitment/pursuit-target choice to make. */}
+      {parserSuggestion.supported && mode === 'view' && !isPursuitProposal && (
         <div className="flex flex-wrap items-center gap-2 border-t border-gray-800 px-4 py-2.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
             Save as
@@ -410,7 +422,18 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
       {/* Action row */}
       {mode === 'view' && (
         <div className="flex flex-wrap gap-2 border-t border-gray-800 px-4 py-2.5">
-          {parserSuggestion.supported && (
+          {isPursuitProposal && (
+            <button
+              onClick={handleAcceptPursuit}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded bg-green-600/20 px-2.5 py-1 text-xs font-medium text-green-300 hover:bg-green-600/30 disabled:opacity-50"
+              title="Create a pursuit with these details and link the source meeting as the first member"
+            >
+              {acceptMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Target size={12} />}
+              Create pursuit
+            </button>
+          )}
+          {!isPursuitProposal && parserSuggestion.supported && (
             <>
               <button
                 onClick={() => setMode('edit')}
@@ -479,6 +502,37 @@ export default function ProposalCard({ proposal }: ProposalCardProps) {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ============================================================
+// Pursuit interpretation (read-only)
+// ============================================================
+// Pursuit proposals don't get an Edit mode for now — accept creates the
+// pursuit with the AI's suggested name/company; the user renames after
+// the fact on /pursuits/:id if needed. Keeps the review queue fast.
+
+function PursuitInterpretation({ proposal }: { proposal: Proposal }) {
+  const p = proposal.normalized_payload as unknown as PursuitProposalPayload
+  return (
+    <div className="space-y-1.5">
+      <div className="text-base font-semibold text-white">{p.name}</div>
+      {p.description && (
+        <div className="text-xs leading-relaxed text-gray-400">{p.description}</div>
+      )}
+      <div className="flex flex-wrap gap-2 pt-1 text-xs">
+        {p.company && (
+          <span className="rounded bg-blue-900/30 px-1.5 py-0.5 text-blue-300">
+            {p.company}
+          </span>
+        )}
+        {p.intent_signal && (
+          <span className="rounded bg-purple-900/30 px-1.5 py-0.5 text-purple-300" title="Engagement signal from the meeting">
+            "{p.intent_signal}"
+          </span>
+        )}
+      </div>
     </div>
   )
 }

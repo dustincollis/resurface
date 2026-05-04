@@ -7,6 +7,7 @@ import type { Proposal, ProposalType, ProposalReviewAction } from '../lib/types'
 const TYPE_LABEL: Record<ProposalType, string> = {
   task: 'Tasks',
   commitment: 'Commitments',
+  pursuit: 'Pursuits',
   memory: 'Memories',
   draft: 'Drafts',
   deadline_adjustment: 'Deadline adj.',

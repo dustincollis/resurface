@@ -147,6 +147,7 @@ export type ProposalType =
   | 'memory'
   | 'draft'
   | 'deadline_adjustment'
+  | 'pursuit'
 
 export type ProposalSourceType =
   | 'meeting'
@@ -186,6 +187,19 @@ export interface TaskProposalPayload {
   assignee?: string | null
   urgency?: 'high' | 'medium' | 'low' | null
   company?: string | null
+}
+
+// Payload shape for proposal_type='pursuit'. The parser proposes a new
+// pursuit when a meeting surfaces a named account with concrete sales /
+// engagement intent that doesn't already have an active pursuit. The
+// user reviews on /proposals — accepting creates a pursuit and links
+// the source meeting as the first member.
+export interface PursuitProposalPayload {
+  name: string
+  company: string | null
+  intent_signal: string | null
+  description: string | null
+  source_meeting_id: string | null
 }
 
 // Payload shape for proposal_type='commitment'. Outgoing-only for now.

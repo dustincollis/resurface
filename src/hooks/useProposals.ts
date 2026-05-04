@@ -9,8 +9,10 @@ import type {
   ProposalReviewAction,
   TaskProposalPayload,
   CommitmentProposalPayload,
+  PursuitProposalPayload,
   Item,
   Commitment,
+  Pursuit,
   CreateItemPayload,
   CreateCommitmentPayload,
 } from '../lib/types'
@@ -134,7 +136,7 @@ function invalidateProposals() {
 // detail page just to add it to a thread of work.
 // ============================================================
 
-export type AcceptAs = 'task' | 'commitment_outgoing' | 'commitment_incoming'
+export type AcceptAs = 'task' | 'commitment_outgoing' | 'commitment_incoming' | 'pursuit'
 
 interface AcceptProposalArgs {
   proposal: Proposal
@@ -170,7 +172,43 @@ export function useAcceptProposal() {
       let resultingObjectType: string | null = null
       let resultingObjectId: string | null = null
 
-      if (acceptAs === 'task') {
+      if (acceptAs === 'pursuit') {
+        // Pursuit proposals create a new pursuit and link the source meeting
+        // as the first member. The user picks the pursuitId selector to attach
+        // to an EXISTING pursuit instead — that path doesn't apply here.
+        const fields = sourcePayload as unknown as PursuitProposalPayload
+        if (!fields.name?.trim()) {
+          throw new Error('Pursuit proposal is missing a name')
+        }
+        const { data: pursuitRow, error: pErr } = await supabase
+          .from('pursuits')
+          .insert({
+            user_id: user!.id,
+            name: fields.name.trim(),
+            company: fields.company?.trim() || null,
+            description: fields.description?.trim() || null,
+            status: 'active',
+          })
+          .select()
+          .single()
+        if (pErr) throw pErr
+        const pursuit = pursuitRow as Pursuit
+        resultingObjectType = 'pursuit'
+        resultingObjectId = pursuit.id
+
+        // Link the source meeting (if any) as the first pursuit member, so
+        // there's an immediate trail back to the conversation that surfaced it.
+        const sourceMeetingId =
+          (fields.source_meeting_id as string | null | undefined) ??
+          (proposal.source_type === 'meeting' ? proposal.source_id : null)
+        if (sourceMeetingId) {
+          await supabase.from('pursuit_members').insert({
+            pursuit_id: pursuit.id,
+            member_type: 'meeting',
+            member_id: sourceMeetingId,
+          })
+        }
+      } else if (acceptAs === 'task') {
         // Map source → task shape
         const taskFields = isSourceTask
           ? (sourcePayload as unknown as TaskProposalPayload)
@@ -330,6 +368,7 @@ export function useAcceptProposal() {
       invalidateProposals()
       queryClient.invalidateQueries({ queryKey: ['items'] })
       queryClient.invalidateQueries({ queryKey: ['commitments'] })
+      queryClient.invalidateQueries({ queryKey: ['pursuits'] })
       queryClient.invalidateQueries({ queryKey: ['pursuit_members'] })
     },
   })
@@ -338,7 +377,9 @@ export function useAcceptProposal() {
 // Helper: derive the default acceptAs choice from a proposal's parser-
 // suggested type. Used to seed the type selector in the UI.
 export function defaultAcceptAs(proposal: Proposal): AcceptAs {
-  return proposal.proposal_type === 'commitment' ? 'commitment_outgoing' : 'task'
+  if (proposal.proposal_type === 'pursuit') return 'pursuit'
+  if (proposal.proposal_type === 'commitment') return 'commitment_outgoing'
+  return 'task'
 }
 
 // ============================================================

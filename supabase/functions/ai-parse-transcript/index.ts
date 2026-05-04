@@ -493,6 +493,15 @@ Extract the following:
 
 9. **DISCUSSION COMPANY**: If the entire discussion is about one company/account, identify it.
 
+9c. **PURSUIT CANDIDATES — opportunities worth tracking**: When the meeting surfaces a named account with *concrete sales / engagement intent* — "they want us in", "bring us in", "joint pursuit", "RFP coming", "evaluating partners", "active opportunity" — propose it as a pursuit candidate.
+
+    STRICT criteria: must be a specific account name PLUS a concrete forward-looking signal (not historical context, not vague aspiration). Existing-customer mentions don't qualify unless there's a fresh expansion / cross-sell hook. Skip when the meeting's primary subject IS this account (it likely already has a pursuit).
+
+    For each qualifying candidate, return:
+    - company (cleanest short form), name (suggested pursuit name, 4-10 words), intent_signal (short phrase), description (1-2 sentences), evidence_quote (verbatim, under 200 chars), confidence ("high"|"medium"|"low").
+
+    Most meetings produce 0. Partner syncs may produce several. When in doubt, skip.
+
 9b. **MENTIONED COMPANIES — accounts referenced in the conversation**: Return every distinct organization (client, prospect, partner, vendor, agency, competitor) named in the discussion, *other than* the discussion_company itself and ${userDisplayName}'s own employer. Use case: a partner sync where ${userDisplayName} talks about pitching the partner to several client accounts — those clients belong here even when the meeting's subject is the partner. Cleanest short form ("Walmart", "The Met"), no duplicates, no invented names, no generic "the client" references, no product names that aren't the company itself. Exclude internal-EPAM teams. Empty array is fine.
 
 10. **MEMORIES — STRICT CRITERIA**: Durable facts worth writing to long-term memory so future AI calls know them without re-discovery. BE CONSERVATIVE — 0-3 memories per meeting is typical.
@@ -525,6 +534,16 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   "title": "string",
   "company": "string or null",
   "mentioned_companies": ["string"],
+  "pursuit_candidates": [
+    {
+      "company": "string",
+      "name": "string",
+      "intent_signal": "string",
+      "description": "string",
+      "evidence_quote": "string",
+      "confidence": "high|medium|low"
+    }
+  ],
   "participants": [
     {"name": "string", "company": "string or null", "role": "string or null"}
   ],
@@ -698,6 +717,29 @@ Extract these elements:
 
 7. **Discussion Company**: At the top level, if the entire discussion is about one company/account, identify it. Same rules as above — only use a name that's clearly present.
 
+7c. **Pursuit Candidates — opportunities worth tracking**: When a meeting surfaces an *opportunity* (a specific account where there's concrete sales / engagement intent), propose it as a pursuit candidate. The user will review on /proposals and decide whether to spin it up as a tracked pursuit.
+
+    STRICT criteria — propose ONLY if ALL are true:
+    - A specific named account / company (not "the client", not generic).
+    - There is a *concrete signal of engagement intent* — examples: "they want us in", "bring us in", "joint pursuit in progress", "evaluating partners", "RFP coming", "active opportunity", "we should pitch them", "warm intro arranged". The intent must be specific enough that a salesperson would treat it as a pipeline candidate.
+    - The opportunity is forward-looking. Existing customers being mentioned in passing ("Royal Caribbean is an existing customer") do NOT qualify unless there's also a fresh expansion / cross-sell signal.
+
+    DO NOT propose when:
+    - The account is named but only as historical context ("we worked with them last year").
+    - The signal is vague ("we should think about them sometime", "they could be interesting").
+    - The mention is purely operational ("the AWS bill is due").
+    - The meeting's primary subject is already this account (the user already has it on their radar; an existing pursuit may already exist).
+
+    For each qualifying candidate, return:
+    - **company**: the account name in cleanest short form ("DexCom", "Hilti", "American Eagle").
+    - **name**: a suggested pursuit name. Default pattern: "<partner or theme> at <account>" or just "<account> opportunity". The user will rename. Aim for 4-10 words.
+    - **intent_signal**: the short phrase capturing the engagement signal ("they want us in", "joint pursuit in progress").
+    - **description**: 1-2 sentences of context — what was said, who said it, why this is a candidate.
+    - **evidence_quote**: verbatim from the transcript (under 200 chars). The line that supports proposing this.
+    - **confidence**: "high" | "medium" | "low" — your confidence that this is a real opportunity vs. casual mention.
+
+    Most meetings produce 0 candidates. Partner syncs may produce several. When in doubt, skip — the user can manually create a pursuit later.
+
 7b. **Mentioned Companies — accounts referenced in the conversation**: Return a list of every distinct organization (client, prospect, partner, vendor, agency, competitor) that comes up by name in the discussion, *other than* the discussion_company itself and ${userDisplayName}'s own employer. The use case: a partner sync where ${userDisplayName} talks about pitching the partner to several client accounts — those clients should be captured here even though the meeting's subject is the partner.
 
    STRICT criteria:
@@ -787,6 +829,16 @@ Respond with ONLY valid JSON (no markdown wrapping, no code fences). Schema:
   "title": "string (4-10 words, descriptive)",
   "company": "string or null",
   "mentioned_companies": ["string"],
+  "pursuit_candidates": [
+    {
+      "company": "string",
+      "name": "string",
+      "intent_signal": "string",
+      "description": "string",
+      "evidence_quote": "string",
+      "confidence": "high|medium|low"
+    }
+  ],
   "action_items": [
     {
       "title": "string",
@@ -1055,11 +1107,22 @@ async function handleHistoricalMode(
     (parsed as { memories?: unknown }).memories
   );
 
+  // Pursuit candidate proposals: even historical meetings can surface
+  // opportunities. The proposals queue is the right place — user reviews
+  // and decides whether the lead is still live.
+  const pursuitProposalsCreated = await createPursuitProposals(
+    adminClient,
+    userId,
+    meetingId,
+    (parsed as { pursuit_candidates?: unknown }).pursuit_candidates,
+  );
+
   return new Response(
     JSON.stringify({
       ...parsed,
       title: meetingUpdate.title ?? currentTitle,
       mode: "historical",
+      pursuit_proposals_created: pursuitProposalsCreated,
       proposals_created: 0,
       commitments_created: commitmentsCreated,
       ideas_created: ideasCreated,
@@ -1383,6 +1446,15 @@ async function handleActiveMode(
     decisions: Array.isArray(parsed.decisions) ? parsed.decisions as string[] : [],
   });
 
+  // Pursuit candidate proposals: parser-flagged opportunities for accounts
+  // that don't already have an active pursuit. Reviewed on /proposals.
+  const pursuitProposalsCreated = await createPursuitProposals(
+    adminClient,
+    userId,
+    meetingId,
+    (parsed as { pursuit_candidates?: unknown }).pursuit_candidates,
+  );
+
   return new Response(
     JSON.stringify({
       ...parsed,
@@ -1393,6 +1465,7 @@ async function handleActiveMode(
       follow_ups_created: followUpsCreated,
       groups_created: groupsCreated,
       pursuit_links_created: pursuitLinksCreated,
+      pursuit_proposals_created: pursuitProposalsCreated,
       not_for_user: notForUser,
       skipped_speculative: skippedSpeculative,
       import_mode: "active",
@@ -1693,6 +1766,115 @@ Confidence must be between 0 and 1. Only return clusters with confidence >= 0.7.
 
 // Pursuit link suggestion is implemented in _shared/pursuit-matcher.ts
 // (shared with backfill-pursuit-links).
+
+// Pursuit candidate proposals: parser-extracted opportunities awaiting
+// user review. Dedupes against the user's existing active pursuits by
+// company name (case-insensitive) so we don't propose what the link-
+// matcher will already handle. Always lands as 'pending' on /proposals;
+// never auto-creates a pursuit. Returns the count inserted.
+async function createPursuitProposals(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  userId: string,
+  meetingId: string,
+  rawCandidates: unknown,
+): Promise<number> {
+  if (!Array.isArray(rawCandidates) || rawCandidates.length === 0) return 0;
+
+  type Cand = {
+    company?: unknown;
+    name?: unknown;
+    intent_signal?: unknown;
+    description?: unknown;
+    evidence_quote?: unknown;
+    confidence?: unknown;
+  };
+
+  // Load existing active pursuits once for dedupe.
+  const { data: activeRows } = await adminClient
+    .from("pursuits")
+    .select("company")
+    .eq("user_id", userId)
+    .eq("status", "active");
+  const activeCompanies = new Set<string>(
+    ((activeRows ?? []) as Array<{ company: string | null }>)
+      .map((p) => (p.company ?? "").trim().toLowerCase())
+      .filter((c) => c.length > 0)
+  );
+
+  // Map confidence label → numeric. Low-confidence candidates still get
+  // proposed but flagged so the user sees them last in the queue.
+  const confidenceMap: Record<string, number> = {
+    high: 0.85,
+    medium: 0.6,
+    low: 0.4,
+  };
+
+  type ProposalRow = {
+    user_id: string;
+    proposal_type: "pursuit";
+    source_type: "meeting";
+    source_id: string;
+    evidence_text: string | null;
+    normalized_payload: Record<string, unknown>;
+    confidence: number;
+    ambiguity_flags: string[];
+  };
+
+  const rows: ProposalRow[] = [];
+  for (const raw of rawCandidates as Cand[]) {
+    const company = typeof raw.company === "string" ? raw.company.trim() : "";
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    if (!company || !name) continue;
+
+    // Dedupe — skip if user already has an active pursuit for this company.
+    if (activeCompanies.has(company.toLowerCase())) continue;
+
+    const confLabel = typeof raw.confidence === "string" ? raw.confidence.trim().toLowerCase() : "";
+    const confidence = confidenceMap[confLabel] ?? 0.5;
+    const flags: string[] = [];
+    if (confLabel === "low") flags.push("low_confidence");
+
+    const intentSignal =
+      typeof raw.intent_signal === "string" && raw.intent_signal.trim().length > 0
+        ? raw.intent_signal.trim()
+        : null;
+    const description =
+      typeof raw.description === "string" && raw.description.trim().length > 0
+        ? raw.description.trim()
+        : null;
+    const evidence =
+      typeof raw.evidence_quote === "string" && raw.evidence_quote.trim().length > 0
+        ? raw.evidence_quote.trim()
+        : null;
+
+    rows.push({
+      user_id: userId,
+      proposal_type: "pursuit",
+      source_type: "meeting",
+      source_id: meetingId,
+      evidence_text: evidence,
+      normalized_payload: {
+        name,
+        company,
+        intent_signal: intentSignal,
+        description,
+        source_meeting_id: meetingId,
+      },
+      confidence,
+      ambiguity_flags: flags,
+    });
+  }
+
+  if (rows.length === 0) return 0;
+
+  const { error } = await adminClient.from("proposals").insert(rows);
+  if (error) {
+    console.error("[pursuit-candidates] insert error:", error);
+    return 0;
+  }
+  return rows.length;
+}
 
 // Normalize the parser's mentioned_companies output into the array we
 // persist. Drops empties, trims, de-dupes case-insensitively, and excludes
