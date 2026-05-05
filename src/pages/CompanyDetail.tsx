@@ -22,7 +22,12 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
-import type { PartnerDocument, PartnerDocumentKind } from '../lib/types'
+import type {
+  PartnerDocument,
+  PartnerDocumentKind,
+  PartnerDocumentPerson,
+  PartnerDocumentPersonTier,
+} from '../lib/types'
 import {
   useCompany,
   useCompanyPeople,
@@ -245,6 +250,113 @@ const DOC_KIND_LABEL: Record<PartnerDocumentKind, string> = {
   other: 'Reference',
 }
 
+// Tier ordering drives the visual section order on the doc card.
+// Leadership at top → sales tiers → CSM → specialists → other.
+const TIER_ORDER: PartnerDocumentPersonTier[] = [
+  'leadership',
+  'enterprise_sales',
+  'mid_market',
+  'regional',
+  'customer_success',
+  'specialist',
+  'other',
+]
+
+const TIER_LABEL: Record<PartnerDocumentPersonTier, string> = {
+  leadership: 'Leadership',
+  enterprise_sales: 'Enterprise sales',
+  mid_market: 'Mid-market',
+  regional: 'Regional',
+  customer_success: 'Customer success',
+  specialist: 'Specialists',
+  other: 'Other',
+}
+
+const TIER_ACCENT: Record<PartnerDocumentPersonTier, string> = {
+  leadership: 'border-l-purple-500',
+  enterprise_sales: 'border-l-blue-500',
+  mid_market: 'border-l-cyan-500',
+  regional: 'border-l-teal-500',
+  customer_success: 'border-l-green-500',
+  specialist: 'border-l-amber-500',
+  other: 'border-l-gray-600',
+}
+
+function PersonChip({ p }: { p: PartnerDocumentPerson }) {
+  const inner = (
+    <div className="rounded border border-gray-800 bg-gray-950/40 px-2.5 py-1.5 transition-colors hover:border-gray-700">
+      <div className="truncate text-xs font-medium text-white">{p.name}</div>
+      {p.role && (
+        <div className="mt-0.5 truncate text-[10px] text-gray-400">{p.role}</div>
+      )}
+      {(p.region || p.territory) && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {p.region && (
+            <span className="rounded bg-gray-800 px-1 py-px text-[9px] uppercase tracking-wider text-gray-400">
+              {p.region}
+            </span>
+          )}
+          {p.territory && (
+            <span
+              className="rounded bg-gray-800 px-1 py-px text-[9px] text-gray-400"
+              title={p.territory}
+            >
+              {p.territory.length > 32 ? p.territory.slice(0, 32) + '…' : p.territory}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+  return p.person_id ? (
+    <Link to={`/people/${p.person_id}`} className="block min-w-0">
+      {inner}
+    </Link>
+  ) : (
+    <div className="block min-w-0">{inner}</div>
+  )
+}
+
+function PeopleByTier({ people }: { people: PartnerDocumentPerson[] }) {
+  // Group by tier, preserve TIER_ORDER, omit empty groups.
+  const groups = new Map<PartnerDocumentPersonTier, PartnerDocumentPerson[]>()
+  for (const p of people) {
+    const t = (p.tier ?? 'other') as PartnerDocumentPersonTier
+    const tier = TIER_ORDER.includes(t) ? t : 'other'
+    const arr = groups.get(tier) ?? []
+    arr.push(p)
+    groups.set(tier, arr)
+  }
+  const ordered = TIER_ORDER.filter((t) => groups.has(t))
+  if (ordered.length === 0) return null
+
+  return (
+    <div className="mt-3 space-y-2.5">
+      {ordered.map((tier) => {
+        const list = groups.get(tier)!
+        return (
+          <div
+            key={tier}
+            className={`border-l-2 pl-3 ${TIER_ACCENT[tier]}`}
+          >
+            <div className="mb-1.5 flex items-baseline gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-400">
+                {TIER_LABEL[tier]}
+              </span>
+              <span className="text-[10px] text-gray-600">{list.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+              {list.map((p, i) => (
+                <PersonChip key={p.person_id ?? `${p.name}-${i}`} p={p} />
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Mime types we know how to extract from server-side. PPTX is deferred —
 // surfacing it here lets the user see "uploaded but not yet processed"
 // rather than silently failing.
@@ -261,8 +373,9 @@ function PartnerDocumentCard({
   onReprocess: () => void
 }) {
   const inflight = !doc.processed_at && !doc.processing_error
-  const peopleCount = doc.extracted_people?.length ?? 0
-  const accountsCount = doc.extracted_accounts?.length ?? 0
+  const people = doc.extracted_people ?? []
+  const accounts = doc.extracted_accounts ?? []
+  const [showSummary, setShowSummary] = useState(false)
 
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 px-4 py-3">
@@ -315,25 +428,45 @@ function PartnerDocumentCard({
         </div>
       )}
 
-      {doc.summary && (
-        <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-gray-400">
-          {doc.summary}
-        </p>
+      {/* People grouped by tier — the primary visual.
+          Click a name to jump to the person's detail page. */}
+      {people.length > 0 && <PeopleByTier people={people} />}
+
+      {/* Accounts referenced — small footnote-style list */}
+      {accounts.length > 0 && (
+        <div className="mt-3 border-t border-gray-800 pt-2">
+          <div className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider text-gray-500">
+            <Paperclip size={10} />
+            Accounts referenced
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {accounts.map((a, i) => (
+              <span
+                key={`${a.name}-${i}`}
+                title={a.context ?? undefined}
+                className="rounded border border-dashed border-gray-700 px-1.5 py-0.5 text-[11px] text-gray-400"
+              >
+                {a.name}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
-      {(peopleCount > 0 || accountsCount > 0) && (
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-gray-400">
-          {peopleCount > 0 && (
-            <span className="flex items-center gap-1">
-              <Users size={11} />
-              {peopleCount} {peopleCount === 1 ? 'person' : 'people'} identified
-            </span>
-          )}
-          {accountsCount > 0 && (
-            <span className="flex items-center gap-1">
-              <Paperclip size={11} />
-              {accountsCount} account{accountsCount === 1 ? '' : 's'} mentioned
-            </span>
+      {/* Summary tucked behind a toggle so the people view leads.
+          Reading the paragraph is the slowest path to understanding. */}
+      {doc.summary && (
+        <div className="mt-3 border-t border-gray-800 pt-2">
+          <button
+            onClick={() => setShowSummary((v) => !v)}
+            className="text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300"
+          >
+            {showSummary ? 'Hide summary' : 'Show summary'}
+          </button>
+          {showSummary && (
+            <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-gray-400">
+              {doc.summary}
+            </p>
           )}
         </div>
       )}

@@ -38,10 +38,14 @@ interface CompanyRow {
 interface ExtractedPerson {
   name?: string;
   role?: string | null;
+  tier?: string | null;
   territory?: string | null;
   region?: string | null;
   email?: string | null;
   notes?: string | null;
+  // Filled in server-side after the identity resolver upserts the row.
+  // The frontend uses this to link each chip to /people/:id.
+  person_id?: string | null;
 }
 
 interface ExtractedAccount {
@@ -241,10 +245,12 @@ Deno.serve(async (req) => {
         cleanPeople.push({
           name,
           role: p.role ?? null,
+          tier: ALLOWED_TIERS.has(p.tier ?? "") ? p.tier : "other",
           territory: p.territory ?? null,
           region: p.region ?? null,
           email: p.email ?? null,
           notes: p.notes ?? null,
+          person_id: personId,
         });
       } catch (err) {
         console.warn("[partner-doc] person resolve failed:", name, err);
@@ -298,6 +304,16 @@ const ALLOWED_KINDS = new Set([
   "other",
 ]);
 
+const ALLOWED_TIERS = new Set([
+  "leadership",
+  "enterprise_sales",
+  "mid_market",
+  "regional",
+  "customer_success",
+  "specialist",
+  "other",
+]);
+
 function buildSystemPrompt(): string {
   return `You are extracting structured information from a reference document about a business partner. The user uploads these to add depth to the partner's profile in their account management system.
 
@@ -315,6 +331,7 @@ Schema:
     {
       "name": "First Last",
       "role": "Job title / function — e.g. 'Head of Alliances'",
+      "tier": "leadership | enterprise_sales | mid_market | regional | customer_success | specialist | other — pick the one that best groups this person on an org-chart view",
       "territory": "States or accounts they cover, if specified — e.g. 'MN, WI, IA, IL, MO, KS, CO, UT, NM, TX, OK, AR, LA'",
       "region": "Higher-level region if applicable — e.g. 'EMEA', 'North America'",
       "email": "if present in the doc",

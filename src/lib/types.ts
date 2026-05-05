@@ -274,13 +274,24 @@ export type PartnerDocumentKind =
   | 'contract'
   | 'other'
 
+export type PartnerDocumentPersonTier =
+  | 'leadership'
+  | 'enterprise_sales'
+  | 'mid_market'
+  | 'regional'
+  | 'customer_success'
+  | 'specialist'
+  | 'other'
+
 export interface PartnerDocumentPerson {
   name: string
   role?: string | null
+  tier?: PartnerDocumentPersonTier | null
   territory?: string | null
   region?: string | null
   email?: string | null
   notes?: string | null
+  person_id?: string | null
 }
 
 export interface PartnerDocumentAccountMention {
