@@ -127,7 +127,7 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               {item.title}
             </h3>
 
-            {/* Meta row: stream + company + due */}
+            {/* Meta row: stream + company + status + due */}
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {item.streams && (
                 <span className="flex items-center gap-1 text-gray-500">
@@ -137,6 +137,22 @@ function FocusCard({ item, rank }: { item: Item; rank: number }) {
               )}
               {(item.custom_fields?.company as string | undefined) && (
                 <span className="text-gray-600">{item.custom_fields.company as string}</span>
+              )}
+              {/* Status chip — only when item has been touched off the 'open'
+                  default. Picks in_progress / waiting / dropped out visually so
+                  a scan of the list shows what's mid-flight vs. cold. */}
+              {(item.status === 'in_progress' || item.status === 'waiting' || item.status === 'dropped') && (
+                <span
+                  className={`rounded border border-current px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+                    item.status === 'in_progress'
+                      ? 'text-cyan-300'
+                      : item.status === 'waiting'
+                        ? 'text-amber-300'
+                        : 'text-red-400'
+                  }`}
+                >
+                  {item.status === 'in_progress' ? 'In progress' : item.status === 'waiting' ? 'Waiting' : 'Dropped'}
+                </span>
               )}
               {item.open_children_count && item.open_children_count > 0 ? (
                 <span className="flex items-center gap-1 rounded-full border border-purple-900/40 bg-purple-950/30 px-1.5 py-0.5 text-[10px] text-purple-300">

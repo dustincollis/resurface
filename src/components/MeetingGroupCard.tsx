@@ -109,6 +109,22 @@ function GroupedItemRow({ item, done }: { item: Item; done?: boolean }) {
       >
         {item.title}
       </span>
+      {/* Status chip — only shown when status diverges from the default
+          'open'/'done' axis. Catches in_progress, waiting, dropped so
+          the user can scan a list and see what's been touched. */}
+      {!done && (item.status === 'in_progress' || item.status === 'waiting' || item.status === 'dropped') && (
+        <span
+          className={`flex-shrink-0 rounded border border-current px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+            item.status === 'in_progress'
+              ? 'text-cyan-300'
+              : item.status === 'waiting'
+                ? 'text-amber-300'
+                : 'text-red-400'
+          }`}
+        >
+          {item.status === 'in_progress' ? 'In progress' : item.status === 'waiting' ? 'Waiting' : 'Dropped'}
+        </span>
+      )}
       {item.streams && (
         <span className="hidden flex-shrink-0 text-xs text-gray-600 sm:inline">
           {item.streams.name}
