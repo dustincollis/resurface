@@ -14,8 +14,19 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
+    // Both env vars now exist in prod. ?? doesn't fall through on empty
+    // strings, so use || with explicit "" defaults — mirrors the pattern
+    // ai-parse-transcript uses. Picking the wrong one means the parser
+    // gets "Bearer " and rejects with "Missing authorization".
+    const serviceRoleKeyLegacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKeyNew = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKey = serviceRoleKeyNew || serviceRoleKeyLegacy;
+    if (!serviceRoleKey) {
+      return new Response(
+        JSON.stringify({ error: "No service role key in env" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: unprocessed } = await adminClient

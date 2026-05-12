@@ -222,8 +222,19 @@ Deno.serve(async (req) => {
 
     // ----- Supabase admin client (needed early for webhook logging) -----
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SB_SERVICE_ROLE_KEY")!;
+    // ?? doesn't fall through when an env var resolves to "" (the new
+    // canonical var is SB_SERVICE_ROLE_KEY; the legacy var may still be
+    // present but empty). Use || with "" defaults so the first non-empty
+    // value wins. Mirrors ai-parse-transcript's env handling.
+    const serviceRoleKeyLegacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKeyNew = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? "";
+    const serviceRoleKey = serviceRoleKeyNew || serviceRoleKeyLegacy;
+    if (!serviceRoleKey) {
+      return new Response(
+        JSON.stringify({ error: "No service role key in env" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     // ----- Parse payload -----
