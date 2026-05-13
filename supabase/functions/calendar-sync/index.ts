@@ -32,6 +32,89 @@ function unwrapMarkdownEmail(s: string): string {
 // don't try to resolve each name to a person record.
 const ATTENDEE_RESOLUTION_CAP = 30;
 
+// Windows → IANA timezone map. Power Automate's Outlook connector sends
+// the user's mailbox timezone using Windows naming ("Eastern Standard
+// Time"); Intl.DateTimeFormat needs IANA ("America/New_York"). Covers
+// the timezones the user's mailbox + correspondents are likely to use.
+// Unknown values fall back to UTC (safe — worst case is the legacy
+// behavior, which is what we had before this fix).
+const WINDOWS_TZ_MAP: Record<string, string> = {
+  "UTC": "UTC",
+  "Coordinated Universal Time": "UTC",
+  "Eastern Standard Time": "America/New_York",
+  "Central Standard Time": "America/Chicago",
+  "Mountain Standard Time": "America/Denver",
+  "Pacific Standard Time": "America/Los_Angeles",
+  "US Mountain Standard Time": "America/Phoenix",
+  "Alaskan Standard Time": "America/Anchorage",
+  "Hawaiian Standard Time": "Pacific/Honolulu",
+  "Atlantic Standard Time": "America/Halifax",
+  "GMT Standard Time": "Europe/London",
+  "Greenwich Standard Time": "Atlantic/Reykjavik",
+  "W. Europe Standard Time": "Europe/Berlin",
+  "Romance Standard Time": "Europe/Paris",
+  "Central European Standard Time": "Europe/Warsaw",
+  "Central Europe Standard Time": "Europe/Budapest",
+  "FLE Standard Time": "Europe/Helsinki",
+  "Russian Standard Time": "Europe/Moscow",
+  "India Standard Time": "Asia/Kolkata",
+  "China Standard Time": "Asia/Shanghai",
+  "Tokyo Standard Time": "Asia/Tokyo",
+  "Korea Standard Time": "Asia/Seoul",
+  "Singapore Standard Time": "Asia/Singapore",
+  "AUS Eastern Standard Time": "Australia/Sydney",
+  "New Zealand Standard Time": "Pacific/Auckland",
+  "SA Pacific Standard Time": "America/Bogota",
+  "E. South America Standard Time": "America/Sao_Paulo",
+  "Argentina Standard Time": "America/Argentina/Buenos_Aires",
+};
+
+function windowsToIana(tz: string): string {
+  if (!tz) return "UTC";
+  // If already IANA-style (contains a slash), trust it as-is.
+  if (tz.includes("/")) return tz;
+  return WINDOWS_TZ_MAP[tz] ?? "UTC";
+}
+
+// Convert a wall-clock datetime string (in the named IANA tz) to a UTC
+// ISO string. Uses Intl.DateTimeFormat to compute the offset at the
+// approximate instant, then adjusts. Handles DST correctly because the
+// formatter is given the actual instant, not the year alone.
+function localToUtcIso(naive: string, iana: string): string | null {
+  const guessUtcMs = Date.parse(naive + "Z");
+  if (isNaN(guessUtcMs)) return null;
+  if (iana === "UTC") return new Date(guessUtcMs).toISOString();
+  let fmt: Intl.DateTimeFormat;
+  try {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: iana,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  } catch {
+    // Unknown IANA name — fall back to naive UTC.
+    return new Date(guessUtcMs).toISOString();
+  }
+  const parts = fmt.formatToParts(new Date(guessUtcMs));
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  if (!m.year) return new Date(guessUtcMs).toISOString();
+  const actualLocalMs = Date.parse(
+    `${m.year}-${m.month}-${m.day}T${m.hour}:${m.minute}:${m.second}Z`
+  );
+  if (isNaN(actualLocalMs)) return new Date(guessUtcMs).toISOString();
+  // guessUtcMs - actualLocalMs = how far ahead the naive guess is from
+  // what the tz says the same instant should look like. Add that diff
+  // back to the guess to get the real UTC.
+  const diffMs = guessUtcMs - actualLocalMs;
+  return new Date(guessUtcMs + diffMs).toISOString();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -117,7 +200,19 @@ Deno.serve(async (req) => {
         .filter(Boolean);
     };
 
-    // Helper: parse a start/end time value
+    // Helper: parse a start/end time value.
+    //
+    // Power Automate's Outlook connector sends events with two shapes:
+    //   { dateTime: "2026-05-13T08:30:00", timeZone: "Eastern Standard Time" }
+    //   { dateTime: "2026-05-13T12:30:00", timeZone: "UTC" }
+    //
+    // The older version only handled the "UTC" case; anything else got
+    // naive-parsed (treated as UTC even though it was local), producing
+    // a 4-hour shift for ET users that displayed as 4 AM events.
+    //
+    // Fix: when timeZone is non-UTC, map the Windows TZ name to an IANA
+    // zone and compute the true UTC instant via Intl.DateTimeFormat (no
+    // external lib needed — V8/Deno honors timeZone in formatToParts).
     const parseTime = (raw: unknown): string | null => {
       if (typeof raw === "string" && raw.trim()) {
         const d = new Date(raw);
@@ -125,11 +220,15 @@ Deno.serve(async (req) => {
       }
       if (raw && typeof raw === "object") {
         const obj = raw as { dateTime?: string; timeZone?: string };
-        if (obj.dateTime) {
-          const suffix = obj.timeZone === "UTC" ? "Z" : "";
-          const d = new Date(obj.dateTime + suffix);
+        if (!obj.dateTime) return null;
+        const naive = obj.dateTime.replace(/Z$/, "");
+        const tz = obj.timeZone ?? "UTC";
+        if (tz === "UTC" || tz === "") {
+          const d = new Date(naive + "Z");
           return isNaN(d.getTime()) ? null : d.toISOString();
         }
+        const iana = windowsToIana(tz);
+        return localToUtcIso(naive, iana);
       }
       return null;
     };
