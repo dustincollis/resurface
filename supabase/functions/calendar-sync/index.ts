@@ -168,6 +168,23 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Log the raw payload so we can debug timezone-handling bugs. The
+    // calendar-sync function previously trusted callers to send the
+    // dateTime in a known shape (Graph-style {dateTime, timeZone}) but
+    // Power Automate variants drift; without the payload on record we
+    // can't tell which shape produced a bad row. Fire-and-forget so any
+    // log failure doesn't block ingestion.
+    adminClient
+      .from("webhook_payload_log")
+      .insert({
+        source: "calendar-sync",
+        payload: body,
+        http_status: 200,
+      })
+      .then(({ error }: { error: unknown }) => {
+        if (error) console.warn("[calendar-sync] payload log failed:", error);
+      });
+
     // Accept either a single event or an array of events.
     // Power Automate's "Apply to each" may send one at a time,
     // or a batch depending on how the flow is built.
